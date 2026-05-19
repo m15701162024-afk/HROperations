@@ -26,7 +26,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { loadRemoteData, normalizeAppData, saveRemoteData } from './api';
+import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, saveRemoteData } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
 import type { AccountType, AppData, AssetItem, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
@@ -66,6 +66,10 @@ function isLegacyDemoData(data: Partial<AppData>) {
 
 function useAppData() {
   const [storageMode, setStorageMode] = useState<'本地缓存' | '本地API'>('本地缓存');
+  const [apiUser, setApiUser] = useState<ApiUser | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [apiToken, setApiToken] = useState(() => localStorage.getItem('hr-assistant-api-token') ?? '');
   const [data, setData] = useState<AppData>(() => {
     const mode = localStorage.getItem('hr-assistant-data-mode');
     if (mode !== 'real-v1') {
@@ -85,25 +89,54 @@ function useAppData() {
 
   useEffect(() => {
     let active = true;
-    void loadRemoteData().then((remote) => {
-      if (!active || !remote) return;
-      setData(remote);
+    void loadRemoteData(apiToken).then((remote) => {
+      if (!active) return;
+      if (remote.status === 'unauthorized') {
+        setAuthRequired(true);
+        setStorageMode('本地缓存');
+        return;
+      }
+      if (remote.status !== 'ok') return;
+      setData(remote.data);
+      setApiUser(remote.user ?? null);
+      setAuthRequired(false);
       setStorageMode('本地API');
       localStorage.setItem('hr-assistant-data-mode', 'real-v1');
-      localStorage.setItem('hr-assistant-data', JSON.stringify(remote));
+      localStorage.setItem('hr-assistant-data', JSON.stringify(remote.data));
     });
     return () => {
       active = false;
     };
-  }, []);
+  }, [apiToken]);
 
   const update = (next: AppData) => {
     setData(next);
     localStorage.setItem('hr-assistant-data-mode', 'real-v1');
     localStorage.setItem('hr-assistant-data', JSON.stringify(next));
-    void saveRemoteData(next).then((saved) => {
+    void saveRemoteData(next, apiToken).then((saved) => {
       if (saved) setStorageMode('本地API');
     });
+  };
+
+  const login = async (username: string, password: string) => {
+    setAuthError('');
+    try {
+      const result = await loginLocalApi(username, password);
+      localStorage.setItem('hr-assistant-api-token', result.token);
+      setApiToken(result.token);
+      setApiUser(result.user);
+      setAuthRequired(false);
+    } catch {
+      setAuthError('账号或密码不正确');
+    }
+  };
+
+  const logout = () => {
+    localStorage.removeItem('hr-assistant-api-token');
+    setApiToken('');
+    setApiUser(null);
+    setAuthRequired(true);
+    setStorageMode('本地缓存');
   };
 
   const audit = (action: string, target: string, nextData?: AppData) => {
@@ -127,7 +160,7 @@ function useAppData() {
     update(emptyData);
   };
 
-  return { data, update, audit, resetData, storageMode };
+  return { data, update, audit, resetData, storageMode, apiUser, authRequired, authError, login, logout };
 }
 
 function StatCard({ label, value, note, icon: Icon }: { label: string; value: string | number; note: string; icon: React.ComponentType<{ size?: number }> }) {
@@ -186,6 +219,43 @@ function Progress({ current, target }: { current: number; target: number }) {
   return (
     <div className="progress" aria-label={`完成度 ${percent}%`}>
       <span style={{ width: `${percent}%` }} />
+    </div>
+  );
+}
+
+function LoginScreen({ onLogin, error }: { onLogin: (username: string, password: string) => Promise<void>; error: string }) {
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    await onLogin(username, password);
+    setLoading(false);
+  };
+
+  return (
+    <div className="login-page">
+      <form className="login-panel" onSubmit={(event) => void submit(event)}>
+        <div className="brand login-brand">
+          <div><Sparkles size={22} /></div>
+          <span>招聘运营助手</span>
+        </div>
+        <h1>登录本地工作台</h1>
+        <p>本地 API 已启用，请登录后继续使用真实数据工作区。</p>
+        <label>
+          账号
+          <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="admin" />
+        </label>
+        <label>
+          密码
+          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" />
+        </label>
+        {error && <div className="login-error">{error}</div>}
+        <button className="full" type="submit" disabled={loading}>{loading ? '登录中' : '登录'}</button>
+        <small>默认本地账号：admin / HRAssistant@2026。首次启动会自动创建本地管理员。</small>
+      </form>
     </div>
   );
 }
@@ -1370,7 +1440,11 @@ function renderSection(
 
 export function App() {
   const [section, setSection] = useState<Section>('工作台');
-  const { data, update, audit, resetData, storageMode } = useAppData();
+  const { data, update, audit, resetData, storageMode, apiUser, authRequired, authError, login, logout } = useAppData();
+
+  if (authRequired) {
+    return <LoginScreen onLogin={login} error={authError} />;
+  }
 
   return (
     <div className="app-shell">
@@ -1390,6 +1464,8 @@ export function App() {
         <div className="sidebar-footer">
           <Badge tone="good">一期闭环版</Badge>
           <Badge tone={storageMode === '本地API' ? 'good' : 'warn'}>{storageMode}</Badge>
+          {apiUser && <small>{apiUser.name} · {apiUser.role}</small>}
+          {apiUser && <button className="ghost" onClick={logout}>退出登录</button>}
           <small>Web 系统 · 北森前置运营中台</small>
         </div>
       </aside>

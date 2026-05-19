@@ -42,6 +42,15 @@ npm run dev:full
 
 前端会优先连接 `http://localhost:8787/api/data`。如果本地 API 没启动，会自动回退到浏览器 `localStorage`，页面左下角会显示当前存储模式。
 
+本地 API 默认账号：
+
+```text
+账号：admin
+密码：HRAssistant@2026
+```
+
+首次启动 `npm run api` 时会在 `data/hr-assistant-auth.json` 中创建本地管理员。该文件已被 `.gitignore` 排除，不会提交账号信息。
+
 ## 推送流程
 
 如果当前仓库已配置 HRAssistant 远端：
