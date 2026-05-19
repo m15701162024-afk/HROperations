@@ -58,6 +58,13 @@ button.secondary {
   border: 1px solid var(--line);
 }
 
+button.ghost {
+  min-height: 30px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+}
+
 button.full {
   width: 100%;
 }
@@ -344,7 +351,7 @@ td span,
 }
 
 .goal-item {
-  grid-template-columns: minmax(220px, 1fr) minmax(160px, 320px) 80px;
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 320px) 80px auto;
   align-items: center;
 }
 
@@ -448,6 +455,25 @@ td span {
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.file-button {
+  min-height: 36px;
+  border-radius: 6px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--blue);
+  background: #fff;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.file-button input {
+  display: none;
 }
 
 .search input {

@@ -27,7 +27,7 @@ import {
 import { useMemo, useState } from 'react';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
 import type { AccountType, AppData, AssetItem, ContentTask, CostRecord, IntegrationConfig, JobNeed, LandingPage, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule } from './types';
-import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, toCsv } from './utils';
+import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
 
 type Section =
   | '工作台'
@@ -114,7 +114,11 @@ function useAppData() {
     });
   };
 
-  return { data, update, audit };
+  const resetData = () => {
+    update(emptyData);
+  };
+
+  return { data, update, audit, resetData };
 }
 
 function StatCard({ label, value, note, icon: Icon }: { label: string; value: string | number; note: string; icon: React.ComponentType<{ size?: number }> }) {
@@ -153,7 +157,8 @@ function Progress({ current, target }: { current: number; target: number }) {
   );
 }
 
-function Dashboard({ data }: { data: AppData }) {
+function Dashboard({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+  const [goal, setGoal] = useState({ title: '', dimension: '平台', target: 0, current: 0, metric: '发布篇数' });
   const totals = useMemo(() => {
     const published = data.contents.filter((item) => item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘').length;
     const views = data.contents.reduce((sum, item) => sum + item.metrics.views, 0);
@@ -161,6 +166,26 @@ function Dashboard({ data }: { data: AppData }) {
     const clicks = data.contents.reduce((sum, item) => sum + item.metrics.clicks, 0);
     return { published, views, interactions, clicks };
   }, [data.contents]);
+
+  const createGoal = () => {
+    if (!goal.title.trim()) return;
+    const item = {
+      id: `goal-${Date.now()}`,
+      title: goal.title,
+      dimension: goal.dimension,
+      target: Number(goal.target) || 0,
+      current: Number(goal.current) || 0,
+      metric: goal.metric,
+      status: '进行中' as const,
+    };
+    audit('创建运营目标', item.title, { ...data, goals: [item, ...data.goals] });
+    setGoal({ title: '', dimension: '平台', target: 0, current: 0, metric: '发布篇数' });
+  };
+
+  const removeGoal = (id: string) => {
+    const target = data.goals.find((item) => item.id === id);
+    audit('删除运营目标', target?.title ?? id, { ...data, goals: data.goals.filter((item) => item.id !== id) });
+  };
 
   return (
     <div className="page-grid">
@@ -188,6 +213,13 @@ function Dashboard({ data }: { data: AppData }) {
           <h2>运营目标进度</h2>
           <Target size={18} />
         </div>
+        <div className="inline-form">
+          <input value={goal.title} onChange={(event) => setGoal({ ...goal, title: event.target.value })} placeholder="目标名称" />
+          <input value={goal.dimension} onChange={(event) => setGoal({ ...goal, dimension: event.target.value })} placeholder="目标维度" />
+          <input value={goal.metric} onChange={(event) => setGoal({ ...goal, metric: event.target.value })} placeholder="指标名称" />
+          <input type="number" value={goal.target} onChange={(event) => setGoal({ ...goal, target: Number(event.target.value) })} placeholder="目标值" />
+          <button onClick={createGoal}><Plus size={16} />保存目标</button>
+        </div>
         <div className="goal-list">
           {data.goals.length === 0 && <EmptyState title="暂无真实运营目标" body="请先录入目标或导入真实排期数据，当前进度按 0 计算。" />}
           {data.goals.map((goal) => (
@@ -198,6 +230,7 @@ function Dashboard({ data }: { data: AppData }) {
               </div>
               <Progress current={goal.current} target={goal.target} />
               <b>{goal.current}/{goal.target}</b>
+              <button className="ghost" onClick={() => removeGoal(goal.id)}>删除</button>
             </article>
           ))}
         </div>
@@ -290,6 +323,15 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
     }))), 'text/csv;charset=utf-8');
   };
 
+  const removeJob = (id: string) => {
+    const target = data.jobs.find((job) => job.id === id);
+    audit('删除岗位需求', target?.title ?? id, {
+      ...data,
+      jobs: data.jobs.filter((job) => job.id !== id),
+      contents: data.contents.filter((content) => content.jobId !== id),
+    });
+  };
+
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -327,12 +369,13 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
               <th>目标平台</th>
               <th>状态</th>
               <th>入口</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
             {data.jobs.length === 0 && (
               <tr>
-                <td colSpan={6}><EmptyState title="暂无真实岗位需求" body="请通过上方表单录入，或粘贴 CSV 批量导入。" /></td>
+                <td colSpan={7}><EmptyState title="暂无真实岗位需求" body="请通过上方表单录入，或粘贴 CSV 批量导入。" /></td>
               </tr>
             )}
             {data.jobs.map((job) => (
@@ -346,6 +389,7 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
                 <td>{job.targetPlatforms.join(' / ')}</td>
                 <td><Badge tone="good">{job.status}</Badge></td>
                 <td><Badge tone="info">北森/官网</Badge></td>
+                <td><button className="ghost" onClick={() => removeJob(job.id)}>删除</button></td>
               </tr>
             ))}
           </tbody>
@@ -400,6 +444,19 @@ function ContentOps({ data, audit }: { data: AppData; audit: (action: string, ta
       ...data,
       contents: data.contents.map((item) => (item.id === id ? { ...item, status: nextStatus(item.status) } : item)),
     });
+  };
+
+  const publishContent = (id: string) => {
+    const target = data.contents.find((item) => item.id === id);
+    audit('标记内容已发布', target?.title ?? id, {
+      ...data,
+      contents: data.contents.map((item) => item.id === id ? { ...item, status: '已发布', publishedAt: new Date().toISOString().slice(0, 10) } : item),
+    });
+  };
+
+  const removeContent = (id: string) => {
+    const target = data.contents.find((item) => item.id === id);
+    audit('删除内容任务', target?.title ?? id, { ...data, contents: data.contents.filter((item) => item.id !== id) });
   };
 
   return (
@@ -470,6 +527,8 @@ function ContentOps({ data, audit }: { data: AppData; audit: (action: string, ta
               <div className="card-actions">
                 <Badge tone="info">{item.status}</Badge>
                 <button onClick={() => advance(item.id)}><CheckCircle2 size={16} />推进状态</button>
+                <button className="secondary" onClick={() => publishContent(item.id)}><Rocket size={16} />标记发布</button>
+                <button className="ghost" onClick={() => removeContent(item.id)}>删除</button>
               </div>
             </article>
           ))}
@@ -494,6 +553,11 @@ function Assets({ data, audit }: { data: AppData; audit: (action: string, target
     };
     audit('新增素材', item.name, { ...data, assets: [item, ...data.assets] });
     setAsset({ name: '', category: '公司/业务介绍', owner: '招聘专员', scope: '招聘内容可用' });
+  };
+
+  const removeAsset = (id: string) => {
+    const target = data.assets.find((item) => item.id === id);
+    audit('删除素材', target?.name ?? id, { ...data, assets: data.assets.filter((item) => item.id !== id) });
   };
 
   return (
@@ -523,6 +587,7 @@ function Assets({ data, audit }: { data: AppData; audit: (action: string, target
             <strong>{asset.name}</strong>
             <span>{asset.category} · {asset.scope}</span>
             <div><Badge tone={asset.riskLevel === '高' ? 'danger' : asset.riskLevel === '中' ? 'warn' : 'good'}>{asset.riskLevel}风险</Badge><Badge>{asset.authorization}</Badge></div>
+            <button className="ghost" onClick={() => removeAsset(asset.id)}>删除</button>
           </div>
         ))}
       </section>
@@ -612,6 +677,16 @@ function Accounts({ data, audit }: { data: AppData; audit: (action: string, targ
     setLanding({ title: '', slug: '', pageType: '岗位集合页', destinationUrl: '' });
   };
 
+  const removeAccount = (id: string) => {
+    const target = data.accounts.find((item) => item.id === id);
+    audit('删除平台账号', target?.name ?? id, { ...data, accounts: data.accounts.filter((item) => item.id !== id) });
+  };
+
+  const removeEntry = (id: string) => {
+    const target = data.entries.find((item) => item.id === id);
+    audit('删除招聘入口', target?.headline ?? id, { ...data, entries: data.entries.filter((item) => item.id !== id) });
+  };
+
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -649,12 +724,13 @@ function Accounts({ data, audit }: { data: AppData; audit: (action: string, targ
               <th>发布权限</th>
               <th>授权</th>
               <th>归属</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
             {data.accounts.length === 0 && (
               <tr>
-                <td colSpan={6}><EmptyState title="暂无真实平台账号" body="请录入实际运营账号，数据归属和发布权限会基于账号配置计算。" /></td>
+                <td colSpan={7}><EmptyState title="暂无真实平台账号" body="请录入实际运营账号，数据归属和发布权限会基于账号配置计算。" /></td>
               </tr>
             )}
             {data.accounts.map((account) => (
@@ -665,6 +741,7 @@ function Accounts({ data, audit }: { data: AppData; audit: (action: string, targ
                 <td>{account.publishingRoles.join(' / ')}</td>
                 <td><Badge tone={account.authStatus === '已授权' ? 'good' : account.authStatus === '授权过期' ? 'danger' : 'warn'}>{account.authStatus}</Badge></td>
                 <td>{account.attribution}</td>
+                <td><button className="ghost" onClick={() => removeAccount(account.id)}>删除</button></td>
               </tr>
             ))}
           </tbody>
@@ -693,6 +770,7 @@ function Accounts({ data, audit }: { data: AppData; audit: (action: string, targ
               <span>{item.destination} · {item.trackingCode}</span>
               <span>{item.url}</span>
               <Badge tone="info">{item.clicks} 点击</Badge>
+              <button className="ghost" onClick={() => removeEntry(item.id)}>删除</button>
             </article>
           ))}
         </div>
@@ -891,7 +969,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   );
 }
 
-function Reports({ data }: { data: AppData }) {
+function Reports({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
   const recommendations = buildRecommendations(data);
   const generatedReports = data.reports.length > 0
     ? data.reports
@@ -904,6 +982,18 @@ function Reports({ data }: { data: AppData }) {
           severity: '建议' as const,
         }]
       : [];
+  const generateReport = () => {
+    const contentCount = data.contents.length;
+    const clickCount = data.contents.reduce((sum, item) => sum + item.metrics.clicks, 0);
+    const report = {
+      id: `rp-${Date.now()}`,
+      title: `自动复盘：${contentCount} 条内容 / ${clickCount} 次点击`,
+      body: recommendations.join(' '),
+      action: '请根据建议调整下周期内容排期，并补齐缺失的真实平台指标和北森结果。',
+      severity: '建议' as const,
+    };
+    audit('生成复盘报告', report.title, { ...data, reports: [report, ...data.reports] });
+  };
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -911,7 +1001,10 @@ function Reports({ data }: { data: AppData }) {
           <h1>复盘报告</h1>
           <p>自动识别高低表现内容，生成周报/月报、行动建议和案例沉淀。</p>
         </div>
-        <button onClick={() => downloadText('招聘新媒体运营周报.md', buildReportMarkdown(data), 'text/markdown;charset=utf-8')}><FileText size={16} />下载周报</button>
+        <div className="toolbar-actions">
+          <button onClick={generateReport}><Sparkles size={16} />生成复盘</button>
+          <button onClick={() => downloadText('招聘新媒体运营周报.md', buildReportMarkdown(data), 'text/markdown;charset=utf-8')}><FileText size={16} />下载周报</button>
+        </div>
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>AI 运营策略建议</h2><Bot size={18} /></div>
@@ -953,7 +1046,7 @@ function Reports({ data }: { data: AppData }) {
   );
 }
 
-function SettingsPage({ data }: { data: AppData }) {
+function SettingsPage({ data, update, resetData }: { data: AppData; update: (data: AppData) => void; resetData: () => void }) {
   const [role, setRole] = useState({ name: '', dataScope: '个人' as PermissionRole['dataScope'], permissions: '岗位查看、内容创建' });
   const [rule, setRule] = useState({ keyword: '', category: '合规表达', riskLevel: '高' as SensitiveRule['riskLevel'], suggestion: '' });
   const addRole = () => {
@@ -979,6 +1072,11 @@ function SettingsPage({ data }: { data: AppData }) {
     localStorage.setItem('hr-assistant-data', JSON.stringify(next));
     location.reload();
   };
+  const restoreBackup = async (file: File | undefined) => {
+    if (!file) return;
+    const restored = await readJsonFile<AppData>(file);
+    update({ ...emptyData, ...restored });
+  };
   const remainingItems = [
     '替换本地 localStorage 为后端数据库与登录态',
     '用真实北森 OpenAPI 替换 CSV 回流入口',
@@ -994,7 +1092,14 @@ function SettingsPage({ data }: { data: AppData }) {
           <h1>系统配置</h1>
           <p>角色权限、审核流程、品牌规范、风险规则、敏感词和操作日志。</p>
         </div>
-        <button><LockKeyhole size={16} />权限审计</button>
+        <div className="toolbar-actions">
+          <button onClick={() => exportJson('招聘运营助手_数据备份.json', data)}><Database size={16} />整库备份</button>
+          <label className="file-button">
+            <LockKeyhole size={16} />恢复备份
+            <input type="file" accept="application/json" onChange={(event) => void restoreBackup(event.target.files?.[0])} />
+          </label>
+          <button className="secondary" onClick={resetData}>清空本地数据</button>
+        </div>
       </section>
       <section className="panel">
         <div className="panel-title"><h2>角色权限矩阵</h2><Users size={18} /></div>
@@ -1086,10 +1191,16 @@ function SettingsPage({ data }: { data: AppData }) {
   );
 }
 
-function renderSection(section: Section, data: AppData, update: (data: AppData) => void, audit: (action: string, target: string, nextData?: AppData) => void) {
+function renderSection(
+  section: Section,
+  data: AppData,
+  update: (data: AppData) => void,
+  audit: (action: string, target: string, nextData?: AppData) => void,
+  resetData: () => void,
+) {
   switch (section) {
     case '工作台':
-      return <Dashboard data={data} />;
+      return <Dashboard data={data} audit={audit} />;
     case '招聘需求':
       return <Jobs data={data} audit={audit} />;
     case '内容运营':
@@ -1101,15 +1212,15 @@ function renderSection(section: Section, data: AppData, update: (data: AppData) 
     case '数据分析':
       return <Analytics data={data} audit={audit} />;
     case '复盘报告':
-      return <Reports data={data} />;
+      return <Reports data={data} audit={audit} />;
     case '系统配置':
-      return <SettingsPage data={data} />;
+      return <SettingsPage data={data} update={update} resetData={resetData} />;
   }
 }
 
 export function App() {
   const [section, setSection] = useState<Section>('工作台');
-  const { data, update, audit } = useAppData();
+  const { data, update, audit, resetData } = useAppData();
 
   return (
     <div className="app-shell">
@@ -1132,7 +1243,7 @@ export function App() {
         </div>
       </aside>
       <main>
-        {renderSection(section, data, update, audit)}
+        {renderSection(section, data, update, audit, resetData)}
       </main>
     </div>
   );

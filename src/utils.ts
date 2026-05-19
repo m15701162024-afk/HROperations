@@ -16,6 +16,21 @@ export function exportJson(filename: string, data: unknown) {
   downloadText(filename, JSON.stringify(data, null, 2), 'application/json;charset=utf-8');
 }
 
+export function readJsonFile<T>(file: File): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        resolve(JSON.parse(String(reader.result)) as T);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file, 'utf-8');
+  });
+}
+
 export function toCsv(rows: Record<string, string | number | boolean | undefined>[]) {
   if (rows.length === 0) return '';
   const headers = Object.keys(rows[0]);
