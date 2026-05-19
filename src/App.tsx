@@ -25,7 +25,8 @@ import {
   Target,
   Users,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { loadRemoteData, normalizeAppData, saveRemoteData } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
 import type { AccountType, AppData, AssetItem, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
@@ -64,6 +65,7 @@ function isLegacyDemoData(data: Partial<AppData>) {
 }
 
 function useAppData() {
+  const [storageMode, setStorageMode] = useState<'本地缓存' | '本地API'>('本地缓存');
   const [data, setData] = useState<AppData>(() => {
     const mode = localStorage.getItem('hr-assistant-data-mode');
     if (mode !== 'real-v1') {
@@ -78,28 +80,30 @@ function useAppData() {
       localStorage.setItem('hr-assistant-data', JSON.stringify(emptyData));
       return emptyData;
     }
-    return {
-      ...emptyData,
-      ...parsed,
-      entries: parsed.entries ?? [],
-      contentVersions: parsed.contentVersions ?? [],
-      beisenResults: parsed.beisenResults ?? [],
-      integrations: parsed.integrations ?? [],
-      landingPages: parsed.landingPages ?? [],
-      roles: parsed.roles ?? [],
-      users: parsed.users ?? [],
-      workflowRules: parsed.workflowRules ?? [],
-      sensitiveRules: parsed.sensitiveRules ?? [],
-      costs: parsed.costs ?? [],
-      notifications: parsed.notifications ?? [],
-      auditLogs: parsed.auditLogs ?? [],
-    };
+    return normalizeAppData(parsed);
   });
+
+  useEffect(() => {
+    let active = true;
+    void loadRemoteData().then((remote) => {
+      if (!active || !remote) return;
+      setData(remote);
+      setStorageMode('本地API');
+      localStorage.setItem('hr-assistant-data-mode', 'real-v1');
+      localStorage.setItem('hr-assistant-data', JSON.stringify(remote));
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const update = (next: AppData) => {
     setData(next);
     localStorage.setItem('hr-assistant-data-mode', 'real-v1');
     localStorage.setItem('hr-assistant-data', JSON.stringify(next));
+    void saveRemoteData(next).then((saved) => {
+      if (saved) setStorageMode('本地API');
+    });
   };
 
   const audit = (action: string, target: string, nextData?: AppData) => {
@@ -123,7 +127,7 @@ function useAppData() {
     update(emptyData);
   };
 
-  return { data, update, audit, resetData };
+  return { data, update, audit, resetData, storageMode };
 }
 
 function StatCard({ label, value, note, icon: Icon }: { label: string; value: string | number; note: string; icon: React.ComponentType<{ size?: number }> }) {
@@ -1366,7 +1370,7 @@ function renderSection(
 
 export function App() {
   const [section, setSection] = useState<Section>('工作台');
-  const { data, update, audit, resetData } = useAppData();
+  const { data, update, audit, resetData, storageMode } = useAppData();
 
   return (
     <div className="app-shell">
@@ -1385,6 +1389,7 @@ export function App() {
         </nav>
         <div className="sidebar-footer">
           <Badge tone="good">一期闭环版</Badge>
+          <Badge tone={storageMode === '本地API' ? 'good' : 'warn'}>{storageMode}</Badge>
           <small>Web 系统 · 北森前置运营中台</small>
         </div>
       </aside>

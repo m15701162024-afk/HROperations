@@ -22,6 +22,26 @@ npm run test
 npm run build
 ```
 
+本地持久化 API：
+
+```bash
+npm run api
+```
+
+另开一个终端运行前端：
+
+```bash
+npm run dev
+```
+
+也可以使用组合命令：
+
+```bash
+npm run dev:full
+```
+
+前端会优先连接 `http://localhost:8787/api/data`。如果本地 API 没启动，会自动回退到浏览器 `localStorage`，页面左下角会显示当前存储模式。
+
 ## 推送流程
 
 如果当前仓库已配置 HRAssistant 远端：
