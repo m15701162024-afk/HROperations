@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>招聘运营助手</title>
+    <style>
+      body { width: 280px; margin: 0; padding: 14px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172033; }
+      label { display: grid; gap: 6px; margin-bottom: 10px; font-size: 12px; color: #526176; }
+      input { height: 34px; padding: 0 10px; border: 1px solid #d7dee8; border-radius: 6px; }
+      button { width: 100%; height: 36px; color: white; background: #2563eb; border: 0; border-radius: 6px; font-weight: 700; cursor: pointer; }
+      pre { white-space: pre-wrap; font-size: 12px; color: #526176; }
+    </style>
+  </head>
+  <body>
+    <label>本地 API 地址<input id="apiBase" value="http://localhost:8787" /></label>
+    <label>API Token<input id="token" placeholder="登录后从本地存储复制 token" /></label>
+    <button id="collect">采集当前页指标</button>
+    <pre id="result"></pre>
+    <script src="popup.js"></script>
+  </body>
+</html>

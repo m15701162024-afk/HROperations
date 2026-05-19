@@ -5,7 +5,7 @@ import { basename, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createJsonRepository } from './repositories/jsonRepository.mjs';
 import { createAuthService } from './services/authService.mjs';
-import { runModelApi, sendIntegrationMessage, testIntegration, testModelApi } from './services/integrationService.mjs';
+import { runIntegrationSync, runModelApi, sendIntegrationMessage, testIntegration, testModelApi } from './services/integrationService.mjs';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dataFile = resolve(rootDir, 'data/hr-assistant-data.json');
@@ -116,6 +116,77 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (request.url === '/api/track' && request.method === 'POST') {
+    try {
+      const body = JSON.parse(await readBody(request));
+      const data = await repository.readData();
+      const eventType = body.eventType === 'click' ? 'clicks' : 'visits';
+      const landingPageId = String(body.landingPageId ?? '');
+      const next = {
+        ...data,
+        landingPages: data.landingPages.map((item) => (
+          item.id === landingPageId || item.slug === landingPageId
+            ? { ...item, [eventType]: Number(item[eventType] ?? 0) + 1 }
+            : item
+        )),
+        auditLogs: [{
+          id: `track-${Date.now()}`,
+          actor: 'landing-sdk',
+          action: body.eventType === 'click' ? '落地页点击埋点' : '落地页访问埋点',
+          target: landingPageId,
+          createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+        }, ...data.auditLogs],
+      };
+      await repository.writeData(next);
+      send(response, 200, { ok: true });
+    } catch (error) {
+      send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid request' });
+    }
+    return;
+  }
+
+  if (request.url === '/api/landing/leads' && request.method === 'POST') {
+    try {
+      const body = JSON.parse(await readBody(request));
+      if (!body.landingPageId || !body.name || !body.contact) {
+        send(response, 400, { ok: false, error: 'landingPageId、name、contact 为必填' });
+        return;
+      }
+      const data = await repository.readData();
+      const lead = {
+        id: `lead-public-${Date.now()}`,
+        landingPageId: String(body.landingPageId),
+        name: String(body.name),
+        contact: String(body.contact),
+        targetJobId: String(body.targetJobId ?? ''),
+        sourcePlatform: String(body.sourcePlatform ?? '未知'),
+        note: String(body.note ?? ''),
+        status: '待转入北森',
+        submittedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      };
+      await repository.writeData({
+        ...data,
+        landingLeads: [lead, ...data.landingLeads],
+        landingPages: data.landingPages.map((item) => (
+          item.id === lead.landingPageId || item.slug === lead.landingPageId ? { ...item, clicks: Number(item.clicks ?? 0) + 1 } : item
+        )),
+        notifications: [{
+          id: `notice-${Date.now()}`,
+          title: '新增公网落地页线索',
+          body: `${lead.name} 提交了联系方式`,
+          targetSection: '账号与平台',
+          level: '待办',
+          read: false,
+          createdAt: lead.submittedAt,
+        }, ...data.notifications],
+      });
+      send(response, 200, { ok: true, leadId: lead.id });
+    } catch (error) {
+      send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid request' });
+    }
+    return;
+  }
+
   if (request.url === '/api/session' && request.method === 'GET') {
     const session = requireSession(request, response);
     if (!session) return;
@@ -171,6 +242,45 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (request.url === '/api/platform-metrics/import' && request.method === 'POST') {
+    if (!requireSession(request, response)) return;
+    try {
+      const body = JSON.parse(await readBody(request));
+      const records = Array.isArray(body.records) ? body.records : [];
+      const data = await repository.readData();
+      const nextContents = data.contents.map((content) => {
+        const record = records.find((item) => item.contentId === content.id || item.title === content.title || item.title === content.title.replace(/^.+?｜/, ''));
+        if (!record) return content;
+        return {
+          ...content,
+          metrics: {
+            views: Number(record.views ?? content.metrics.views ?? 0),
+            likes: Number(record.likes ?? content.metrics.likes ?? 0),
+            comments: Number(record.comments ?? content.metrics.comments ?? 0),
+            saves: Number(record.saves ?? content.metrics.saves ?? 0),
+            shares: Number(record.shares ?? content.metrics.shares ?? 0),
+            clicks: Number(record.clicks ?? content.metrics.clicks ?? 0),
+          },
+        };
+      });
+      await repository.writeData({
+        ...data,
+        contents: nextContents,
+        auditLogs: [{
+          id: `metrics-${Date.now()}`,
+          actor: 'browser-extension',
+          action: '导入浏览器插件指标',
+          target: `${records.length} 条`,
+          createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+        }, ...data.auditLogs],
+      });
+      send(response, 200, { ok: true, recordCount: records.length });
+    } catch (error) {
+      send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid request' });
+    }
+    return;
+  }
+
   if (request.url === '/api/integrations/test' && request.method === 'POST') {
     if (!requireSession(request, response)) return;
     try {
@@ -189,6 +299,17 @@ const server = createServer(async (request, response) => {
       send(response, 200, await sendIntegrationMessage(body.integration, body.message));
     } catch (error) {
       send(response, 400, { ok: false, message: error instanceof Error ? error.message : 'Invalid request' });
+    }
+    return;
+  }
+
+  if (request.url === '/api/integrations/sync' && request.method === 'POST') {
+    if (!requireSession(request, response)) return;
+    try {
+      const body = JSON.parse(await readBody(request));
+      send(response, 200, await runIntegrationSync(body.integration, body.syncType, body.payload));
+    } catch (error) {
+      send(response, 400, { ok: false, message: error instanceof Error ? error.message : 'Invalid request', recordCount: 0 });
     }
     return;
   }

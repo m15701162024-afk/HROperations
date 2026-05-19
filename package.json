@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
+    "package:extension": "mkdir -p dist && cd browser-extension && zip -r ../dist/hr-assistant-extension.zip .",
     "push:hrassistant": "bash scripts/push-hrassistant.sh"
   },
   "dependencies": {

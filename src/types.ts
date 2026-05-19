@@ -156,9 +156,22 @@ export interface IntegrationConfig {
   type: '北森' | '平台API' | '企业微信' | '飞书' | 'BI';
   name: string;
   endpoint: string;
+  apiKey?: string;
+  extraConfig?: string;
   authMode: '未配置' | 'Token' | 'OAuth' | 'Webhook' | '文件导入';
   status: '未配置' | '待验证' | '已连接' | '连接失败';
   lastSyncAt?: string;
+  lastMessage?: string;
+}
+
+export interface IntegrationSyncRun {
+  id: string;
+  integrationId: string;
+  syncType: '北森线索同步' | '北森结果回流' | '平台指标拉取' | 'BI同步' | '消息发送' | '其他';
+  status: '成功' | '失败';
+  message: string;
+  recordCount: number;
+  ranAt: string;
 }
 
 export interface ModelApiConfig {
@@ -270,6 +283,7 @@ export interface AppData {
   entries: RecruitmentEntry[];
   beisenResults: BeisenResult[];
   integrations: IntegrationConfig[];
+  integrationSyncRuns: IntegrationSyncRun[];
   modelApis: ModelApiConfig[];
   landingPages: LandingPage[];
   landingLeads: LandingPageLead[];

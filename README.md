@@ -68,6 +68,19 @@ POST /api/integrations/test
 
 使用人后续只需要在页面里填入 API 地址或 Webhook，即可先验证连通性；正式数据同步逻辑可继续基于该连接器层扩展。
 
+正式集成同步接口：
+
+```text
+POST /api/integrations/sync
+POST /api/integrations/send
+POST /api/platform-metrics/import
+```
+
+- 北森集成：在页面配置北森 OpenAPI 地址和 Token 后，可同步待转入北森的落地页线索，并写入回流归因池。
+- 平台 API：配置平台指标接口后，可拉取指标；若接口返回 `records` 或 `metrics` 数组，系统会按 `contentId` 或 `title` 写回内容指标。
+- 企业微信/飞书：配置 Webhook 后，可发送待办/预警摘要。
+- 浏览器插件：`browser-extension/` 是 MV3 插件目录，可在浏览器开发者模式加载，用于采集当前平台页面指标。
+
 素材上传接口：
 
 ```text
@@ -76,6 +89,29 @@ GET /uploads/:fileName
 ```
 
 前端会先上传文件，再把返回的文件地址写入素材记录；如果本地 API 未启动，仍可保存素材台账，但不会落盘保存附件。
+
+## 落地页 SDK
+
+公网落地页可引入：
+
+```html
+<script
+  src="/hr-assistant-tracker.js"
+  data-api-base="https://your-api.example.com"
+  data-landing-page-id="landing-page-id-or-slug"
+  data-source-platform="小红书"></script>
+```
+
+SDK 会自动记录访问，并对链接点击记录点击。表单提交可调用：
+
+```js
+window.HRAssistantTracker.submitLead({
+  name: '候选人姓名',
+  contact: '手机号/邮箱/微信',
+  targetJobId: 'job-id',
+  note: '备注'
+});
+```
 
 ## 大模型 API 配置
 

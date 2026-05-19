@@ -8,7 +8,7 @@ export async function testIntegration(integration) {
     const timer = setTimeout(() => controller.abort(), 5000);
     const response = await fetch(integration.endpoint, {
       method: integration.type === '企业微信' || integration.type === '飞书' ? 'POST' : 'GET',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildHeaders(integration),
       body: integration.type === '企业微信' || integration.type === '飞书' ? JSON.stringify({ text: 'HRAssistant connection test' }) : undefined,
       signal: controller.signal,
     });
@@ -24,6 +24,41 @@ export async function testIntegration(integration) {
       ok: false,
       status: '连接失败',
       message: error instanceof Error ? error.message : '连接失败',
+    };
+  }
+}
+
+export async function runIntegrationSync(integration, syncType, payload) {
+  if (!integration?.endpoint) {
+    return { ok: false, message: '缺少接口地址或 Webhook', recordCount: 0 };
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    const response = await fetch(integration.endpoint, {
+      method: syncType === '平台指标拉取' || syncType === '北森结果回流' ? 'GET' : 'POST',
+      headers: buildHeaders(integration),
+      body: syncType === '平台指标拉取' || syncType === '北森结果回流' ? undefined : JSON.stringify(payload ?? {}),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    const text = await response.text();
+    const data = parseJson(text);
+    const recordCount = Array.isArray(data) ? data.length : Number(data?.recordCount ?? data?.count ?? payload?.records?.length ?? 0);
+    return {
+      ok: response.ok,
+      statusCode: response.status,
+      message: response.ok ? '同步请求已完成' : `同步请求失败：HTTP ${response.status}`,
+      recordCount,
+      data,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : '同步请求失败',
+      recordCount: 0,
     };
   }
 }
@@ -45,7 +80,7 @@ export async function sendIntegrationMessage(integration, message) {
     const timer = setTimeout(() => controller.abort(), 8000);
     const response = await fetch(integration.endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildHeaders(integration),
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -60,6 +95,23 @@ export async function sendIntegrationMessage(integration, message) {
       ok: false,
       message: error instanceof Error ? error.message : '消息发送失败',
     };
+  }
+}
+
+function buildHeaders(integration) {
+  return {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...(integration?.apiKey ? { Authorization: `Bearer ${integration.apiKey}`, 'X-API-Key': integration.apiKey } : {}),
+  };
+}
+
+function parseJson(text) {
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
   }
 }
 

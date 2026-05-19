@@ -26,9 +26,9 @@ import {
   Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
+import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, runIntegrationSync, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
-import type { AccountType, AppData, AssetItem, BeisenResult, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, LandingPageLead, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
+import type { AccountType, AppData, AssetItem, BeisenResult, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, IntegrationConfig, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
 
 type Section =
@@ -546,6 +546,25 @@ function compareVersionText(current: string, previous?: string) {
   return `${addedText}；${removedText}`;
 }
 
+function normalizeRemoteRows(data: unknown): Record<string, string | number | boolean | undefined>[] {
+  if (Array.isArray(data)) return data as Record<string, string | number | boolean | undefined>[];
+  if (typeof data === 'object' && data !== null && Array.isArray((data as { records?: unknown[] }).records)) {
+    return (data as { records: Record<string, string | number | boolean | undefined>[] }).records;
+  }
+  if (typeof data === 'object' && data !== null && Array.isArray((data as { metrics?: unknown[] }).metrics)) {
+    return (data as { metrics: Record<string, string | number | boolean | undefined>[] }).metrics;
+  }
+  return [];
+}
+
+function safeParseJson(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+}
+
 function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
   const [jobId, setJobId] = useState(data.jobs[0]?.id ?? '');
   const [platform, setPlatform] = useState<Platform>('小红书');
@@ -940,7 +959,7 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
 
 function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
   const [entry, setEntry] = useState({ platform: '小红书' as Platform, headline: '', url: '', destination: '北森岗位页' as RecruitmentEntry['destination'] });
-  const [integration, setIntegration] = useState({ type: '北森' as IntegrationConfig['type'], name: '', endpoint: '', authMode: 'Token' as IntegrationConfig['authMode'] });
+  const [integration, setIntegration] = useState({ type: '北森' as IntegrationConfig['type'], name: '', endpoint: '', apiKey: '', extraConfig: '', authMode: 'Token' as IntegrationConfig['authMode'] });
   const [landing, setLanding] = useState({ title: '', slug: '', pageType: '岗位集合页' as LandingPage['pageType'], destinationUrl: '' });
   const [landingLeadDrafts, setLandingLeadDrafts] = useState<Record<string, { name: string; contact: string; targetJobId: string; sourcePlatform: Platform | '未知'; note: string }>>({});
   const [account, setAccount] = useState({
@@ -987,7 +1006,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
       status: integration.endpoint ? '待验证' : '未配置',
     };
     audit('新增集成配置', item.name, { ...data, integrations: [item, ...data.integrations] });
-    setIntegration({ type: '北森', name: '', endpoint: '', authMode: 'Token' });
+    setIntegration({ type: '北森', name: '', endpoint: '', apiKey: '', extraConfig: '', authMode: 'Token' });
   };
 
   const testIntegration = async (id: string) => {
@@ -1025,6 +1044,88 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
         ...data.notifications,
       ],
     });
+  };
+
+  const recordSyncRun = (
+    integrationItem: IntegrationConfig,
+    syncType: IntegrationSyncRun['syncType'],
+    ok: boolean,
+    message: string,
+    recordCount: number,
+    nextData: AppData,
+  ): AppData => ({
+    ...nextData,
+    integrations: nextData.integrations.map((item) => item.id === integrationItem.id ? {
+      ...item,
+      status: ok ? '已连接' : '连接失败',
+      lastSyncAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      lastMessage: message,
+    } : item),
+    integrationSyncRuns: [{
+      id: `sync-${Date.now()}`,
+      integrationId: integrationItem.id,
+      syncType,
+      status: ok ? '成功' : '失败',
+      message,
+      recordCount,
+      ranAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    }, ...nextData.integrationSyncRuns],
+  });
+
+  const syncBeisenLeads = async (id: string) => {
+    const target = data.integrations.find((item) => item.id === id);
+    if (!target) return;
+    const pending = data.landingLeads.filter((lead) => lead.status === '待转入北森');
+    const payload = {
+      records: pending.map((lead) => ({
+        candidateCode: `lead-${lead.id}`,
+        name: lead.name,
+        contact: lead.contact,
+        jobId: lead.targetJobId,
+        sourcePlatform: lead.sourcePlatform,
+        note: lead.note,
+        submittedAt: lead.submittedAt,
+      })),
+      extraConfig: target.extraConfig ? safeParseJson(target.extraConfig) : undefined,
+    };
+    const result = await runIntegrationSync(target, '北森线索同步', payload, apiToken);
+    const beisenResults: BeisenResult[] = result.ok ? pending.map((lead) => ({
+      id: `beisen-lead-${lead.id}`,
+      jobId: lead.targetJobId,
+      sourcePlatform: lead.sourcePlatform,
+      sourceContentId: lead.landingPageId,
+      candidateCode: `lead-${lead.id}`,
+      stage: '已投递',
+      importedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    })) : [];
+    const next = recordSyncRun(target, '北森线索同步', result.ok, result.message, pending.length, {
+      ...data,
+      landingLeads: result.ok ? data.landingLeads.map((lead) => lead.status === '待转入北森' ? { ...lead, status: '已转入北森' } : lead) : data.landingLeads,
+      beisenResults: result.ok ? [...beisenResults, ...data.beisenResults] : data.beisenResults,
+      notifications: [
+        makeNotification('北森线索同步结果', `${target.name}：${result.message}，记录 ${pending.length} 条`, '账号与平台', result.ok ? '提醒' : '预警'),
+        ...data.notifications,
+      ],
+    });
+    audit('同步北森线索', `${target.name}：${result.message}`, next);
+  };
+
+  const pullPlatformMetrics = async (id: string) => {
+    const target = data.integrations.find((item) => item.id === id);
+    if (!target) return;
+    const result = await runIntegrationSync(target, '平台指标拉取', { extraConfig: target.extraConfig ? safeParseJson(target.extraConfig) : undefined }, apiToken);
+    const rows = normalizeRemoteRows(result.data);
+    const csv = rows.length > 0 ? toCsv(rows) : '';
+    const nextContents = csv ? applyMetricsCsv(data.contents, csv) : data.contents;
+    const next = recordSyncRun(target, '平台指标拉取', result.ok, result.message, rows.length || result.recordCount, {
+      ...data,
+      contents: nextContents,
+      notifications: [
+        makeNotification('平台指标拉取结果', `${target.name}：${result.message}，记录 ${rows.length || result.recordCount} 条`, '数据分析', result.ok ? '提醒' : '预警'),
+        ...data.notifications,
+      ],
+    });
+    audit('拉取平台指标', `${target.name}：${result.message}`, next);
   };
 
   const createLanding = () => {
@@ -1238,6 +1339,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
           </select>
           <input value={integration.name} onChange={(event) => setIntegration({ ...integration, name: event.target.value })} placeholder="集成名称" />
           <input value={integration.endpoint} onChange={(event) => setIntegration({ ...integration, endpoint: event.target.value })} placeholder="接口地址 / Webhook" />
+          <input value={integration.apiKey} onChange={(event) => setIntegration({ ...integration, apiKey: event.target.value })} placeholder="API Key / Token" />
           <select value={integration.authMode} onChange={(event) => setIntegration({ ...integration, authMode: event.target.value as IntegrationConfig['authMode'] })}>
             <option>Token</option>
             <option>OAuth</option>
@@ -1247,20 +1349,32 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
           </select>
           <button onClick={createIntegration}><Plus size={16} />保存集成</button>
         </div>
+        <textarea className="small-textarea" value={integration.extraConfig} onChange={(event) => setIntegration({ ...integration, extraConfig: event.target.value })} placeholder={'扩展配置 JSON，例如：{"tenantId":"xxx","appId":"xxx","fields":{"name":"candidateName"}}'} />
         <div className="entry-grid">
           {data.integrations.length === 0 && <EmptyState title="暂无真实集成配置" body="配置北森、平台 API、企微/飞书或 BI 后，系统会记录连接状态。" />}
           {data.integrations.map((item) => (
             <article key={item.id}>
               <strong>{item.type}｜{item.name}</strong>
-              <span>{item.authMode} · {item.endpoint || '未填写接口地址'}</span>
+              <span>{item.authMode} · {item.endpoint || '未填写接口地址'} · {item.apiKey ? '已配置密钥' : '未配置密钥'}</span>
+              {item.lastMessage && <span>最近结果：{item.lastMessage}</span>}
               <Badge tone={item.status === '已连接' ? 'good' : item.status === '连接失败' ? 'danger' : 'warn'}>{item.status}</Badge>
               <div className="card-actions-inline">
                 <button className="ghost" onClick={() => void testIntegration(item.id)}>测试连接</button>
+                {item.type === '北森' && <button className="ghost" onClick={() => void syncBeisenLeads(item.id)}>同步线索</button>}
+                {item.type === '平台API' && <button className="ghost" onClick={() => void pullPlatformMetrics(item.id)}>拉取指标</button>}
                 {(item.type === '企业微信' || item.type === '飞书') && <button className="ghost" onClick={() => void sendNotificationDigest(item.id)}>发送摘要</button>}
               </div>
             </article>
           ))}
         </div>
+        {data.integrationSyncRuns.length > 0 && (
+          <details className="version-box">
+            <summary>同步运行记录（{data.integrationSyncRuns.length}）</summary>
+            {data.integrationSyncRuns.slice(0, 8).map((run) => (
+              <p key={run.id}>{run.syncType} · {run.status} · {run.message} · {run.recordCount} 条 · {run.ranAt}</p>
+            ))}
+          </details>
+        )}
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>招聘落地页</h2><FileText size={18} /></div>
@@ -1678,12 +1792,12 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
     update({ ...emptyData, ...restored });
   };
   const remainingItems = [
-    '生产数据库、对象存储和正式账号体系部署',
-    '北森 OpenAPI 简历投递、流程状态和候选人回流',
-    '小红书、脉脉、B站、公众号、抖音、知乎、技术社区正式 API 或插件采集',
-    '浏览器插件独立打包、平台页面适配和数据采集权限',
-    '企业微信/飞书真实消息发送、审批提醒和群机器人权限',
-    '招聘落地页公网部署、独立域名、埋点 SDK 和隐私合规配置',
+    '生产数据库、对象存储和正式账号体系：已预留本地仓储/上传抽象，待部署资源后替换',
+    '北森 OpenAPI 简历投递、流程状态和候选人回流：已提供配置、测试和同步入口，待真实接口参数',
+    '小红书、脉脉、B站、公众号、抖音、知乎、技术社区：已提供平台 API 拉取和浏览器插件采集入口，待平台权限',
+    '浏览器插件独立打包和页面适配：已创建 MV3 插件目录，待目标浏览器加载测试与平台字段微调',
+    '企业微信/飞书消息发送：已支持 Webhook 摘要发送，待真实机器人/应用权限',
+    '招聘落地页公网部署、独立域名和埋点：已提供 SDK 与公开接口，待域名、服务器和隐私备案配置',
   ];
   return (
     <div className="page-grid">
@@ -1862,7 +1976,7 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
         </table>
       </section>
       <section className="panel wide">
-        <div className="panel-title"><h2>后续集成与生产化事项</h2><ClipboardList size={18} /></div>
+        <div className="panel-title"><h2>待配置资源与上线事项</h2><ClipboardList size={18} /></div>
         <div className="todo-grid">
           {remainingItems.map((item) => (
             <div className="todo-item" key={item}><CheckCircle2 size={16} />{item}</div>

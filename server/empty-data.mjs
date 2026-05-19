@@ -10,6 +10,7 @@ export const emptyData = {
   entries: [],
   beisenResults: [],
   integrations: [],
+  integrationSyncRuns: [],
   modelApis: [],
   landingPages: [],
   landingLeads: [],

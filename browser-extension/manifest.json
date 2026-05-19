@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "招聘运营助手采集插件",
+  "version": "1.0.0",
+  "description": "采集招聘新媒体平台页面指标，并推送到 HRAssistant 本地 API。",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": [
+    "https://*.xiaohongshu.com/*",
+    "https://*.maimai.cn/*",
+    "https://*.bilibili.com/*",
+    "https://*.weixin.qq.com/*",
+    "https://*.douyin.com/*",
+    "https://*.zhihu.com/*",
+    "https://*/*",
+    "http://localhost:8787/*"
+  ],
+  "action": {
+    "default_title": "招聘运营助手",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

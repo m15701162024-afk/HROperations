@@ -1,6 +1,6 @@
 import { emptyData } from './data';
 import type { AppData } from './types';
-import type { AssetItem, IntegrationConfig, ModelApiConfig } from './types';
+import type { AssetItem, IntegrationConfig, IntegrationSyncRun, ModelApiConfig } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
 const DISABLE_API = import.meta.env.MODE === 'test' || import.meta.env.VITE_DISABLE_API === 'true';
@@ -59,6 +59,21 @@ export async function sendIntegrationMessage(integration: IntegrationConfig, mes
     statusCode?: number;
     message: string;
   }>(`${API_BASE}/api/integrations/send`, 'POST', token, { integration, message });
+}
+
+export async function runIntegrationSync(
+  integration: IntegrationConfig,
+  syncType: IntegrationSyncRun['syncType'],
+  payload: unknown,
+  token?: string,
+) {
+  return await requestJson<{
+    ok: boolean;
+    statusCode?: number;
+    message: string;
+    recordCount: number;
+    data?: unknown;
+  }>(`${API_BASE}/api/integrations/sync`, 'POST', token, { integration, syncType, payload });
 }
 
 export async function testModelApiConfig(config: ModelApiConfig, token?: string) {
@@ -169,6 +184,7 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     entries: data.entries ?? [],
     beisenResults: data.beisenResults ?? [],
     integrations: data.integrations ?? [],
+    integrationSyncRuns: data.integrationSyncRuns ?? [],
     modelApis: data.modelApis ?? [],
     landingPages: data.landingPages ?? [],
     landingLeads: data.landingLeads ?? [],
