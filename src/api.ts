@@ -1,5 +1,6 @@
 import { emptyData } from './data';
 import type { AppData } from './types';
+import type { IntegrationConfig } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
 const DISABLE_API = import.meta.env.MODE === 'test' || import.meta.env.VITE_DISABLE_API === 'true';
@@ -41,6 +42,15 @@ export async function saveRemoteData(data: AppData, token?: string) {
   } catch {
     return false;
   }
+}
+
+export async function testIntegrationConfig(integration: IntegrationConfig, token?: string) {
+  return await requestJson<{
+    ok: boolean;
+    status: IntegrationConfig['status'];
+    statusCode?: number;
+    message: string;
+  }>(`${API_BASE}/api/integrations/test`, 'POST', token, integration);
 }
 
 class ApiError extends Error {

@@ -26,7 +26,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, saveRemoteData } from './api';
+import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, saveRemoteData, testIntegrationConfig } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
 import type { AccountType, AppData, AssetItem, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
@@ -160,7 +160,7 @@ function useAppData() {
     update(emptyData);
   };
 
-  return { data, update, audit, resetData, storageMode, apiUser, authRequired, authError, login, logout };
+  return { data, update, audit, resetData, storageMode, apiUser, apiToken, authRequired, authError, login, logout };
 }
 
 function StatCard({ label, value, note, icon: Icon }: { label: string; value: string | number; note: string; icon: React.ComponentType<{ size?: number }> }) {
@@ -762,7 +762,7 @@ function Assets({ data, audit }: { data: AppData; audit: (action: string, target
   );
 }
 
-function Accounts({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
   const [entry, setEntry] = useState({ platform: '小红书' as Platform, headline: '', url: '', destination: '北森岗位页' as RecruitmentEntry['destination'] });
   const [integration, setIntegration] = useState({ type: '北森' as IntegrationConfig['type'], name: '', endpoint: '', authMode: 'Token' as IntegrationConfig['authMode'] });
   const [landing, setLanding] = useState({ title: '', slug: '', pageType: '岗位集合页' as LandingPage['pageType'], destinationUrl: '' });
@@ -811,6 +811,24 @@ function Accounts({ data, audit }: { data: AppData; audit: (action: string, targ
     };
     audit('新增集成配置', item.name, { ...data, integrations: [item, ...data.integrations] });
     setIntegration({ type: '北森', name: '', endpoint: '', authMode: 'Token' });
+  };
+
+  const testIntegration = async (id: string) => {
+    const target = data.integrations.find((item) => item.id === id);
+    if (!target) return;
+    const result = await testIntegrationConfig(target, apiToken);
+    audit('测试集成配置', `${target.name}：${result.message}`, {
+      ...data,
+      integrations: data.integrations.map((item) => item.id === id ? {
+        ...item,
+        status: result.status,
+        lastSyncAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      } : item),
+      notifications: [
+        makeNotification('集成连接测试', `${target.name}：${result.message}`, '账号与平台', result.ok ? '提醒' : '预警'),
+        ...data.notifications,
+      ],
+    });
   };
 
   const createLanding = () => {
@@ -953,6 +971,7 @@ function Accounts({ data, audit }: { data: AppData; audit: (action: string, targ
               <strong>{item.type}｜{item.name}</strong>
               <span>{item.authMode} · {item.endpoint || '未填写接口地址'}</span>
               <Badge tone={item.status === '已连接' ? 'good' : item.status === '连接失败' ? 'danger' : 'warn'}>{item.status}</Badge>
+              <button className="ghost" onClick={() => void testIntegration(item.id)}>测试连接</button>
             </article>
           ))}
         </div>
@@ -1417,6 +1436,7 @@ function renderSection(
   update: (data: AppData) => void,
   audit: (action: string, target: string, nextData?: AppData) => void,
   resetData: () => void,
+  apiToken?: string,
 ) {
   switch (section) {
     case '工作台':
@@ -1428,7 +1448,7 @@ function renderSection(
     case '素材资产':
       return <Assets data={data} audit={audit} />;
     case '账号与平台':
-      return <Accounts data={data} audit={audit} />;
+      return <Accounts data={data} audit={audit} apiToken={apiToken} />;
     case '数据分析':
       return <Analytics data={data} audit={audit} />;
     case '复盘报告':
@@ -1440,7 +1460,7 @@ function renderSection(
 
 export function App() {
   const [section, setSection] = useState<Section>('工作台');
-  const { data, update, audit, resetData, storageMode, apiUser, authRequired, authError, login, logout } = useAppData();
+  const { data, update, audit, resetData, storageMode, apiUser, apiToken, authRequired, authError, login, logout } = useAppData();
 
   if (authRequired) {
     return <LoginScreen onLogin={login} error={authError} />;
@@ -1470,7 +1490,7 @@ export function App() {
         </div>
       </aside>
       <main>
-        {renderSection(section, data, update, audit, resetData)}
+        {renderSection(section, data, update, audit, resetData, apiToken)}
       </main>
     </div>
   );

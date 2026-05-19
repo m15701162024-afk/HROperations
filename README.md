@@ -51,6 +51,21 @@ npm run dev:full
 
 首次启动 `npm run api` 时会在 `data/hr-assistant-auth.json` 中创建本地管理员。该文件已被 `.gitignore` 排除，不会提交账号信息。
 
+## 本地服务结构
+
+- `server/local-api.mjs`：本地 API 入口
+- `server/repositories/jsonRepository.mjs`：JSON 数据仓库，后续可替换为数据库实现
+- `server/services/authService.mjs`：本地认证和会话
+- `server/services/integrationService.mjs`：平台/北森/企微/飞书/BI 连接测试
+
+平台配置页中的“测试连接”会调用：
+
+```text
+POST /api/integrations/test
+```
+
+使用人后续只需要在页面里填入 API 地址或 Webhook，即可先验证连通性；正式数据同步逻辑可继续基于该连接器层扩展。
+
 ## 推送流程
 
 如果当前仓库已配置 HRAssistant 远端：
