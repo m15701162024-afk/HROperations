@@ -1,5 +1,7 @@
 import { createServer } from 'node:http';
-import { dirname, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { basename, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createJsonRepository } from './repositories/jsonRepository.mjs';
 import { createAuthService } from './services/authService.mjs';
@@ -8,6 +10,7 @@ import { runModelApi, testIntegration, testModelApi } from './services/integrati
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dataFile = resolve(rootDir, 'data/hr-assistant-data.json');
 const authFile = resolve(rootDir, 'data/hr-assistant-auth.json');
+const uploadDir = resolve(rootDir, 'data/uploads');
 const port = Number(process.env.HR_ASSISTANT_API_PORT ?? 8787);
 
 const repository = createJsonRepository(dataFile);
@@ -29,6 +32,16 @@ function send(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
+function sendFile(response, status, body, contentType) {
+  response.writeHead(status, {
+    'Content-Type': contentType,
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,PUT,POST,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,Accept,Authorization',
+  });
+  response.end(body);
+}
+
 function getBearerToken(request) {
   const header = request.headers.authorization ?? '';
   return header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
@@ -43,6 +56,24 @@ function requireSession(request, response) {
   return session;
 }
 
+function sanitizeFileName(fileName) {
+  const plainName = basename(String(fileName || 'asset-file')).replace(/[^\w.\-\u4e00-\u9fa5]/g, '_');
+  return plainName || 'asset-file';
+}
+
+function contentTypeFor(filePath) {
+  const ext = extname(filePath).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.pdf') return 'application/pdf';
+  if (ext === '.txt') return 'text/plain; charset=utf-8';
+  if (ext === '.md') return 'text/markdown; charset=utf-8';
+  if (ext === '.csv') return 'text/csv; charset=utf-8';
+  return 'application/octet-stream';
+}
+
 const server = createServer(async (request, response) => {
   if (request.method === 'OPTIONS') {
     send(response, 204, {});
@@ -51,6 +82,22 @@ const server = createServer(async (request, response) => {
 
   if (request.url === '/api/health') {
     send(response, 200, { ok: true, storage: 'json', auth: 'local' });
+    return;
+  }
+
+  if (request.url?.startsWith('/uploads/') && request.method === 'GET') {
+    try {
+      const requestedName = decodeURIComponent(request.url.replace('/uploads/', '').split('?')[0]);
+      const safeName = basename(requestedName);
+      const filePath = resolve(uploadDir, safeName);
+      if (!filePath.startsWith(uploadDir)) {
+        send(response, 400, { ok: false, error: 'Invalid file path' });
+        return;
+      }
+      sendFile(response, 200, await readFile(filePath), contentTypeFor(filePath));
+    } catch {
+      send(response, 404, { ok: false, error: 'File not found' });
+    }
     return;
   }
 
@@ -89,6 +136,35 @@ const server = createServer(async (request, response) => {
       const data = JSON.parse(body);
       await repository.writeData(data);
       send(response, 200, { ok: true });
+    } catch (error) {
+      send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid request' });
+    }
+    return;
+  }
+
+  if (request.url === '/api/assets/upload' && request.method === 'POST') {
+    if (!requireSession(request, response)) return;
+    try {
+      const body = JSON.parse(await readBody(request));
+      const match = String(body.dataUrl ?? '').match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) {
+        send(response, 400, { ok: false, error: 'Invalid file payload' });
+        return;
+      }
+
+      const buffer = Buffer.from(match[2], 'base64');
+      const originalName = sanitizeFileName(body.fileName);
+      const storedName = `${Date.now()}-${randomUUID()}-${originalName}`;
+      await mkdir(uploadDir, { recursive: true });
+      await writeFile(resolve(uploadDir, storedName), buffer);
+
+      send(response, 200, {
+        fileName: originalName,
+        fileUrl: `/uploads/${encodeURIComponent(storedName)}`,
+        mimeType: body.mimeType || match[1],
+        fileSize: buffer.byteLength,
+        uploadedAt: new Date().toISOString().slice(0, 10),
+      });
     } catch (error) {
       send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid request' });
     }

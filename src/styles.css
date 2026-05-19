@@ -684,6 +684,46 @@ textarea {
   gap: 8px;
 }
 
+.asset-preview {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.asset-file {
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.file-picker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 14px;
+  color: #314056;
+  background: #ffffff;
+  border: 1px dashed #a9b8c9;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.file-picker input {
+  display: none;
+}
+
+.upload-note {
+  margin: 0;
+  color: #526176;
+  font-size: 13px;
+}
+
 .template-block {
   padding: 14px;
   margin-bottom: 12px;

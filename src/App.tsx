@@ -26,7 +26,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, runModelTask, saveRemoteData, testIntegrationConfig, testModelApiConfig } from './api';
+import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, runModelTask, saveRemoteData, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
 import type { AccountType, AppData, AssetItem, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
@@ -727,13 +727,29 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
   );
 }
 
-function Assets({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
   const [asset, setAsset] = useState({ name: '', category: '公司/业务介绍', owner: '招聘专员', scope: '招聘内容可用' });
-  const createAsset = () => {
+  const [assetFile, setAssetFile] = useState<File | null>(null);
+  const [uploadStatus, setUploadStatus] = useState('');
+
+  const createAsset = async () => {
     if (!asset.name.trim()) return;
+    setUploadStatus(assetFile ? '正在上传素材文件...' : '');
+    let fileMeta: Pick<AssetItem, 'fileName' | 'fileUrl' | 'mimeType' | 'fileSize' | 'uploadedAt'> = {};
+
+    if (assetFile) {
+      try {
+        fileMeta = await uploadAssetFile(assetFile, apiToken);
+        setUploadStatus('文件已上传并关联到素材记录');
+      } catch {
+        setUploadStatus('文件上传失败，已仅保存素材记录');
+      }
+    }
+
     const item: AssetItem = {
       id: `asset-${Date.now()}`,
       ...asset,
+      ...fileMeta,
       platforms: ['小红书', '脉脉', '公众号'],
       riskLevel: asset.category.includes('员工') || asset.category.includes('技术') ? '高' : '中',
       authorization: '待审核',
@@ -742,6 +758,7 @@ function Assets({ data, audit }: { data: AppData; audit: (action: string, target
     };
     audit('新增素材', item.name, { ...data, assets: [item, ...data.assets] });
     setAsset({ name: '', category: '公司/业务介绍', owner: '招聘专员', scope: '招聘内容可用' });
+    setAssetFile(null);
   };
 
   const removeAsset = (id: string) => {
@@ -765,16 +782,27 @@ function Assets({ data, audit }: { data: AppData; audit: (action: string, target
           <input value={asset.category} onChange={(event) => setAsset({ ...asset, category: event.target.value })} placeholder="素材类型" />
           <input value={asset.owner} onChange={(event) => setAsset({ ...asset, owner: event.target.value })} placeholder="负责人" />
           <input value={asset.scope} onChange={(event) => setAsset({ ...asset, scope: event.target.value })} placeholder="使用范围" />
-          <button onClick={createAsset}><Plus size={16} />保存</button>
+          <label className="file-picker">
+            <input type="file" onChange={(event) => setAssetFile(event.target.files?.[0] ?? null)} />
+            {assetFile ? assetFile.name : '选择文件'}
+          </label>
+          <button onClick={() => void createAsset()}><Plus size={16} />保存</button>
         </div>
+        {uploadStatus && <p className="upload-note">{uploadStatus}</p>}
       </section>
       <section className="panel">
         <div className="panel-title"><h2>素材库</h2><Database size={18} /></div>
         {data.assets.length === 0 && <EmptyState title="暂无真实素材" body="请录入公司介绍、JD、图片授权、FAQ 或技术案例采集记录。" />}
         {data.assets.map((asset) => (
           <div className="asset-row" key={asset.id}>
+            {asset.mimeType?.startsWith('image/') && asset.fileUrl && <img className="asset-preview" src={asset.fileUrl} alt={asset.name} />}
             <strong>{asset.name}</strong>
             <span>{asset.category} · {asset.scope}</span>
+            {asset.fileUrl && (
+              <a className="asset-file" href={asset.fileUrl} target="_blank" rel="noreferrer">
+                {asset.fileName ?? '查看文件'}{asset.fileSize ? ` · ${Math.round(asset.fileSize / 1024)} KB` : ''}
+              </a>
+            )}
             <div><Badge tone={asset.riskLevel === '高' ? 'danger' : asset.riskLevel === '中' ? 'warn' : 'good'}>{asset.riskLevel}风险</Badge><Badge>{asset.authorization}</Badge></div>
             <button className="ghost" onClick={() => removeAsset(asset.id)}>删除</button>
           </div>
@@ -1586,7 +1614,7 @@ function renderSection(
     case '内容运营':
       return <ContentOps data={data} audit={audit} apiToken={apiToken} />;
     case '素材资产':
-      return <Assets data={data} audit={audit} />;
+      return <Assets data={data} audit={audit} apiToken={apiToken} />;
     case '账号与平台':
       return <Accounts data={data} audit={audit} apiToken={apiToken} />;
     case '数据分析':

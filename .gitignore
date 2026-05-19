@@ -7,3 +7,4 @@ coverage/
 .env.local
 hr-assistant-browser-check.png
 data/*.json
+data/uploads/

@@ -1,6 +1,6 @@
 import { emptyData } from './data';
 import type { AppData } from './types';
-import type { IntegrationConfig, ModelApiConfig } from './types';
+import type { AssetItem, IntegrationConfig, ModelApiConfig } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
 const DISABLE_API = import.meta.env.MODE === 'test' || import.meta.env.VITE_DISABLE_API === 'true';
@@ -75,6 +75,26 @@ export async function runModelTask(
   });
 }
 
+export async function uploadAssetFile(file: File, token?: string): Promise<Pick<AssetItem, 'fileName' | 'fileUrl' | 'mimeType' | 'fileSize' | 'uploadedAt'>> {
+  const dataUrl = await readFileAsDataUrl(file);
+  const payload = await requestJson<{
+    fileName: string;
+    fileUrl: string;
+    mimeType: string;
+    fileSize: number;
+    uploadedAt: string;
+  }>(`${API_BASE}/api/assets/upload`, 'POST', token, {
+    fileName: file.name,
+    mimeType: file.type || 'application/octet-stream',
+    dataUrl,
+  });
+
+  return {
+    ...payload,
+    fileUrl: payload.fileUrl.startsWith('http') ? payload.fileUrl : `${API_BASE}${payload.fileUrl}`,
+  };
+}
+
 class ApiError extends Error {
   constructor(public status: number) {
     super(`HTTP ${status}`);
@@ -114,6 +134,15 @@ function requestJson<T>(url: string, method: 'GET' | 'PUT' | 'POST', token?: str
     };
     request.onerror = () => reject(new Error('Network error'));
     request.send(body === undefined ? undefined : JSON.stringify(body));
+  });
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(new Error('文件读取失败'));
+    reader.readAsDataURL(file);
   });
 }
 

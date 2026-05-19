@@ -95,6 +95,11 @@ export interface AssetItem {
   authorization: string;
   expiresAt: string;
   usageCount: number;
+  fileName?: string;
+  fileUrl?: string;
+  mimeType?: string;
+  fileSize?: number;
+  uploadedAt?: string;
 }
 
 export interface Goal {
