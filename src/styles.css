@@ -764,6 +764,17 @@ textarea {
   gap: 12px;
 }
 
+.lead-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.lead-form button {
+  margin-top: 0;
+}
+
 .template-chip,
 .entry-grid article,
 .report-card {
@@ -934,7 +945,8 @@ textarea {
 
   .toolbar-actions,
   .inline-form,
-  .form-grid {
+  .form-grid,
+  .lead-form {
     grid-template-columns: 1fr;
   }
 

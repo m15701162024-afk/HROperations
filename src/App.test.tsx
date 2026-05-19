@@ -48,6 +48,7 @@ describe('招聘运营助手', () => {
       integrations: [],
       modelApis: [],
       landingPages: [],
+      landingLeads: [],
       roles: [],
       users: [],
       workflowRules: [],

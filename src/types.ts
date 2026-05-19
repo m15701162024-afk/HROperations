@@ -185,6 +185,18 @@ export interface LandingPage {
   clicks: number;
 }
 
+export interface LandingPageLead {
+  id: string;
+  landingPageId: string;
+  name: string;
+  contact: string;
+  targetJobId: string;
+  sourcePlatform: Platform | '未知';
+  note: string;
+  status: '待转入北森' | '已转入北森';
+  submittedAt: string;
+}
+
 export interface PermissionRole {
   id: string;
   name: string;
@@ -260,6 +272,7 @@ export interface AppData {
   integrations: IntegrationConfig[];
   modelApis: ModelApiConfig[];
   landingPages: LandingPage[];
+  landingLeads: LandingPageLead[];
   roles: PermissionRole[];
   users: UserProfile[];
   workflowRules: WorkflowRule[];

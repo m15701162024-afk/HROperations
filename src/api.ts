@@ -163,6 +163,7 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     integrations: data.integrations ?? [],
     modelApis: data.modelApis ?? [],
     landingPages: data.landingPages ?? [],
+    landingLeads: data.landingLeads ?? [],
     roles: data.roles ?? [],
     users: data.users ?? [],
     workflowRules: data.workflowRules ?? [],

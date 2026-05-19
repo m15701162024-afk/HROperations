@@ -12,6 +12,7 @@ export const emptyData = {
   integrations: [],
   modelApis: [],
   landingPages: [],
+  landingLeads: [],
   roles: [],
   users: [],
   workflowRules: [],

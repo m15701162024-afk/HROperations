@@ -28,7 +28,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, runModelTask, saveRemoteData, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
-import type { AccountType, AppData, AssetItem, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
+import type { AccountType, AppData, AssetItem, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, LandingPageLead, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
 
 type Section =
@@ -942,6 +942,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
   const [entry, setEntry] = useState({ platform: '小红书' as Platform, headline: '', url: '', destination: '北森岗位页' as RecruitmentEntry['destination'] });
   const [integration, setIntegration] = useState({ type: '北森' as IntegrationConfig['type'], name: '', endpoint: '', authMode: 'Token' as IntegrationConfig['authMode'] });
   const [landing, setLanding] = useState({ title: '', slug: '', pageType: '岗位集合页' as LandingPage['pageType'], destinationUrl: '' });
+  const [landingLeadDrafts, setLandingLeadDrafts] = useState<Record<string, { name: string; contact: string; targetJobId: string; sourcePlatform: Platform | '未知'; note: string }>>({});
   const [account, setAccount] = useState({
     platform: '小红书' as Platform,
     name: '',
@@ -1019,6 +1020,52 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     };
     audit('创建落地页', item.title, { ...data, landingPages: [item, ...data.landingPages] });
     setLanding({ title: '', slug: '', pageType: '岗位集合页', destinationUrl: '' });
+  };
+
+  const updateLandingMetric = (id: string, metric: 'visits' | 'clicks') => {
+    const target = data.landingPages.find((item) => item.id === id);
+    if (!target) return;
+    audit(metric === 'visits' ? '记录落地页访问' : '记录落地页点击', target.title, {
+      ...data,
+      landingPages: data.landingPages.map((item) => item.id === id ? { ...item, [metric]: item[metric] + 1 } : item),
+    });
+  };
+
+  const publishLandingPage = (id: string) => {
+    const target = data.landingPages.find((item) => item.id === id);
+    if (!target) return;
+    audit('发布落地页', target.title, {
+      ...data,
+      landingPages: data.landingPages.map((item) => item.id === id ? { ...item, status: '已发布' } : item),
+    });
+  };
+
+  const submitLandingLead = (landingPage: LandingPage) => {
+    const draft = landingLeadDrafts[landingPage.id] ?? {
+      name: '',
+      contact: '',
+      targetJobId: data.jobs[0]?.id ?? '',
+      sourcePlatform: '未知' as Platform | '未知',
+      note: '',
+    };
+    if (!draft.name.trim() || !draft.contact.trim()) return;
+    const lead: LandingPageLead = {
+      id: `lead-${Date.now()}`,
+      landingPageId: landingPage.id,
+      ...draft,
+      status: '待转入北森',
+      submittedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    };
+    audit('提交落地页线索', `${landingPage.title}：${lead.name}`, {
+      ...data,
+      landingPages: data.landingPages.map((item) => item.id === landingPage.id ? { ...item, clicks: item.clicks + 1 } : item),
+      landingLeads: [lead, ...data.landingLeads],
+      notifications: [
+        makeNotification('新增落地页线索', `${lead.name} 来自 ${landingPage.title}`, '账号与平台', '待办'),
+        ...data.notifications,
+      ],
+    });
+    setLandingLeadDrafts({ ...landingLeadDrafts, [landingPage.id]: { ...draft, name: '', contact: '', note: '' } });
   };
 
   const removeAccount = (id: string) => {
@@ -1168,13 +1215,66 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
         </div>
         <div className="entry-grid">
           {data.landingPages.length === 0 && <EmptyState title="暂无招聘落地页" body="可创建岗位集合页、校招专题页或技术活动页，本地阶段先生成配置和归因数据。" />}
-          {data.landingPages.map((item) => (
+          {data.landingPages.map((item) => {
+            const draft = landingLeadDrafts[item.id] ?? {
+              name: '',
+              contact: '',
+              targetJobId: data.jobs[0]?.id ?? '',
+              sourcePlatform: '未知' as Platform | '未知',
+              note: '',
+            };
+            const leads = data.landingLeads.filter((lead) => lead.landingPageId === item.id);
+            return (
             <article key={item.id}>
               <strong>{item.title}</strong>
               <span>/{item.slug || item.id} · {item.pageType} · 关联岗位 {item.linkedJobIds.length} 个</span>
-              <Badge tone="info">{item.visits} 访问 / {item.clicks} 点击</Badge>
+              <Badge tone="info">{item.visits} 访问 / {item.clicks} 点击 / {leads.length} 线索</Badge>
+              <div className="card-actions-inline">
+                <button className="ghost" onClick={() => publishLandingPage(item.id)}>发布</button>
+                <button className="ghost" onClick={() => updateLandingMetric(item.id, 'visits')}>记录访问</button>
+                <button className="ghost" onClick={() => updateLandingMetric(item.id, 'clicks')}>记录点击</button>
+              </div>
+              <details className="version-box">
+                <summary>本地表单与线索（{leads.length}）</summary>
+                <div className="lead-form">
+                  <input
+                    value={draft.name}
+                    onChange={(event) => setLandingLeadDrafts({ ...landingLeadDrafts, [item.id]: { ...draft, name: event.target.value } })}
+                    placeholder="候选人姓名"
+                  />
+                  <input
+                    value={draft.contact}
+                    onChange={(event) => setLandingLeadDrafts({ ...landingLeadDrafts, [item.id]: { ...draft, contact: event.target.value } })}
+                    placeholder="手机号/邮箱/微信"
+                  />
+                  <select
+                    value={draft.targetJobId}
+                    onChange={(event) => setLandingLeadDrafts({ ...landingLeadDrafts, [item.id]: { ...draft, targetJobId: event.target.value } })}
+                  >
+                    <option value="">未选择岗位</option>
+                    {data.jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
+                  </select>
+                  <select
+                    value={draft.sourcePlatform}
+                    onChange={(event) => setLandingLeadDrafts({ ...landingLeadDrafts, [item.id]: { ...draft, sourcePlatform: event.target.value as Platform | '未知' } })}
+                  >
+                    <option>未知</option>
+                    {platforms.map((platform) => <option key={platform}>{platform}</option>)}
+                  </select>
+                  <input
+                    value={draft.note}
+                    onChange={(event) => setLandingLeadDrafts({ ...landingLeadDrafts, [item.id]: { ...draft, note: event.target.value } })}
+                    placeholder="候选人备注"
+                  />
+                  <button className="secondary" onClick={() => submitLandingLead(item)}>提交线索</button>
+                </div>
+                {leads.map((lead) => (
+                  <p key={lead.id}>{lead.name} · {lead.contact} · {lead.sourcePlatform} · {lead.status} · {lead.submittedAt}</p>
+                ))}
+              </details>
             </article>
-          ))}
+            );
+          })}
         </div>
       </section>
     </div>
