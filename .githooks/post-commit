@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${HR_OPERATIONS_SKIP_AUTO_PUSH:-}" = "1" ]; then
+  exit 0
+fi
+
+echo "Running HROperations auto-push..."
+bash scripts/push-hroperations.sh
