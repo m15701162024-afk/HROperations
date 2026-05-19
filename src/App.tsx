@@ -1612,12 +1612,12 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
     update({ ...emptyData, ...restored });
   };
   const remainingItems = [
-    '替换本地 localStorage 为后端数据库与登录态',
-    '用真实北森 OpenAPI 替换 CSV 回流入口',
-    '用各平台正式 API/插件替换手动导入平台指标',
-    '完成浏览器插件独立打包和平台页面适配',
-    '接入真实企业微信/飞书消息发送权限',
-    '完善落地页公网部署、表单提交和访问埋点',
+    '生产数据库、对象存储和正式账号体系部署',
+    '北森 OpenAPI 简历投递、流程状态和候选人回流',
+    '小红书、脉脉、B站、公众号、抖音、知乎、技术社区正式 API 或插件采集',
+    '浏览器插件独立打包、平台页面适配和数据采集权限',
+    '企业微信/飞书真实消息发送、审批提醒和群机器人权限',
+    '招聘落地页公网部署、独立域名、埋点 SDK 和隐私合规配置',
   ];
   return (
     <div className="page-grid">
@@ -1796,7 +1796,7 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
         </table>
       </section>
       <section className="panel wide">
-        <div className="panel-title"><h2>剩余待开发项</h2><ClipboardList size={18} /></div>
+        <div className="panel-title"><h2>后续集成与生产化事项</h2><ClipboardList size={18} /></div>
         <div className="todo-grid">
           {remainingItems.map((item) => (
             <div className="todo-item" key={item}><CheckCircle2 size={16} />{item}</div>
