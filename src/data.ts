@@ -41,6 +41,7 @@ export const emptyData: AppData = {
   jobs: [],
   accounts: [],
   contents: [],
+  contentVersions: [],
   assets: [],
   goals: [],
   reports: [],
@@ -49,8 +50,11 @@ export const emptyData: AppData = {
   integrations: [],
   landingPages: [],
   roles: [],
+  users: [],
+  workflowRules: [],
   sensitiveRules: [],
   costs: [],
+  notifications: [],
   auditLogs: [],
 };
 
@@ -197,6 +201,7 @@ export const seedData: AppData = {
       metrics: { views: 3200, likes: 52, comments: 9, saves: 28, shares: 11, clicks: 34 },
     },
   ],
+  contentVersions: [],
   assets: [
     {
       id: 'asset-1',
@@ -313,8 +318,11 @@ export const seedData: AppData = {
   integrations: [],
   landingPages: [],
   roles: [],
+  users: [],
+  workflowRules: [],
   sensitiveRules: [],
   costs: [],
+  notifications: [],
   auditLogs: [
     {
       id: 'log-1',

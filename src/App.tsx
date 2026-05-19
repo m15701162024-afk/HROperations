@@ -13,6 +13,7 @@ import {
   Link,
   LockKeyhole,
   Megaphone,
+  Bell,
   PieChart,
   Plus,
   RefreshCw,
@@ -26,7 +27,7 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
-import type { AccountType, AppData, AssetItem, ContentTask, CostRecord, IntegrationConfig, JobNeed, LandingPage, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule } from './types';
+import type { AccountType, AppData, AssetItem, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
 
 type Section =
@@ -81,12 +82,16 @@ function useAppData() {
       ...emptyData,
       ...parsed,
       entries: parsed.entries ?? [],
+      contentVersions: parsed.contentVersions ?? [],
       beisenResults: parsed.beisenResults ?? [],
       integrations: parsed.integrations ?? [],
       landingPages: parsed.landingPages ?? [],
       roles: parsed.roles ?? [],
+      users: parsed.users ?? [],
+      workflowRules: parsed.workflowRules ?? [],
       sensitiveRules: parsed.sensitiveRules ?? [],
       costs: parsed.costs ?? [],
+      notifications: parsed.notifications ?? [],
       auditLogs: parsed.auditLogs ?? [],
     };
   });
@@ -148,6 +153,30 @@ function EmptyState({ title, body }: { title: string; body: string }) {
   );
 }
 
+function makeNotification(title: string, body: string, targetSection: string, level: NotificationItem['level'] = '提醒'): NotificationItem {
+  return {
+    id: `notice-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    title,
+    body,
+    targetSection,
+    level,
+    read: false,
+    createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+  };
+}
+
+function getConfiguredNextStatus(content: ContentTask, rules: WorkflowRule[]) {
+  const riskOrder = { 低: 1, 中: 2, 高: 3 };
+  const rule = rules.find((item) => item.enabled
+    && (item.platform === '全部' || item.platform === content.platform)
+    && (item.contentType === '全部' || item.contentType === content.type)
+    && riskOrder[content.riskLevel] >= riskOrder[item.minRiskLevel]);
+  if (!rule) return nextStatus(content.status);
+  const index = rule.steps.indexOf(content.status);
+  if (index < 0 || index === rule.steps.length - 1) return nextStatus(content.status);
+  return rule.steps[index + 1];
+}
+
 function Progress({ current, target }: { current: number; target: number }) {
   const percent = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
   return (
@@ -186,6 +215,16 @@ function Dashboard({ data, audit }: { data: AppData; audit: (action: string, tar
     const target = data.goals.find((item) => item.id === id);
     audit('删除运营目标', target?.title ?? id, { ...data, goals: data.goals.filter((item) => item.id !== id) });
   };
+  const assetWarnings = data.assets.filter((asset) => {
+    if (!asset.expiresAt) return false;
+    const days = Math.ceil((new Date(asset.expiresAt).getTime() - Date.now()) / 86400000);
+    return days <= 30;
+  });
+  const pendingNotices = [
+    ...data.notifications.filter((notice) => !notice.read),
+    ...assetWarnings.map((asset) => makeNotification('素材授权即将到期', `${asset.name} 有效期至 ${asset.expiresAt}`, '素材资产', '预警')),
+    ...data.contents.filter((content) => content.riskLevel === '高').map((content) => makeNotification('高风险内容待审核', content.title, '内容运营', '待办')),
+  ].slice(0, 8);
 
   return (
     <div className="page-grid">
@@ -207,6 +246,22 @@ function Dashboard({ data, audit }: { data: AppData; audit: (action: string, tar
         <StatCard label="互动量" value={totals.interactions.toLocaleString()} note="赞评藏转合计" icon={PieChart} />
         <StatCard label="招聘入口点击" value={totals.clicks.toLocaleString()} note="北森/官网跳转前" icon={Link} />
       </div>
+
+      <section className="panel wide">
+        <div className="panel-title">
+          <h2>通知中心</h2>
+          <Bell size={18} />
+        </div>
+        {pendingNotices.length === 0 && <EmptyState title="暂无待办通知" body="高风险内容、素材授权到期、审核流待办会在这里汇总。" />}
+        <div className="notice-list">
+          {pendingNotices.map((notice) => (
+            <div className="compact-row" key={notice.id}>
+              <div><strong>{notice.title}</strong><span>{notice.body}</span></div>
+              <Badge tone={notice.level === '预警' ? 'danger' : notice.level === '待办' ? 'warn' : 'info'}>{notice.level}</Badge>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <section className="panel wide">
         <div className="panel-title">
@@ -435,14 +490,29 @@ function ContentOps({ data, audit }: { data: AppData; audit: (action: string, ta
       risks: scanned.risks,
       metrics: { views: 0, likes: 0, comments: 0, saves: 0, shares: 0, clicks: 0 },
     };
-    audit('创建内容任务', newTask.title, { ...data, contents: [newTask, ...data.contents] });
+    const version: ContentVersion = {
+      id: `ver-${Date.now()}`,
+      contentId: newTask.id,
+      version: 1,
+      body: draft,
+      editor: '当前用户',
+      changeNote: '创建 AI 初稿',
+      createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    };
+    audit('创建内容任务', newTask.title, { ...data, contents: [newTask, ...data.contents], contentVersions: [version, ...data.contentVersions] });
   };
 
   const advance = (id: string) => {
     const target = data.contents.find((item) => item.id === id);
+    if (!target) return;
+    const status = getConfiguredNextStatus(target, data.workflowRules);
     audit('推进审核状态', target?.title ?? id, {
       ...data,
-      contents: data.contents.map((item) => (item.id === id ? { ...item, status: nextStatus(item.status) } : item)),
+      contents: data.contents.map((item) => (item.id === id ? { ...item, status } : item)),
+      notifications: [
+        makeNotification('内容状态已更新', `${target.title} 已进入 ${status}`, '内容运营', '提醒'),
+        ...data.notifications,
+      ],
     });
   };
 
@@ -523,6 +593,12 @@ function ContentOps({ data, audit }: { data: AppData; audit: (action: string, ta
                   <span>审核：{item.reviewer}</span>
                   <span>截止：{item.dueDate}</span>
                 </div>
+                <details className="version-box">
+                  <summary>版本历史（{data.contentVersions.filter((version) => version.contentId === item.id).length}）</summary>
+                  {data.contentVersions.filter((version) => version.contentId === item.id).map((version) => (
+                    <p key={version.id}>V{version.version} · {version.editor} · {version.changeNote} · {version.createdAt}</p>
+                  ))}
+                </details>
               </div>
               <div className="card-actions">
                 <Badge tone="info">{item.status}</Badge>
@@ -1049,6 +1125,8 @@ function Reports({ data, audit }: { data: AppData; audit: (action: string, targe
 function SettingsPage({ data, update, resetData }: { data: AppData; update: (data: AppData) => void; resetData: () => void }) {
   const [role, setRole] = useState({ name: '', dataScope: '个人' as PermissionRole['dataScope'], permissions: '岗位查看、内容创建' });
   const [rule, setRule] = useState({ keyword: '', category: '合规表达', riskLevel: '高' as SensitiveRule['riskLevel'], suggestion: '' });
+  const [user, setUser] = useState({ name: '', roleId: '', team: '招聘团队' });
+  const [workflow, setWorkflow] = useState({ name: '', platform: '全部' as WorkflowRule['platform'], contentType: '全部', minRiskLevel: '高' as WorkflowRule['minRiskLevel'] });
   const addRole = () => {
     if (!role.name.trim()) return;
     const item: PermissionRole = {
@@ -1071,6 +1149,32 @@ function SettingsPage({ data, update, resetData }: { data: AppData; update: (dat
     const next = { ...data, sensitiveRules: [item, ...data.sensitiveRules] };
     localStorage.setItem('hr-assistant-data', JSON.stringify(next));
     location.reload();
+  };
+  const addUser = () => {
+    if (!user.name.trim()) return;
+    const item: UserProfile = {
+      id: `user-${Date.now()}`,
+      name: user.name,
+      roleId: user.roleId || data.roles[0]?.id || 'default-role',
+      team: user.team,
+      status: '启用',
+    };
+    update({ ...data, users: [item, ...data.users] });
+    setUser({ name: '', roleId: '', team: '招聘团队' });
+  };
+  const addWorkflow = () => {
+    if (!workflow.name.trim()) return;
+    const item: WorkflowRule = {
+      id: `workflow-${Date.now()}`,
+      name: workflow.name,
+      platform: workflow.platform,
+      contentType: workflow.contentType,
+      minRiskLevel: workflow.minRiskLevel,
+      steps: ['草稿', 'AI已生成', '待专业补充', '待专业审核', '待品牌合规审核', '待平台适配', '待发布', '已发布'],
+      enabled: true,
+    };
+    update({ ...data, workflowRules: [item, ...data.workflowRules] });
+    setWorkflow({ name: '', platform: '全部', contentType: '全部', minRiskLevel: '高' });
   };
   const restoreBackup = async (file: File | undefined) => {
     if (!file) return;
@@ -1127,6 +1231,25 @@ function SettingsPage({ data, update, resetData }: { data: AppData; update: (dat
         ))}
       </section>
       <section className="panel">
+        <div className="panel-title"><h2>用户与团队</h2><Users size={18} /></div>
+        <div className="form-grid single">
+          <input value={user.name} onChange={(event) => setUser({ ...user, name: event.target.value })} placeholder="成员姓名" />
+          <input value={user.team} onChange={(event) => setUser({ ...user, team: event.target.value })} placeholder="所属团队" />
+          <select value={user.roleId} onChange={(event) => setUser({ ...user, roleId: event.target.value })}>
+            <option value="">选择角色</option>
+            {data.roles.map((roleItem) => <option key={roleItem.id} value={roleItem.id}>{roleItem.name}</option>)}
+          </select>
+          <button onClick={addUser}><Plus size={16} />新增用户</button>
+        </div>
+        {data.users.length === 0 && <EmptyState title="暂无用户" body="正式后端接入前，可先在本地维护团队成员和角色。" />}
+        {data.users.map((item) => (
+          <div className="compact-row" key={item.id}>
+            <div><strong>{item.name}</strong><span>{item.team} · {data.roles.find((roleItem) => roleItem.id === item.roleId)?.name ?? item.roleId}</span></div>
+            <Badge tone="good">{item.status}</Badge>
+          </div>
+        ))}
+      </section>
+      <section className="panel">
         <div className="panel-title"><h2>高风险规则库</h2><ShieldCheck size={18} /></div>
         <div className="form-grid single">
           <input value={rule.keyword} onChange={(event) => setRule({ ...rule, keyword: event.target.value })} placeholder="敏感词 / 红线主题" />
@@ -1148,9 +1271,32 @@ function SettingsPage({ data, update, resetData }: { data: AppData; update: (dat
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>审核流程配置</h2><GitBranch size={18} /></div>
+        <div className="inline-form">
+          <input value={workflow.name} onChange={(event) => setWorkflow({ ...workflow, name: event.target.value })} placeholder="流程名称" />
+          <select value={workflow.platform} onChange={(event) => setWorkflow({ ...workflow, platform: event.target.value as WorkflowRule['platform'] })}>
+            <option>全部</option>
+            {platforms.map((platform) => <option key={platform}>{platform}</option>)}
+          </select>
+          <input value={workflow.contentType} onChange={(event) => setWorkflow({ ...workflow, contentType: event.target.value })} placeholder="内容类型或全部" />
+          <select value={workflow.minRiskLevel} onChange={(event) => setWorkflow({ ...workflow, minRiskLevel: event.target.value as WorkflowRule['minRiskLevel'] })}>
+            <option>低</option>
+            <option>中</option>
+            <option>高</option>
+          </select>
+          <button onClick={addWorkflow}><Plus size={16} />新增流程</button>
+        </div>
         <div className="workflow">
           {['草稿', 'AI已生成', '待专业补充', '待专业审核', '待品牌合规审核', '待平台适配', '待发布', '已发布', '数据回收中', '已复盘'].map((step) => (
             <span key={step}>{step}</span>
+          ))}
+        </div>
+        <div className="entry-grid">
+          {data.workflowRules.map((item) => (
+            <article key={item.id}>
+              <strong>{item.name}</strong>
+              <span>{item.platform} · {item.contentType} · {item.minRiskLevel}风险起</span>
+              <Badge tone={item.enabled ? 'good' : 'warn'}>{item.enabled ? '启用' : '停用'}</Badge>
+            </article>
           ))}
         </div>
       </section>

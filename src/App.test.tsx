@@ -38,6 +38,7 @@ describe('招聘运营助手', () => {
       }],
       accounts: [],
       contents: [],
+      contentVersions: [],
       assets: [],
       goals: [],
       reports: [],
@@ -46,8 +47,11 @@ describe('招聘运营助手', () => {
       integrations: [],
       landingPages: [],
       roles: [],
+      users: [],
+      workflowRules: [],
       sensitiveRules: [],
       costs: [],
+      notifications: [],
       auditLogs: [],
     };
     localStorage.setItem('hr-assistant-data-mode', 'real-v1');

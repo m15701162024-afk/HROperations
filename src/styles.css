@@ -387,6 +387,30 @@ td span,
   border-top: 1px solid var(--line);
 }
 
+.notice-list {
+  display: grid;
+  gap: 10px;
+}
+
+.version-box {
+  margin-top: 12px;
+  padding: 10px;
+  background: #f8fbfd;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.version-box summary {
+  cursor: pointer;
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.version-box p {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
 .empty-state {
   display: grid;
   place-items: center;

@@ -74,6 +74,16 @@ export interface ContentTask {
   };
 }
 
+export interface ContentVersion {
+  id: string;
+  contentId: string;
+  version: number;
+  body: string;
+  editor: string;
+  changeNote: string;
+  createdAt: string;
+}
+
 export interface AssetItem {
   id: string;
   name: string;
@@ -155,6 +165,34 @@ export interface PermissionRole {
   permissions: string[];
 }
 
+export interface UserProfile {
+  id: string;
+  name: string;
+  roleId: string;
+  team: string;
+  status: '启用' | '停用';
+}
+
+export interface WorkflowRule {
+  id: string;
+  name: string;
+  platform: Platform | '全部';
+  contentType: string;
+  minRiskLevel: RiskLevel;
+  steps: ContentStatus[];
+  enabled: boolean;
+}
+
+export interface NotificationItem {
+  id: string;
+  title: string;
+  body: string;
+  targetSection: string;
+  level: '提醒' | '预警' | '待办';
+  read: boolean;
+  createdAt: string;
+}
+
 export interface SensitiveRule {
   id: string;
   keyword: string;
@@ -185,6 +223,7 @@ export interface AppData {
   jobs: JobNeed[];
   accounts: PlatformAccount[];
   contents: ContentTask[];
+  contentVersions: ContentVersion[];
   assets: AssetItem[];
   goals: Goal[];
   reports: ReportInsight[];
@@ -193,7 +232,10 @@ export interface AppData {
   integrations: IntegrationConfig[];
   landingPages: LandingPage[];
   roles: PermissionRole[];
+  users: UserProfile[];
+  workflowRules: WorkflowRule[];
   sensitiveRules: SensitiveRule[];
   costs: CostRecord[];
+  notifications: NotificationItem[];
   auditLogs: AuditLog[];
 }
