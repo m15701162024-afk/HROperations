@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createJsonRepository } from './repositories/jsonRepository.mjs';
 import { createAuthService } from './services/authService.mjs';
-import { testIntegration } from './services/integrationService.mjs';
+import { testIntegration, testModelApi } from './services/integrationService.mjs';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dataFile = resolve(rootDir, 'data/hr-assistant-data.json');
@@ -100,6 +100,17 @@ const server = createServer(async (request, response) => {
     try {
       const integration = JSON.parse(await readBody(request));
       send(response, 200, await testIntegration(integration));
+    } catch (error) {
+      send(response, 400, { ok: false, status: '连接失败', message: error instanceof Error ? error.message : 'Invalid request' });
+    }
+    return;
+  }
+
+  if (request.url === '/api/model-apis/test' && request.method === 'POST') {
+    if (!requireSession(request, response)) return;
+    try {
+      const config = JSON.parse(await readBody(request));
+      send(response, 200, await testModelApi(config));
     } catch (error) {
       send(response, 400, { ok: false, status: '连接失败', message: error instanceof Error ? error.message : 'Invalid request' });
     }

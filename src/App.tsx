@@ -26,9 +26,9 @@ import {
   Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, saveRemoteData, testIntegrationConfig } from './api';
+import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, saveRemoteData, testIntegrationConfig, testModelApiConfig } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
-import type { AccountType, AppData, AssetItem, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
+import type { AccountType, AppData, AssetItem, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
 
 type Section =
@@ -1215,11 +1215,19 @@ function Reports({ data, audit }: { data: AppData; audit: (action: string, targe
   );
 }
 
-function SettingsPage({ data, update, resetData }: { data: AppData; update: (data: AppData) => void; resetData: () => void }) {
+function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; update: (data: AppData) => void; resetData: () => void; apiToken?: string }) {
   const [role, setRole] = useState({ name: '', dataScope: '个人' as PermissionRole['dataScope'], permissions: '岗位查看、内容创建' });
   const [rule, setRule] = useState({ keyword: '', category: '合规表达', riskLevel: '高' as SensitiveRule['riskLevel'], suggestion: '' });
   const [user, setUser] = useState({ name: '', roleId: '', team: '招聘团队' });
   const [workflow, setWorkflow] = useState({ name: '', platform: '全部' as WorkflowRule['platform'], contentType: '全部', minRiskLevel: '高' as WorkflowRule['minRiskLevel'] });
+  const [modelApi, setModelApi] = useState({
+    provider: 'OpenAI' as ModelApiConfig['provider'],
+    name: '',
+    baseUrl: 'https://api.openai.com/v1',
+    apiKey: '',
+    model: '',
+    enabledFor: '内容生成、风险识别、复盘建议',
+  });
   const addRole = () => {
     if (!role.name.trim()) return;
     const item: PermissionRole = {
@@ -1268,6 +1276,41 @@ function SettingsPage({ data, update, resetData }: { data: AppData; update: (dat
     };
     update({ ...data, workflowRules: [item, ...data.workflowRules] });
     setWorkflow({ name: '', platform: '全部', contentType: '全部', minRiskLevel: '高' });
+  };
+  const addModelApi = () => {
+    if (!modelApi.name.trim()) return;
+    const item: ModelApiConfig = {
+      id: `model-api-${Date.now()}`,
+      provider: modelApi.provider,
+      name: modelApi.name,
+      baseUrl: modelApi.baseUrl,
+      apiKey: modelApi.apiKey,
+      model: modelApi.model,
+      enabledFor: modelApi.enabledFor.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean) as ModelApiConfig['enabledFor'],
+      status: modelApi.baseUrl && modelApi.apiKey && modelApi.model ? '待验证' : '未配置',
+    };
+    update({ ...data, modelApis: [item, ...data.modelApis] });
+    setModelApi({ provider: 'OpenAI', name: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', model: '', enabledFor: '内容生成、风险识别、复盘建议' });
+  };
+  const testModelApi = async (id: string) => {
+    const target = data.modelApis.find((item) => item.id === id);
+    if (!target) return;
+    const result = await testModelApiConfig(target, apiToken);
+    update({
+      ...data,
+      modelApis: data.modelApis.map((item) => item.id === id ? {
+        ...item,
+        status: result.status,
+        lastTestAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      } : item),
+      notifications: [
+        makeNotification('大模型 API 测试', `${target.name}：${result.message}`, '系统配置', result.ok ? '提醒' : '预警'),
+        ...data.notifications,
+      ],
+    });
+  };
+  const removeModelApi = (id: string) => {
+    update({ ...data, modelApis: data.modelApis.filter((item) => item.id !== id) });
   };
   const restoreBackup = async (file: File | undefined) => {
     if (!file) return;
@@ -1363,6 +1406,46 @@ function SettingsPage({ data, update, resetData }: { data: AppData; update: (dat
         ))}
       </section>
       <section className="panel wide">
+        <div className="panel-title"><h2>大模型 API 配置</h2><Bot size={18} /></div>
+        <p className="helper">支持 OpenAI 兼容接口。API Key 仅保存在本地数据文件/缓存中，正式部署前建议迁移到服务端密钥管理。</p>
+        <div className="inline-form">
+          <select value={modelApi.provider} onChange={(event) => setModelApi({ ...modelApi, provider: event.target.value as ModelApiConfig['provider'] })}>
+            <option>OpenAI</option>
+            <option>Azure OpenAI</option>
+            <option>通义千问</option>
+            <option>DeepSeek</option>
+            <option>智谱</option>
+            <option>私有模型</option>
+            <option>其他</option>
+          </select>
+          <input value={modelApi.name} onChange={(event) => setModelApi({ ...modelApi, name: event.target.value })} placeholder="配置名称" />
+          <input value={modelApi.baseUrl} onChange={(event) => setModelApi({ ...modelApi, baseUrl: event.target.value })} placeholder="API Base URL，如 https://api.openai.com/v1" />
+          <input value={modelApi.model} onChange={(event) => setModelApi({ ...modelApi, model: event.target.value })} placeholder="模型名称，如 gpt-4.1-mini" />
+          <button onClick={addModelApi}><Plus size={16} />保存配置</button>
+        </div>
+        <div className="inline-form model-form">
+          <input type="password" value={modelApi.apiKey} onChange={(event) => setModelApi({ ...modelApi, apiKey: event.target.value })} placeholder="API Key" />
+          <input value={modelApi.enabledFor} onChange={(event) => setModelApi({ ...modelApi, enabledFor: event.target.value })} placeholder="用途，用顿号分隔：内容生成、风险识别、复盘建议、标题推荐" />
+        </div>
+        <div className="entry-grid">
+          {data.modelApis.length === 0 && <EmptyState title="暂无大模型 API 配置" body="添加配置后，可用于内容生成、风险识别、复盘建议和标题推荐。" />}
+          {data.modelApis.map((item) => (
+            <article key={item.id}>
+              <strong>{item.provider}｜{item.name}</strong>
+              <span>{item.baseUrl} · {item.model}</span>
+              <span>用途：{item.enabledFor.join('、')}</span>
+              <span>密钥：{item.apiKey ? `已配置（${item.apiKey.slice(0, 4)}...）` : '未配置'}</span>
+              <Badge tone={item.status === '已连接' ? 'good' : item.status === '连接失败' ? 'danger' : 'warn'}>{item.status}</Badge>
+              {item.lastTestAt && <span>最近测试：{item.lastTestAt}</span>}
+              <div className="card-actions-inline">
+                <button className="ghost" onClick={() => void testModelApi(item.id)}>测试连接</button>
+                <button className="ghost" onClick={() => removeModelApi(item.id)}>删除</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="panel wide">
         <div className="panel-title"><h2>审核流程配置</h2><GitBranch size={18} /></div>
         <div className="inline-form">
           <input value={workflow.name} onChange={(event) => setWorkflow({ ...workflow, name: event.target.value })} placeholder="流程名称" />
@@ -1454,7 +1537,7 @@ function renderSection(
     case '复盘报告':
       return <Reports data={data} audit={audit} />;
     case '系统配置':
-      return <SettingsPage data={data} update={update} resetData={resetData} />;
+      return <SettingsPage data={data} update={update} resetData={resetData} apiToken={apiToken} />;
   }
 }
 

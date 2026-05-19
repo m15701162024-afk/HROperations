@@ -146,6 +146,18 @@ export interface IntegrationConfig {
   lastSyncAt?: string;
 }
 
+export interface ModelApiConfig {
+  id: string;
+  provider: 'OpenAI' | 'Azure OpenAI' | '通义千问' | 'DeepSeek' | '智谱' | '私有模型' | '其他';
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  enabledFor: Array<'内容生成' | '风险识别' | '复盘建议' | '标题推荐'>;
+  status: '未配置' | '待验证' | '已连接' | '连接失败';
+  lastTestAt?: string;
+}
+
 export interface LandingPage {
   id: string;
   title: string;
@@ -230,6 +242,7 @@ export interface AppData {
   entries: RecruitmentEntry[];
   beisenResults: BeisenResult[];
   integrations: IntegrationConfig[];
+  modelApis: ModelApiConfig[];
   landingPages: LandingPage[];
   roles: PermissionRole[];
   users: UserProfile[];

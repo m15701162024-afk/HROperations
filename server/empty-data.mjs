@@ -9,6 +9,7 @@ export const emptyData = {
   entries: [],
   beisenResults: [],
   integrations: [],
+  modelApis: [],
   landingPages: [],
   roles: [],
   users: [],

@@ -1,6 +1,6 @@
 import { emptyData } from './data';
 import type { AppData } from './types';
-import type { IntegrationConfig } from './types';
+import type { IntegrationConfig, ModelApiConfig } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
 const DISABLE_API = import.meta.env.MODE === 'test' || import.meta.env.VITE_DISABLE_API === 'true';
@@ -51,6 +51,15 @@ export async function testIntegrationConfig(integration: IntegrationConfig, toke
     statusCode?: number;
     message: string;
   }>(`${API_BASE}/api/integrations/test`, 'POST', token, integration);
+}
+
+export async function testModelApiConfig(config: ModelApiConfig, token?: string) {
+  return await requestJson<{
+    ok: boolean;
+    status: ModelApiConfig['status'];
+    statusCode?: number;
+    message: string;
+  }>(`${API_BASE}/api/model-apis/test`, 'POST', token, config);
 }
 
 class ApiError extends Error {
@@ -109,6 +118,7 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     entries: data.entries ?? [],
     beisenResults: data.beisenResults ?? [],
     integrations: data.integrations ?? [],
+    modelApis: data.modelApis ?? [],
     landingPages: data.landingPages ?? [],
     roles: data.roles ?? [],
     users: data.users ?? [],

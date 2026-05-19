@@ -608,6 +608,16 @@ textarea {
   margin-bottom: 14px;
 }
 
+.inline-form.model-form {
+  grid-template-columns: minmax(220px, 1fr) 2fr;
+}
+
+.card-actions-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .platform-note,
 .risk-box {
   display: flex;

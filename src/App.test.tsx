@@ -45,6 +45,7 @@ describe('招聘运营助手', () => {
       entries: [],
       beisenResults: [],
       integrations: [],
+      modelApis: [],
       landingPages: [],
       roles: [],
       users: [],

@@ -66,6 +66,24 @@ POST /api/integrations/test
 
 使用人后续只需要在页面里填入 API 地址或 Webhook，即可先验证连通性；正式数据同步逻辑可继续基于该连接器层扩展。
 
+## 大模型 API 配置
+
+系统配置页支持维护大模型 API：
+
+- 服务商：OpenAI、Azure OpenAI、通义千问、DeepSeek、智谱、私有模型、其他
+- API Base URL
+- API Key
+- 模型名称
+- 用途：内容生成、风险识别、复盘建议、标题推荐
+
+“测试连接”会调用：
+
+```text
+POST /api/model-apis/test
+```
+
+当前测试逻辑按 OpenAI-compatible `/models` 接口验证连通性。API Key 只保存在本地数据文件或浏览器缓存中，正式部署前建议迁移到服务端密钥管理。
+
 ## 推送流程
 
 如果当前仓库已配置 HRAssistant 远端：
