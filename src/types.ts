@@ -105,6 +105,25 @@ export interface ReportInsight {
   severity: '机会' | '风险' | '建议';
 }
 
+export interface RecruitmentEntry {
+  id: string;
+  platform: Platform;
+  headline: string;
+  destination: '北森岗位页' | '公司官网招聘页' | '自建落地页';
+  url: string;
+  trackingCode: string;
+  clicks: number;
+  status: '启用' | '停用';
+}
+
+export interface AuditLog {
+  id: string;
+  actor: string;
+  action: string;
+  target: string;
+  createdAt: string;
+}
+
 export interface AppData {
   jobs: JobNeed[];
   accounts: PlatformAccount[];
@@ -112,4 +131,6 @@ export interface AppData {
   assets: AssetItem[];
   goals: Goal[];
   reports: ReportInsight[];
+  entries: RecruitmentEntry[];
+  auditLogs: AuditLog[];
 }

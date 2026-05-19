@@ -26,7 +26,8 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { generateContent, nextStatus, platformPositioning, platforms, scanRisks, seedData } from './data';
-import type { AppData, ContentTask, Platform } from './types';
+import type { AppData, AssetItem, ContentTask, JobNeed, Platform, RecruitmentEntry } from './types';
+import { buildReportMarkdown, downloadText, exportJson, parseJobCsv, toCsv } from './utils';
 
 type Section =
   | '工作台'
@@ -54,7 +55,14 @@ const contentTypes = ['岗位种草', '技术团队内容', '员工故事', '公
 function useAppData() {
   const [data, setData] = useState<AppData>(() => {
     const stored = localStorage.getItem('hr-assistant-data');
-    return stored ? (JSON.parse(stored) as AppData) : seedData;
+    if (!stored) return seedData;
+    const parsed = JSON.parse(stored) as Partial<AppData>;
+    return {
+      ...seedData,
+      ...parsed,
+      entries: parsed.entries ?? seedData.entries,
+      auditLogs: parsed.auditLogs ?? seedData.auditLogs,
+    };
   });
 
   const update = (next: AppData) => {
@@ -62,7 +70,24 @@ function useAppData() {
     localStorage.setItem('hr-assistant-data', JSON.stringify(next));
   };
 
-  return { data, update };
+  const audit = (action: string, target: string, nextData?: AppData) => {
+    const base = nextData ?? data;
+    update({
+      ...base,
+      auditLogs: [
+        {
+          id: `log-${Date.now()}`,
+          actor: '当前用户',
+          action,
+          target,
+          createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+        },
+        ...base.auditLogs,
+      ],
+    });
+  };
+
+  return { data, update, audit };
 }
 
 function StatCard({ label, value, note, icon: Icon }: { label: string; value: string | number; note: string; icon: React.ComponentType<{ size?: number }> }) {
@@ -173,7 +198,58 @@ function Dashboard({ data }: { data: AppData }) {
   );
 }
 
-function Jobs({ data }: { data: AppData }) {
+const emptyJob: Omit<JobNeed, 'id' | 'sellingPoints' | 'targetPlatforms' | 'status'> & { sellingPoints: string; targetPlatforms: string } = {
+  title: '',
+  family: '后端',
+  city: '杭州',
+  level: '中高级',
+  type: '社招',
+  jd: '',
+  persona: '',
+  sellingPoints: '',
+  targetPlatforms: '小红书、脉脉',
+  beisenUrl: '',
+  websiteUrl: '',
+};
+
+function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+  const [form, setForm] = useState(emptyJob);
+  const [csv, setCsv] = useState('');
+
+  const createJob = () => {
+    if (!form.title.trim()) return;
+    const job: JobNeed = {
+      ...form,
+      id: `job-${Date.now()}`,
+      sellingPoints: form.sellingPoints.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean),
+      targetPlatforms: form.targetPlatforms.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean) as Platform[],
+      status: '招聘中',
+    };
+    audit('创建岗位需求', job.title, { ...data, jobs: [job, ...data.jobs] });
+    setForm(emptyJob);
+  };
+
+  const importJobs = () => {
+    const jobs = parseJobCsv(csv);
+    if (jobs.length === 0) return;
+    audit('导入岗位需求', `${jobs.length} 条`, { ...data, jobs: [...jobs, ...data.jobs] });
+    setCsv('');
+  };
+
+  const exportJobs = () => {
+    downloadText('招聘需求.csv', toCsv(data.jobs.map((job) => ({
+      title: job.title,
+      family: job.family,
+      city: job.city,
+      level: job.level,
+      type: job.type,
+      targetPlatforms: job.targetPlatforms.join('、'),
+      status: job.status,
+      beisenUrl: job.beisenUrl,
+      websiteUrl: job.websiteUrl,
+    }))), 'text/csv;charset=utf-8');
+  };
+
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -181,7 +257,25 @@ function Jobs({ data }: { data: AppData }) {
           <h1>招聘需求</h1>
           <p>手动创建、表格导入与后续北森同步的岗位需求源头。</p>
         </div>
-        <button><Plus size={16} />新增岗位</button>
+        <button onClick={exportJobs}><FileText size={16} />导出岗位CSV</button>
+      </section>
+      <section className="panel">
+        <div className="panel-title"><h2>新增岗位需求</h2><Plus size={18} /></div>
+        <div className="form-grid">
+          <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="岗位名称" />
+          <input value={form.family} onChange={(event) => setForm({ ...form, family: event.target.value })} placeholder="岗位族群" />
+          <input value={form.level} onChange={(event) => setForm({ ...form, level: event.target.value })} placeholder="岗位层级" />
+          <input value={form.targetPlatforms} onChange={(event) => setForm({ ...form, targetPlatforms: event.target.value })} placeholder="目标平台，用顿号分隔" />
+          <textarea value={form.jd} onChange={(event) => setForm({ ...form, jd: event.target.value })} placeholder="JD / 岗位描述" />
+          <textarea value={form.sellingPoints} onChange={(event) => setForm({ ...form, sellingPoints: event.target.value })} placeholder="岗位卖点，用顿号分隔" />
+        </div>
+        <button className="full" onClick={createJob}><Plus size={16} />保存岗位</button>
+      </section>
+      <section className="panel">
+        <div className="panel-title"><h2>CSV 导入</h2><Database size={18} /></div>
+        <p className="helper">支持字段：title/family/city/level/type/jd/persona/sellingPoints/targetPlatforms，或中文表头。</p>
+        <textarea className="small-textarea" value={csv} onChange={(event) => setCsv(event.target.value)} placeholder="title,family,city&#10;高级前端,前端,杭州" />
+        <button className="full" onClick={importJobs}><Database size={16} />解析并导入</button>
       </section>
       <section className="panel wide">
         <table>
@@ -216,7 +310,7 @@ function Jobs({ data }: { data: AppData }) {
   );
 }
 
-function ContentOps({ data, update }: { data: AppData; update: (data: AppData) => void }) {
+function ContentOps({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
   const [jobId, setJobId] = useState(data.jobs[0]?.id ?? '');
   const [platform, setPlatform] = useState<Platform>('小红书');
   const [draft, setDraft] = useState('');
@@ -251,14 +345,34 @@ function ContentOps({ data, update }: { data: AppData; update: (data: AppData) =
       risks: scanned.risks,
       metrics: { views: 0, likes: 0, comments: 0, saves: 0, shares: 0, clicks: 0 },
     };
-    update({ ...data, contents: [newTask, ...data.contents] });
+    audit('创建内容任务', newTask.title, { ...data, contents: [newTask, ...data.contents] });
   };
 
   const advance = (id: string) => {
-    update({
+    const target = data.contents.find((item) => item.id === id);
+    audit('推进审核状态', target?.title ?? id, {
       ...data,
       contents: data.contents.map((item) => (item.id === id ? { ...item, status: nextStatus(item.status) } : item)),
     });
+  };
+
+  const syncMetrics = () => {
+    const next = {
+      ...data,
+      contents: data.contents.map((item) => ({
+        ...item,
+        status: item.status === '已发布' ? '数据回收中' : item.status,
+        metrics: {
+          views: item.metrics.views + Math.round(Math.random() * 900),
+          likes: item.metrics.likes + Math.round(Math.random() * 80),
+          comments: item.metrics.comments + Math.round(Math.random() * 12),
+          saves: item.metrics.saves + Math.round(Math.random() * 45),
+          shares: item.metrics.shares + Math.round(Math.random() * 20),
+          clicks: item.metrics.clicks + Math.round(Math.random() * 24),
+        },
+      })),
+    };
+    audit('同步平台数据', '内容指标', next);
   };
 
   return (
@@ -268,7 +382,10 @@ function ContentOps({ data, update }: { data: AppData; update: (data: AppData) =
           <h1>内容运营</h1>
           <p>AI 多平台生成、风险识别、审核状态流转、排期发布一体管理。</p>
         </div>
-        <div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索内容、平台、类型" /></div>
+        <div className="toolbar-actions">
+          <button onClick={syncMetrics}><RefreshCw size={16} />模拟同步数据</button>
+          <div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索内容、平台、类型" /></div>
+        </div>
       </section>
 
       <section className="panel generator">
@@ -333,7 +450,23 @@ function ContentOps({ data, update }: { data: AppData; update: (data: AppData) =
   );
 }
 
-function Assets({ data }: { data: AppData }) {
+function Assets({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+  const [asset, setAsset] = useState({ name: '', category: '公司/业务介绍', owner: '招聘专员', scope: '招聘内容可用' });
+  const createAsset = () => {
+    if (!asset.name.trim()) return;
+    const item: AssetItem = {
+      id: `asset-${Date.now()}`,
+      ...asset,
+      platforms: ['小红书', '脉脉', '公众号'],
+      riskLevel: asset.category.includes('员工') || asset.category.includes('技术') ? '高' : '中',
+      authorization: '待审核',
+      expiresAt: '2026-12-31',
+      usageCount: 0,
+    };
+    audit('新增素材', item.name, { ...data, assets: [item, ...data.assets] });
+    setAsset({ name: '', category: '公司/业务介绍', owner: '招聘专员', scope: '招聘内容可用' });
+  };
+
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -341,7 +474,17 @@ function Assets({ data }: { data: AppData }) {
           <h1>素材资产</h1>
           <p>素材库、采集表、模板库和案例库统一沉淀，并保留授权与使用记录。</p>
         </div>
-        <button><Plus size={16} />上传素材</button>
+        <button onClick={() => exportJson('素材资产.json', data.assets)}><FileText size={16} />导出素材</button>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>新增素材记录</h2><Plus size={18} /></div>
+        <div className="inline-form">
+          <input value={asset.name} onChange={(event) => setAsset({ ...asset, name: event.target.value })} placeholder="素材名称" />
+          <input value={asset.category} onChange={(event) => setAsset({ ...asset, category: event.target.value })} placeholder="素材类型" />
+          <input value={asset.owner} onChange={(event) => setAsset({ ...asset, owner: event.target.value })} placeholder="负责人" />
+          <input value={asset.scope} onChange={(event) => setAsset({ ...asset, scope: event.target.value })} placeholder="使用范围" />
+          <button onClick={createAsset}><Plus size={16} />保存</button>
+        </div>
       </section>
       <section className="panel">
         <div className="panel-title"><h2>素材库</h2><Database size={18} /></div>
@@ -374,7 +517,21 @@ function Assets({ data }: { data: AppData }) {
   );
 }
 
-function Accounts({ data }: { data: AppData }) {
+function Accounts({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+  const [entry, setEntry] = useState({ platform: '小红书' as Platform, headline: '', url: '', destination: '北森岗位页' as RecruitmentEntry['destination'] });
+  const createEntry = () => {
+    if (!entry.headline.trim() || !entry.url.trim()) return;
+    const item: RecruitmentEntry = {
+      id: `entry-${Date.now()}`,
+      ...entry,
+      trackingCode: `${entry.platform}-${Date.now()}`,
+      clicks: 0,
+      status: '启用',
+    };
+    audit('配置招聘入口', item.headline, { ...data, entries: [item, ...data.entries] });
+    setEntry({ platform: '小红书', headline: '', url: '', destination: '北森岗位页' });
+  };
+
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -382,7 +539,7 @@ function Accounts({ data }: { data: AppData }) {
           <h1>账号与平台</h1>
           <p>管理平台账号定位、授权状态、发布权限、主页招聘入口和数据归属。</p>
         </div>
-        <button><Link size={16} />配置招聘入口</button>
+        <button onClick={() => exportJson('平台账号与招聘入口.json', { accounts: data.accounts, entries: data.entries })}><FileText size={16} />导出配置</button>
       </section>
       <section className="panel wide">
         <table>
@@ -412,12 +569,26 @@ function Accounts({ data }: { data: AppData }) {
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>平台主页招聘入口</h2><Link size={18} /></div>
+        <div className="inline-form">
+          <select value={entry.platform} onChange={(event) => setEntry({ ...entry, platform: event.target.value as Platform })}>
+            {platforms.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <input value={entry.headline} onChange={(event) => setEntry({ ...entry, headline: event.target.value })} placeholder="入口名称" />
+          <input value={entry.url} onChange={(event) => setEntry({ ...entry, url: event.target.value })} placeholder="北森/官网链接" />
+          <select value={entry.destination} onChange={(event) => setEntry({ ...entry, destination: event.target.value as RecruitmentEntry['destination'] })}>
+            <option>北森岗位页</option>
+            <option>公司官网招聘页</option>
+            <option>自建落地页</option>
+          </select>
+          <button onClick={createEntry}><Plus size={16} />新增入口</button>
+        </div>
         <div className="entry-grid">
-          {platforms.map((item) => (
-            <article key={item}>
-              <strong>{item}</strong>
-              <span>{platformPositioning[item]}</span>
-              <Badge tone="info">北森/官网归因链接</Badge>
+          {data.entries.map((item) => (
+            <article key={item.id}>
+              <strong>{item.platform}｜{item.headline}</strong>
+              <span>{item.destination} · {item.trackingCode}</span>
+              <span>{item.url}</span>
+              <Badge tone="info">{item.clicks} 点击</Badge>
             </article>
           ))}
         </div>
@@ -487,7 +658,7 @@ function Reports({ data }: { data: AppData }) {
           <h1>复盘报告</h1>
           <p>自动识别高低表现内容，生成周报/月报、行动建议和案例沉淀。</p>
         </div>
-        <button><FileText size={16} />生成周报</button>
+        <button onClick={() => downloadText('招聘新媒体运营周报.md', buildReportMarkdown(data), 'text/markdown;charset=utf-8')}><FileText size={16} />下载周报</button>
       </section>
       <section className="panel wide">
         <div className="report-header">
@@ -518,7 +689,7 @@ function Reports({ data }: { data: AppData }) {
   );
 }
 
-function SettingsPage() {
+function SettingsPage({ data }: { data: AppData }) {
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -551,34 +722,57 @@ function SettingsPage() {
           ))}
         </div>
       </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>操作日志</h2><ShieldCheck size={18} /></div>
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>操作人</th>
+              <th>动作</th>
+              <th>对象</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.auditLogs.slice(0, 12).map((log) => (
+              <tr key={log.id}>
+                <td>{log.createdAt}</td>
+                <td>{log.actor}</td>
+                <td>{log.action}</td>
+                <td>{log.target}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
     </div>
   );
 }
 
-function renderSection(section: Section, data: AppData, update: (data: AppData) => void) {
+function renderSection(section: Section, data: AppData, update: (data: AppData) => void, audit: (action: string, target: string, nextData?: AppData) => void) {
   switch (section) {
     case '工作台':
       return <Dashboard data={data} />;
     case '招聘需求':
-      return <Jobs data={data} />;
+      return <Jobs data={data} audit={audit} />;
     case '内容运营':
-      return <ContentOps data={data} update={update} />;
+      return <ContentOps data={data} audit={audit} />;
     case '素材资产':
-      return <Assets data={data} />;
+      return <Assets data={data} audit={audit} />;
     case '账号与平台':
-      return <Accounts data={data} />;
+      return <Accounts data={data} audit={audit} />;
     case '数据分析':
       return <Analytics data={data} />;
     case '复盘报告':
       return <Reports data={data} />;
     case '系统配置':
-      return <SettingsPage />;
+      return <SettingsPage data={data} />;
   }
 }
 
 export function App() {
   const [section, setSection] = useState<Section>('工作台');
-  const { data, update } = useAppData();
+  const { data, update, audit } = useAppData();
 
   return (
     <div className="app-shell">
@@ -601,7 +795,7 @@ export function App() {
         </div>
       </aside>
       <main>
-        {renderSection(section, data, update)}
+        {renderSection(section, data, update, audit)}
       </main>
     </div>
   );

@@ -62,6 +62,17 @@ button.full {
   width: 100%;
 }
 
+input,
+select,
+textarea {
+  min-height: 38px;
+  padding: 0 10px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
 button:hover {
   filter: brightness(0.96);
 }
@@ -409,6 +420,14 @@ td span {
   background: #fff;
 }
 
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .search input {
   width: 100%;
   min-height: 38px;
@@ -428,17 +447,8 @@ label {
   font-size: 13px;
 }
 
-select,
 textarea {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #fff;
-}
-
-select {
-  min-height: 38px;
-  padding: 0 10px;
 }
 
 textarea {
@@ -447,6 +457,35 @@ textarea {
   padding: 12px;
   resize: vertical;
   line-height: 1.7;
+}
+
+.small-textarea {
+  min-height: 132px;
+}
+
+.helper {
+  margin: 0 0 10px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.form-grid textarea {
+  min-height: 110px;
+  margin: 0;
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr)) auto;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .platform-note,
@@ -666,6 +705,16 @@ textarea {
   .toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .toolbar-actions,
+  .inline-form,
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar-actions {
+    align-items: stretch;
   }
 
   table {

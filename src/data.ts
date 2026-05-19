@@ -270,6 +270,37 @@ export const seedData: AppData = {
       severity: '建议',
     },
   ],
+  entries: [
+    {
+      id: 'entry-1',
+      platform: '小红书',
+      headline: '主页置顶招聘入口',
+      destination: '北森岗位页',
+      url: 'https://example.beisen.com/jobs?utm_source=xiaohongshu',
+      trackingCode: 'xhshu-home-202605',
+      clicks: 188,
+      status: '启用',
+    },
+    {
+      id: 'entry-2',
+      platform: '脉脉',
+      headline: '中高端技术岗位集合入口',
+      destination: '公司官网招聘页',
+      url: 'https://example.com/careers?utm_source=maimai',
+      trackingCode: 'maimai-tech-202605',
+      clicks: 96,
+      status: '启用',
+    },
+  ],
+  auditLogs: [
+    {
+      id: 'log-1',
+      actor: '系统',
+      action: '初始化种子数据',
+      target: '招聘运营助手',
+      createdAt: '2026-05-19 11:00',
+    },
+  ],
 };
 
 export function generateContent(job: JobNeed, platform: Platform) {
