@@ -26,7 +26,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, saveRemoteData, testIntegrationConfig, testModelApiConfig } from './api';
+import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, runModelTask, saveRemoteData, testIntegrationConfig, testModelApiConfig } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
 import type { AccountType, AppData, AssetItem, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
@@ -528,25 +528,63 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
   );
 }
 
-function ContentOps({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+function findModelApi(data: AppData, purpose: ModelApiConfig['enabledFor'][number]) {
+  return data.modelApis.find((item) => item.enabledFor.includes(purpose) && item.status === '已连接')
+    ?? data.modelApis.find((item) => item.enabledFor.includes(purpose));
+}
+
+function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
   const [jobId, setJobId] = useState(data.jobs[0]?.id ?? '');
   const [platform, setPlatform] = useState<Platform>('小红书');
   const [draft, setDraft] = useState('');
   const [query, setQuery] = useState('');
+  const [aiStatus, setAiStatus] = useState('');
 
   const selectedJob = data.jobs.find((job) => job.id === jobId) ?? data.jobs[0];
   const risk = scanRisks(draft);
   const filtered = data.contents.filter((item) => item.title.includes(query) || item.platform.includes(query) || item.type.includes(query));
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!selectedJob) return;
+    const model = findModelApi(data, '内容生成');
+    if (model) {
+      setAiStatus('正在调用大模型生成内容...');
+      const result = await runModelTask(model, '内容生成', { job: selectedJob, platform }, apiToken);
+      if (result.ok && result.text) {
+        setDraft(result.text);
+        setAiStatus(`已使用 ${model.name} 生成`);
+        return;
+      }
+      setAiStatus(`模型调用失败，已回退本地模板：${result.message ?? '未知错误'}`);
+    } else {
+      setAiStatus('未配置内容生成模型，使用本地模板');
+    }
     setDraft(generateContent(selectedJob, platform));
   };
 
-  const handleCreateTask = () => {
+  const handleCreateTask = async () => {
     if (!selectedJob || !draft.trim()) return;
     const accountId = data.accounts.find((acc) => acc.platform === platform)?.id ?? data.accounts[0]?.id ?? '';
-    const scanned = scanRisks(draft);
+    let scanned = scanRisks(draft);
+    const riskModel = findModelApi(data, '风险识别');
+    if (riskModel) {
+      setAiStatus('正在调用大模型识别风险...');
+      const result = await runModelTask(riskModel, '风险识别', { text: draft }, apiToken);
+      if (result.ok && result.text) {
+        try {
+          const parsed = JSON.parse(result.text) as { level?: '低' | '中' | '高'; risks?: string[] };
+          scanned = {
+            level: parsed.level === '低' || parsed.level === '中' || parsed.level === '高' ? parsed.level : scanned.level,
+            risks: Array.isArray(parsed.risks) ? parsed.risks : scanned.risks,
+          };
+          setAiStatus(`已使用 ${riskModel.name} 识别风险`);
+        } catch {
+          setAiStatus('模型风险识别返回格式不可解析，已回退本地规则');
+        }
+      } else {
+        setAiStatus(`模型风险识别失败，已回退本地规则：${result.message ?? '未知错误'}`);
+      }
+    }
     const newTask: ContentTask = {
       id: `ct-${Date.now()}`,
       title: `${platform}｜${selectedJob.title}内容初稿`,
@@ -635,14 +673,15 @@ function ContentOps({ data, audit }: { data: AppData; audit: (action: string, ta
           </select>
         </label>
         <div className="platform-note">{platformPositioning[platform]}</div>
-        <button onClick={handleGenerate} disabled={data.jobs.length === 0}><Bot size={16} />生成平台内容</button>
+        <button onClick={() => void handleGenerate()} disabled={data.jobs.length === 0}><Bot size={16} />生成平台内容</button>
+        {aiStatus && <div className="platform-note"><Bot size={16} />{aiStatus}</div>}
         <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="生成或编辑内容初稿" />
         <div className="risk-box">
           <ShieldCheck size={16} />
           <span>风险等级：<b>{risk.level}</b></span>
           {risk.risks.length > 0 && <small>{risk.risks.join('；')}</small>}
         </div>
-        <button className="full" onClick={handleCreateTask}><Plus size={16} />保存为内容任务</button>
+        <button className="full" onClick={() => void handleCreateTask()}><Plus size={16} />保存为内容任务</button>
       </section>
 
       <section className="panel wide">
@@ -1138,8 +1177,10 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   );
 }
 
-function Reports({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
-  const recommendations = buildRecommendations(data);
+function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
+  const [aiRecommendations, setAiRecommendations] = useState<string[]>([]);
+  const [aiStatus, setAiStatus] = useState('');
+  const recommendations = aiRecommendations.length > 0 ? aiRecommendations : buildRecommendations(data);
   const generatedReports = data.reports.length > 0
     ? data.reports
     : data.contents.length > 0
@@ -1151,13 +1192,28 @@ function Reports({ data, audit }: { data: AppData; audit: (action: string, targe
           severity: '建议' as const,
         }]
       : [];
-  const generateReport = () => {
+  const generateReport = async () => {
+    let reportRecommendations = recommendations;
+    const model = findModelApi(data, '复盘建议');
+    if (model) {
+      setAiStatus('正在调用大模型生成复盘建议...');
+      const result = await runModelTask(model, '复盘建议', { data }, apiToken);
+      if (result.ok && result.text) {
+        reportRecommendations = result.text.split(/\n+/).map((item) => item.replace(/^[-\d.、\s]+/, '').trim()).filter(Boolean);
+        setAiRecommendations(reportRecommendations);
+        setAiStatus(`已使用 ${model.name} 生成复盘建议`);
+      } else {
+        setAiStatus(`模型调用失败，已回退本地建议：${result.message ?? '未知错误'}`);
+      }
+    } else {
+      setAiStatus('未配置复盘建议模型，使用本地规则');
+    }
     const contentCount = data.contents.length;
     const clickCount = data.contents.reduce((sum, item) => sum + item.metrics.clicks, 0);
     const report = {
       id: `rp-${Date.now()}`,
       title: `自动复盘：${contentCount} 条内容 / ${clickCount} 次点击`,
-      body: recommendations.join(' '),
+      body: reportRecommendations.join(' '),
       action: '请根据建议调整下周期内容排期，并补齐缺失的真实平台指标和北森结果。',
       severity: '建议' as const,
     };
@@ -1171,12 +1227,13 @@ function Reports({ data, audit }: { data: AppData; audit: (action: string, targe
           <p>自动识别高低表现内容，生成周报/月报、行动建议和案例沉淀。</p>
         </div>
         <div className="toolbar-actions">
-          <button onClick={generateReport}><Sparkles size={16} />生成复盘</button>
+          <button onClick={() => void generateReport()}><Sparkles size={16} />生成复盘</button>
           <button onClick={() => downloadText('招聘新媒体运营周报.md', buildReportMarkdown(data), 'text/markdown;charset=utf-8')}><FileText size={16} />下载周报</button>
         </div>
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>AI 运营策略建议</h2><Bot size={18} /></div>
+        {aiStatus && <div className="platform-note"><Bot size={16} />{aiStatus}</div>}
         <div className="template-grid">
           {recommendations.map((item) => <div className="template-chip" key={item}>策略建议<small>{item}</small></div>)}
         </div>
@@ -1527,7 +1584,7 @@ function renderSection(
     case '招聘需求':
       return <Jobs data={data} audit={audit} />;
     case '内容运营':
-      return <ContentOps data={data} audit={audit} />;
+      return <ContentOps data={data} audit={audit} apiToken={apiToken} />;
     case '素材资产':
       return <Assets data={data} audit={audit} />;
     case '账号与平台':
@@ -1535,7 +1592,7 @@ function renderSection(
     case '数据分析':
       return <Analytics data={data} audit={audit} />;
     case '复盘报告':
-      return <Reports data={data} audit={audit} />;
+      return <Reports data={data} audit={audit} apiToken={apiToken} />;
     case '系统配置':
       return <SettingsPage data={data} update={update} resetData={resetData} apiToken={apiToken} />;
   }

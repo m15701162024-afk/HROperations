@@ -84,6 +84,14 @@ POST /api/model-apis/test
 
 当前测试逻辑按 OpenAI-compatible `/models` 接口验证连通性。API Key 只保存在本地数据文件或浏览器缓存中，正式部署前建议迁移到服务端密钥管理。
 
+内容生成、风险识别和复盘建议会优先使用已配置的大模型 API：
+
+- 内容生成调用 `POST /api/model-apis/run`，任务类型为 `内容生成`
+- 风险识别调用 `POST /api/model-apis/run`，任务类型为 `风险识别`
+- 复盘建议调用 `POST /api/model-apis/run`，任务类型为 `复盘建议`
+
+如果没有可用模型配置、接口调用失败或返回格式异常，系统会自动回退到本地模板和规则逻辑，保证基础流程不被外部模型影响。
+
 ## 推送流程
 
 如果当前仓库已配置 HRAssistant 远端：

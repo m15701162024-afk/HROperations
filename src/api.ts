@@ -62,6 +62,19 @@ export async function testModelApiConfig(config: ModelApiConfig, token?: string)
   }>(`${API_BASE}/api/model-apis/test`, 'POST', token, config);
 }
 
+export async function runModelTask(
+  config: ModelApiConfig,
+  task: '内容生成' | '风险识别' | '复盘建议',
+  input: unknown,
+  token?: string,
+) {
+  return await requestJson<{ ok: boolean; text?: string; message?: string }>(`${API_BASE}/api/model-apis/run`, 'POST', token, {
+    config,
+    task,
+    input,
+  });
+}
+
 class ApiError extends Error {
   constructor(public status: number) {
     super(`HTTP ${status}`);

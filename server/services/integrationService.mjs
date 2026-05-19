@@ -59,3 +59,56 @@ export async function testModelApi(config) {
     };
   }
 }
+
+export async function runModelApi(config, task, input) {
+  if (!config?.baseUrl || !config?.apiKey || !config?.model) {
+    return { ok: false, message: '模型 API 未配置完整' };
+  }
+
+  const prompt = buildPrompt(task, input);
+  const base = config.baseUrl.replace(/\/$/, '');
+  const url = `${base}/chat/completions`;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: 'system', content: '你是招聘新媒体运营助手，输出中文，直接给出可用结果。' },
+          { role: 'user', content: prompt },
+        ],
+        temperature: task === '风险识别' ? 0.1 : 0.7,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!response.ok) {
+      return { ok: false, message: `模型调用失败：HTTP ${response.status}` };
+    }
+    const payload = await response.json();
+    const text = payload?.choices?.[0]?.message?.content ?? '';
+    return text ? { ok: true, text } : { ok: false, message: '模型未返回内容' };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : '模型调用失败' };
+  }
+}
+
+function buildPrompt(task, input) {
+  if (task === '内容生成') {
+    return `请根据以下岗位和平台生成招聘新媒体内容初稿。\n\n平台：${input.platform}\n岗位：${input.job?.title}\n岗位族群：${input.job?.family}\n层级：${input.job?.level}\nJD：${input.job?.jd}\n候选人画像：${input.job?.persona}\n岗位卖点：${input.job?.sellingPoints?.join('、')}\n\n要求：包含标题、正文、标签、CTA，避免夸大承诺。`;
+  }
+  if (task === '风险识别') {
+    return `请识别以下招聘内容中的合规风险，输出 JSON，格式为 {"level":"低|中|高","risks":["风险1"],"suggestion":"修改建议"}。\n\n内容：${input.text}`;
+  }
+  if (task === '复盘建议') {
+    return `请根据以下招聘运营数据生成复盘建议，输出 3-5 条行动建议。\n\n${JSON.stringify(input.data, null, 2)}`;
+  }
+  return JSON.stringify(input);
+}
