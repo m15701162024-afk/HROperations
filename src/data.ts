@@ -1,0 +1,308 @@
+import type { AppData, ContentTask, JobNeed, Platform } from './types';
+
+export const platforms: Platform[] = ['小红书', '脉脉', 'B站', '公众号', '抖音', '知乎', '技术社区'];
+
+export const platformPositioning: Record<Platform, string> = {
+  小红书: '岗位种草、职场氛围、校招内容',
+  脉脉: '中高端人才、职场话题、技术/行业观点',
+  B站: '技术分享、团队访谈、雇主品牌视频',
+  公众号: '长文、公司介绍、招聘专题',
+  抖音: '短视频曝光、办公室/员工故事',
+  知乎: '专业问答、行业观点',
+  技术社区: '技术文章、开源/实践分享',
+};
+
+export const statusFlow = [
+  '草稿',
+  'AI已生成',
+  '待专业补充',
+  '待专业审核',
+  '待品牌合规审核',
+  '待平台适配',
+  '待发布',
+  '已发布',
+  '数据回收中',
+  '已复盘',
+  '已归档',
+] as const;
+
+export const riskRules = [
+  '薪酬、奖金、股票、福利承诺',
+  '公司战略、业务数据、客户信息',
+  '技术架构、项目细节、算法模型、系统数据',
+  '员工个人经历、照片、评价',
+  '竞品对比、行业评论、负面舆情回应',
+  '加班、管理风格、组织文化敏感表达',
+  '校招承诺、转正、培养机制',
+  '歧视性招聘条件、虚假宣传',
+];
+
+export const seedData: AppData = {
+  jobs: [
+    {
+      id: 'job-1',
+      title: '资深自动驾驶云平台开发 Java 方向',
+      family: '后端',
+      city: '杭州',
+      level: '高级/专家',
+      type: '社招',
+      jd: '负责自动驾驶云平台服务架构设计、任务调度、数据链路和稳定性建设，要求具备 Java、分布式系统、云原生经验。',
+      persona: '5-10 年后端工程师，关注技术挑战、业务前景、团队稳定性和成长空间。',
+      sellingPoints: ['具身智能赛道', '复杂云平台工程挑战', '技术负责人直接参与', '团队氛围开放'],
+      targetPlatforms: ['脉脉', '知乎', '技术社区', '公众号'],
+      status: '招聘中',
+      beisenUrl: 'https://example.beisen.com/jobs/java-cloud',
+      websiteUrl: 'https://example.com/careers/java-cloud',
+    },
+    {
+      id: 'job-2',
+      title: '具身智能 VLA 研究实习生',
+      family: '算法',
+      city: '杭州',
+      level: '实习/校招',
+      type: '实习',
+      jd: '参与 VLA 模型训练、数据构建和机器人任务泛化实验，要求机器学习、机器人或多模态方向基础扎实。',
+      persona: '优秀应届生或研究型实习生，关注导师质量、成长速度、技术视野和转正机会。',
+      sellingPoints: ['前沿研究方向', '真实机器人场景', '技术导师带教', '校招生友好'],
+      targetPlatforms: ['小红书', 'B站', '公众号'],
+      status: '招聘中',
+      beisenUrl: 'https://example.beisen.com/jobs/vla-intern',
+      websiteUrl: 'https://example.com/careers/vla-intern',
+    },
+    {
+      id: 'job-3',
+      title: '高级产品运营经理',
+      family: '职能',
+      city: '杭州',
+      level: '中高级',
+      type: '职能',
+      jd: '负责招聘运营工具、人才增长和雇主品牌相关项目推进，具备跨部门协同和数据分析能力。',
+      persona: '2-8 年运营或产品运营背景，关注平台稳定性、组织空间、管理风格和业务增长。',
+      sellingPoints: ['业务增长快', '跨团队影响力', '机制建设空间', '工作节奏健康'],
+      targetPlatforms: ['小红书', '脉脉', '公众号'],
+      status: '招聘中',
+      beisenUrl: 'https://example.beisen.com/jobs/product-ops',
+      websiteUrl: 'https://example.com/careers/product-ops',
+    },
+  ],
+  accounts: [
+    {
+      id: 'acc-1',
+      platform: '小红书',
+      name: '有鹿招聘研究所',
+      type: '招聘专用账号',
+      positioning: '岗位种草、杭州职场氛围、校招答疑',
+      owner: '招聘专员A',
+      publishingRoles: ['招聘专员', '新媒体运营'],
+      reviewRule: '岗位种草内容走 HR 主管审核，高风险进入合规审核',
+      attribution: '招聘团队',
+      authStatus: '已授权',
+      status: '启用',
+    },
+    {
+      id: 'acc-2',
+      platform: '脉脉',
+      name: '技术招聘伙伴',
+      type: 'HR个人IP账号',
+      positioning: '中高端人才沟通、技术岗位机会、行业观点',
+      owner: '招聘主管',
+      publishingRoles: ['招聘主管'],
+      reviewRule: '观点型内容发布前品牌合规审核',
+      attribution: '中高端招聘',
+      authStatus: '未授权',
+      status: '启用',
+    },
+    {
+      id: 'acc-3',
+      platform: 'B站',
+      name: '有鹿技术团队',
+      type: '技术负责人账号',
+      positioning: '技术分享、团队访谈、雇主品牌视频',
+      owner: '技术负责人',
+      publishingRoles: ['新媒体运营', '技术负责人'],
+      reviewRule: '技术内容强制专业审核与品牌审核',
+      attribution: '技术团队',
+      authStatus: '授权过期',
+      status: '启用',
+    },
+  ],
+  contents: [
+    {
+      id: 'ct-1',
+      title: '在杭州做自动驾驶云平台，工程挑战到底在哪？',
+      jobId: 'job-1',
+      platform: '脉脉',
+      accountId: 'acc-2',
+      type: '技术/行业观点',
+      status: '待品牌合规审核',
+      owner: '招聘主管',
+      reviewer: 'HR负责人',
+      dueDate: '2026-05-22',
+      content: '我们正在招聘资深自动驾驶云平台开发，重点不是堆需求，而是解决任务调度、数据链路和云原生稳定性这些真实工程问题。',
+      tags: ['后端', '自动驾驶', '中高端'],
+      riskLevel: '高',
+      risks: ['技术架构、项目细节、算法模型、系统数据'],
+      metrics: { views: 8200, likes: 146, comments: 31, saves: 40, shares: 22, clicks: 96 },
+    },
+    {
+      id: 'ct-2',
+      title: '适合研究型实习生的 VLA 岗位长什么样？',
+      jobId: 'job-2',
+      platform: '小红书',
+      accountId: 'acc-1',
+      type: '校招内容',
+      status: '已发布',
+      owner: '招聘专员A',
+      reviewer: '招聘主管',
+      dueDate: '2026-05-18',
+      publishedAt: '2026-05-18',
+      content: '如果你想把多模态模型放到真实机器人任务里验证，这个杭州实习机会可能适合你。',
+      tags: ['校招', '实习', '算法'],
+      riskLevel: '中',
+      risks: ['校招承诺、转正、培养机制'],
+      metrics: { views: 14600, likes: 420, comments: 68, saves: 512, shares: 58, clicks: 188 },
+    },
+    {
+      id: 'ct-3',
+      title: '一条职能岗内容如何讲清业务增长和组织空间',
+      jobId: 'job-3',
+      platform: '公众号',
+      accountId: 'acc-1',
+      type: '公司/业务介绍',
+      status: '待平台适配',
+      owner: '招聘专员B',
+      reviewer: 'HR负责人',
+      dueDate: '2026-05-24',
+      content: '招聘运营岗位不只是执行发布，而是把渠道、内容、数据和业务需求串成一个增长系统。',
+      tags: ['职能', '运营', '雇主品牌'],
+      riskLevel: '低',
+      risks: [],
+      metrics: { views: 3200, likes: 52, comments: 9, saves: 28, shares: 11, clicks: 34 },
+    },
+  ],
+  assets: [
+    {
+      id: 'asset-1',
+      name: '公司介绍与业务赛道说明',
+      category: '公司/业务介绍',
+      owner: 'HR负责人',
+      scope: '全平台可用',
+      platforms: ['小红书', '脉脉', '公众号', 'B站'],
+      riskLevel: '中',
+      authorization: '内部审核通过',
+      expiresAt: '2026-12-31',
+      usageCount: 9,
+    },
+    {
+      id: 'asset-2',
+      name: '研发团队访谈照片',
+      category: '员工照片/访谈',
+      owner: '新媒体运营',
+      scope: '公众号、B站可用',
+      platforms: ['公众号', 'B站'],
+      riskLevel: '高',
+      authorization: '肖像授权已签署',
+      expiresAt: '2026-09-30',
+      usageCount: 3,
+    },
+    {
+      id: 'asset-3',
+      name: '面试流程与 FAQ',
+      category: '招聘FAQ',
+      owner: '招聘专员A',
+      scope: '招聘内容可用',
+      platforms: ['小红书', '脉脉', '公众号'],
+      riskLevel: '低',
+      authorization: 'HR确认',
+      expiresAt: '2027-01-31',
+      usageCount: 14,
+    },
+  ],
+  goals: [
+    {
+      id: 'goal-1',
+      title: '小红书招聘专用账号月度种草目标',
+      dimension: '平台+账号+内容类型',
+      target: 12,
+      current: 7,
+      metric: '发布篇数',
+      status: '进行中',
+    },
+    {
+      id: 'goal-2',
+      title: '算法/后端岗位族群招聘入口点击',
+      dimension: '岗位族群+结果指标',
+      target: 300,
+      current: 284,
+      metric: '入口点击',
+      status: '进行中',
+    },
+    {
+      id: 'goal-3',
+      title: '本月自动复盘覆盖率',
+      dimension: '工作量指标',
+      target: 100,
+      current: 76,
+      metric: '复盘完成率',
+      status: '进行中',
+    },
+  ],
+  reports: [
+    {
+      id: 'rp-1',
+      title: '小红书校招内容点击效率领先',
+      body: 'VLA 实习内容在收藏和点击上高于平均值，说明“真实机器人场景 + 导师带教”的卖点有效。',
+      action: '下周继续产出 2 条校招答疑和 1 条实习生日常图文。',
+      severity: '机会',
+    },
+    {
+      id: 'rp-2',
+      title: '技术深度内容审核耗时偏长',
+      body: '技术负责人参与补充后，品牌合规审核平均耗时达到 1.8 天。',
+      action: '建立技术案例采集表和可公开边界字段，减少来回确认。',
+      severity: '风险',
+    },
+    {
+      id: 'rp-3',
+      title: '脉脉适合承接中高端岗位观点内容',
+      body: '脉脉内容评论质量高，适合发布行业观点、技术挑战和岗位机会组合内容。',
+      action: '将后端、算法、云平台岗位每周固定配置 1 条脉脉观点内容。',
+      severity: '建议',
+    },
+  ],
+};
+
+export function generateContent(job: JobNeed, platform: Platform) {
+  const tone = {
+    小红书: '真实、种草、轻量、亲和',
+    脉脉: '专业、克制、观点型',
+    B站: '深度、访谈、技术分享',
+    公众号: '系统、正式、专题化',
+    抖音: '短句、口播、场景化',
+    知乎: '问答、分析、专业',
+    技术社区: '工程实践、技术细节、克制',
+  }[platform];
+
+  return `【${platform}内容初稿】\\n主题：${job.title}为什么值得关注\\n语气：${tone}\\n候选人关注点：${job.persona}\\n核心卖点：${job.sellingPoints.join('、')}\\n正文：我们正在杭州寻找${job.level}人才加入${job.family}方向。这个机会更适合希望在${job.sellingPoints[0]}中解决真实问题、同时看重团队氛围和成长空间的候选人。\\nCTA：主页招聘入口已挂出，可查看岗位详情并跳转北森/官网投递。`;
+}
+
+export function scanRisks(text: string) {
+  const matches = riskRules.filter((rule) => {
+    const keys = rule.split('、').slice(0, 2);
+    return keys.some((key) => text.includes(key.replace('等', '')));
+  });
+  const broad = ['薪酬', '奖金', '股票', '福利', '战略', '客户', '架构', '算法', '加班', '转正', '歧视'].filter((word) =>
+    text.includes(word),
+  );
+  const risks = Array.from(new Set([...matches, ...broad.map((word) => `包含敏感词：${word}`)]));
+  return {
+    level: risks.length > 1 ? '高' : risks.length === 1 ? '中' : '低',
+    risks,
+  } as const;
+}
+
+export function nextStatus(status: ContentTask['status']) {
+  const index = statusFlow.indexOf(status as (typeof statusFlow)[number]);
+  if (index < 0 || index === statusFlow.length - 1) return status;
+  return statusFlow[index + 1];
+}
