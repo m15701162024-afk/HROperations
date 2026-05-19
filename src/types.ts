@@ -116,6 +116,63 @@ export interface RecruitmentEntry {
   status: '启用' | '停用';
 }
 
+export interface BeisenResult {
+  id: string;
+  jobId: string;
+  sourcePlatform: Platform | '未知';
+  sourceContentId?: string;
+  candidateCode: string;
+  stage: '已投递' | '有效简历' | '初筛通过' | '已约面' | '已面试' | 'Offer' | '已入职';
+  importedAt: string;
+}
+
+export interface IntegrationConfig {
+  id: string;
+  type: '北森' | '平台API' | '企业微信' | '飞书' | 'BI';
+  name: string;
+  endpoint: string;
+  authMode: '未配置' | 'Token' | 'OAuth' | 'Webhook' | '文件导入';
+  status: '未配置' | '待验证' | '已连接' | '连接失败';
+  lastSyncAt?: string;
+}
+
+export interface LandingPage {
+  id: string;
+  title: string;
+  slug: string;
+  pageType: '岗位集合页' | '校招专题页' | '技术开放日' | '自定义落地页';
+  linkedJobIds: string[];
+  destinationUrl: string;
+  status: '草稿' | '已发布' | '停用';
+  visits: number;
+  clicks: number;
+}
+
+export interface PermissionRole {
+  id: string;
+  name: string;
+  dataScope: '个人' | '团队' | '全部';
+  permissions: string[];
+}
+
+export interface SensitiveRule {
+  id: string;
+  keyword: string;
+  category: string;
+  riskLevel: RiskLevel;
+  suggestion: string;
+  enabled: boolean;
+}
+
+export interface CostRecord {
+  id: string;
+  targetType: '内容' | '平台' | '岗位族群';
+  targetId: string;
+  laborCost: number;
+  mediaCost: number;
+  productionCost: number;
+}
+
 export interface AuditLog {
   id: string;
   actor: string;
@@ -132,5 +189,11 @@ export interface AppData {
   goals: Goal[];
   reports: ReportInsight[];
   entries: RecruitmentEntry[];
+  beisenResults: BeisenResult[];
+  integrations: IntegrationConfig[];
+  landingPages: LandingPage[];
+  roles: PermissionRole[];
+  sensitiveRules: SensitiveRule[];
+  costs: CostRecord[];
   auditLogs: AuditLog[];
 }

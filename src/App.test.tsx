@@ -42,6 +42,12 @@ describe('招聘运营助手', () => {
       goals: [],
       reports: [],
       entries: [],
+      beisenResults: [],
+      integrations: [],
+      landingPages: [],
+      roles: [],
+      sensitiveRules: [],
+      costs: [],
       auditLogs: [],
     };
     localStorage.setItem('hr-assistant-data-mode', 'real-v1');

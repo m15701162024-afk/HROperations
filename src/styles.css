@@ -498,6 +498,10 @@ textarea {
   margin-bottom: 12px;
 }
 
+.form-grid.single {
+  grid-template-columns: 1fr;
+}
+
 .form-grid textarea {
   min-height: 110px;
   margin: 0;
@@ -639,6 +643,13 @@ textarea {
 .funnel div:nth-child(4) {
   width: 56%;
   background: var(--amber);
+}
+
+.roi-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .report-header {

@@ -45,6 +45,12 @@ export const emptyData: AppData = {
   goals: [],
   reports: [],
   entries: [],
+  beisenResults: [],
+  integrations: [],
+  landingPages: [],
+  roles: [],
+  sensitiveRules: [],
+  costs: [],
   auditLogs: [],
 };
 
@@ -303,6 +309,12 @@ export const seedData: AppData = {
       status: '启用',
     },
   ],
+  beisenResults: [],
+  integrations: [],
+  landingPages: [],
+  roles: [],
+  sensitiveRules: [],
+  costs: [],
   auditLogs: [
     {
       id: 'log-1',

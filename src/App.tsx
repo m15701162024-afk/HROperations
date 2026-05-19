@@ -26,8 +26,8 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
-import type { AccountType, AppData, AssetItem, ContentTask, JobNeed, Platform, PlatformAccount, RecruitmentEntry } from './types';
-import { applyMetricsCsv, buildReportMarkdown, downloadText, exportJson, parseJobCsv, toCsv } from './utils';
+import type { AccountType, AppData, AssetItem, ContentTask, CostRecord, IntegrationConfig, JobNeed, LandingPage, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule } from './types';
+import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, toCsv } from './utils';
 
 type Section =
   | '工作台'
@@ -81,6 +81,12 @@ function useAppData() {
       ...emptyData,
       ...parsed,
       entries: parsed.entries ?? [],
+      beisenResults: parsed.beisenResults ?? [],
+      integrations: parsed.integrations ?? [],
+      landingPages: parsed.landingPages ?? [],
+      roles: parsed.roles ?? [],
+      sensitiveRules: parsed.sensitiveRules ?? [],
+      costs: parsed.costs ?? [],
       auditLogs: parsed.auditLogs ?? [],
     };
   });
@@ -543,6 +549,8 @@ function Assets({ data, audit }: { data: AppData; audit: (action: string, target
 
 function Accounts({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
   const [entry, setEntry] = useState({ platform: '小红书' as Platform, headline: '', url: '', destination: '北森岗位页' as RecruitmentEntry['destination'] });
+  const [integration, setIntegration] = useState({ type: '北森' as IntegrationConfig['type'], name: '', endpoint: '', authMode: 'Token' as IntegrationConfig['authMode'] });
+  const [landing, setLanding] = useState({ title: '', slug: '', pageType: '岗位集合页' as LandingPage['pageType'], destinationUrl: '' });
   const [account, setAccount] = useState({
     platform: '小红书' as Platform,
     name: '',
@@ -577,6 +585,31 @@ function Accounts({ data, audit }: { data: AppData; audit: (action: string, targ
     };
     audit('配置招聘入口', item.headline, { ...data, entries: [item, ...data.entries] });
     setEntry({ platform: '小红书', headline: '', url: '', destination: '北森岗位页' });
+  };
+
+  const createIntegration = () => {
+    if (!integration.name.trim()) return;
+    const item: IntegrationConfig = {
+      id: `integration-${Date.now()}`,
+      ...integration,
+      status: integration.endpoint ? '待验证' : '未配置',
+    };
+    audit('新增集成配置', item.name, { ...data, integrations: [item, ...data.integrations] });
+    setIntegration({ type: '北森', name: '', endpoint: '', authMode: 'Token' });
+  };
+
+  const createLanding = () => {
+    if (!landing.title.trim()) return;
+    const item: LandingPage = {
+      id: `landing-${Date.now()}`,
+      ...landing,
+      linkedJobIds: data.jobs.map((job) => job.id),
+      status: '草稿',
+      visits: 0,
+      clicks: 0,
+    };
+    audit('创建落地页', item.title, { ...data, landingPages: [item, ...data.landingPages] });
+    setLanding({ title: '', slug: '', pageType: '岗位集合页', destinationUrl: '' });
   };
 
   return (
@@ -664,12 +697,71 @@ function Accounts({ data, audit }: { data: AppData; audit: (action: string, targ
           ))}
         </div>
       </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>平台与系统集成配置</h2><RefreshCw size={18} /></div>
+        <div className="inline-form">
+          <select value={integration.type} onChange={(event) => setIntegration({ ...integration, type: event.target.value as IntegrationConfig['type'] })}>
+            <option>北森</option>
+            <option>平台API</option>
+            <option>企业微信</option>
+            <option>飞书</option>
+            <option>BI</option>
+          </select>
+          <input value={integration.name} onChange={(event) => setIntegration({ ...integration, name: event.target.value })} placeholder="集成名称" />
+          <input value={integration.endpoint} onChange={(event) => setIntegration({ ...integration, endpoint: event.target.value })} placeholder="接口地址 / Webhook" />
+          <select value={integration.authMode} onChange={(event) => setIntegration({ ...integration, authMode: event.target.value as IntegrationConfig['authMode'] })}>
+            <option>Token</option>
+            <option>OAuth</option>
+            <option>Webhook</option>
+            <option>文件导入</option>
+            <option>未配置</option>
+          </select>
+          <button onClick={createIntegration}><Plus size={16} />保存集成</button>
+        </div>
+        <div className="entry-grid">
+          {data.integrations.length === 0 && <EmptyState title="暂无真实集成配置" body="配置北森、平台 API、企微/飞书或 BI 后，系统会记录连接状态。" />}
+          {data.integrations.map((item) => (
+            <article key={item.id}>
+              <strong>{item.type}｜{item.name}</strong>
+              <span>{item.authMode} · {item.endpoint || '未填写接口地址'}</span>
+              <Badge tone={item.status === '已连接' ? 'good' : item.status === '连接失败' ? 'danger' : 'warn'}>{item.status}</Badge>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>招聘落地页</h2><FileText size={18} /></div>
+        <div className="inline-form">
+          <input value={landing.title} onChange={(event) => setLanding({ ...landing, title: event.target.value })} placeholder="页面标题" />
+          <input value={landing.slug} onChange={(event) => setLanding({ ...landing, slug: event.target.value })} placeholder="页面路径 slug" />
+          <select value={landing.pageType} onChange={(event) => setLanding({ ...landing, pageType: event.target.value as LandingPage['pageType'] })}>
+            <option>岗位集合页</option>
+            <option>校招专题页</option>
+            <option>技术开放日</option>
+            <option>自定义落地页</option>
+          </select>
+          <input value={landing.destinationUrl} onChange={(event) => setLanding({ ...landing, destinationUrl: event.target.value })} placeholder="最终跳转地址" />
+          <button onClick={createLanding}><Plus size={16} />创建页面</button>
+        </div>
+        <div className="entry-grid">
+          {data.landingPages.length === 0 && <EmptyState title="暂无招聘落地页" body="可创建岗位集合页、校招专题页或技术活动页，本地阶段先生成配置和归因数据。" />}
+          {data.landingPages.map((item) => (
+            <article key={item.id}>
+              <strong>{item.title}</strong>
+              <span>/{item.slug || item.id} · {item.pageType} · 关联岗位 {item.linkedJobIds.length} 个</span>
+              <Badge tone="info">{item.visits} 访问 / {item.clicks} 点击</Badge>
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
 
 function Analytics({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
   const [metricsCsv, setMetricsCsv] = useState('');
+  const [beisenCsv, setBeisenCsv] = useState('');
+  const [cost, setCost] = useState({ targetType: '内容' as CostRecord['targetType'], targetId: '', laborCost: 0, mediaCost: 0, productionCost: 0 });
   const byPlatform = platforms.map((platform) => {
     const items = data.contents.filter((item) => item.platform === platform);
     return {
@@ -685,6 +777,25 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
     audit('导入平台指标', '内容数据', { ...data, contents: nextContents });
     setMetricsCsv('');
   };
+  const importBeisen = () => {
+    const results = parseBeisenCsv(beisenCsv);
+    if (results.length === 0) return;
+    audit('导入北森结果', `${results.length} 条`, { ...data, beisenResults: [...results, ...data.beisenResults] });
+    setBeisenCsv('');
+  };
+  const createCost = () => {
+    const item: CostRecord = {
+      id: `cost-${Date.now()}`,
+      targetType: cost.targetType,
+      targetId: cost.targetId || 'all',
+      laborCost: Number(cost.laborCost) || 0,
+      mediaCost: Number(cost.mediaCost) || 0,
+      productionCost: Number(cost.productionCost) || 0,
+    };
+    audit('录入成本', `${item.targetType}:${item.targetId}`, { ...data, costs: [item, ...data.costs] });
+    setCost({ targetType: '内容', targetId: '', laborCost: 0, mediaCost: 0, productionCost: 0 });
+  };
+  const roi = calculateRoi(data);
 
   return (
     <div className="page-grid">
@@ -699,6 +810,41 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
         <div className="panel-title"><h2>平台指标导入</h2><Database size={18} /></div>
         <p className="helper">支持字段：contentId/title、views、likes、comments、saves、shares、clicks，也支持中文表头。未导入时看板指标为 0。</p>
         <textarea className="small-textarea" value={metricsCsv} onChange={(event) => setMetricsCsv(event.target.value)} placeholder="contentId,views,likes,comments,saves,shares,clicks&#10;ct-xxx,1000,20,3,8,2,15" />
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>北森结果回流</h2><RefreshCw size={18} /></div>
+        <p className="helper">支持字段：jobId、sourcePlatform、sourceContentId、candidateCode、stage。stage 可为：已投递、有效简历、初筛通过、已约面、已面试、Offer、已入职。</p>
+        <textarea className="small-textarea" value={beisenCsv} onChange={(event) => setBeisenCsv(event.target.value)} placeholder="jobId,sourcePlatform,sourceContentId,candidateCode,stage&#10;job-xxx,小红书,ct-xxx,C001,已投递" />
+        <button className="full" onClick={importBeisen}><Database size={16} />导入北森结果</button>
+      </section>
+      <section className="panel">
+        <div className="panel-title"><h2>成本录入</h2><Target size={18} /></div>
+        <div className="form-grid single">
+          <select value={cost.targetType} onChange={(event) => setCost({ ...cost, targetType: event.target.value as CostRecord['targetType'] })}>
+            <option>内容</option>
+            <option>平台</option>
+            <option>岗位族群</option>
+          </select>
+          <input value={cost.targetId} onChange={(event) => setCost({ ...cost, targetId: event.target.value })} placeholder="对象 ID，可空表示全部" />
+          <input type="number" value={cost.laborCost} onChange={(event) => setCost({ ...cost, laborCost: Number(event.target.value) })} placeholder="人工成本" />
+          <input type="number" value={cost.mediaCost} onChange={(event) => setCost({ ...cost, mediaCost: Number(event.target.value) })} placeholder="投放成本" />
+          <input type="number" value={cost.productionCost} onChange={(event) => setCost({ ...cost, productionCost: Number(event.target.value) })} placeholder="制作成本" />
+        </div>
+        <button className="full" onClick={createCost}><Plus size={16} />保存成本</button>
+      </section>
+      <section className="panel">
+        <div className="panel-title"><h2>真实 ROI</h2><PieChart size={18} /></div>
+        <div className="funnel">
+          <div>总成本 <b>{roi.totalCost}</b></div>
+          <div>投递人数 <b>{roi.applications}</b></div>
+          <div>有效简历 <b>{roi.effective}</b></div>
+          <div>入职人数 <b>{roi.hires}</b></div>
+        </div>
+        <div className="roi-row">
+          <Badge tone="info">单投递 {roi.costPerApplication}</Badge>
+          <Badge tone="info">单有效 {roi.costPerEffective}</Badge>
+          <Badge tone="info">单入职 {roi.costPerHire}</Badge>
+        </div>
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>平台效果对比</h2><BarChart3 size={18} /></div>
@@ -722,6 +868,16 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           return <div className="compact-row" key={job.id}><div><strong>{job.family}</strong><span>{job.title}</span></div><Badge tone="info">{clicks} 点击</Badge></div>;
         })}
       </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>多触点归因</h2><Link size={18} /></div>
+        {data.beisenResults.length === 0 && <EmptyState title="暂无北森回流归因" body="导入北森结果后，会按平台、内容和岗位关联投递/入职结果。" />}
+        <div className="entry-grid">
+          {platforms.map((platform) => {
+            const count = data.beisenResults.filter((item) => item.sourcePlatform === platform).length;
+            return count > 0 ? <article key={platform}><strong>{platform}</strong><span>北森回流 {count} 条</span><Badge tone="good">真实回流</Badge></article> : null;
+          })}
+        </div>
+      </section>
       <section className="panel">
         <div className="panel-title"><h2>漏斗代理指标</h2><Target size={18} /></div>
         <div className="funnel">
@@ -736,6 +892,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
 }
 
 function Reports({ data }: { data: AppData }) {
+  const recommendations = buildRecommendations(data);
   const generatedReports = data.reports.length > 0
     ? data.reports
     : data.contents.length > 0
@@ -755,6 +912,12 @@ function Reports({ data }: { data: AppData }) {
           <p>自动识别高低表现内容，生成周报/月报、行动建议和案例沉淀。</p>
         </div>
         <button onClick={() => downloadText('招聘新媒体运营周报.md', buildReportMarkdown(data), 'text/markdown;charset=utf-8')}><FileText size={16} />下载周报</button>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>AI 运营策略建议</h2><Bot size={18} /></div>
+        <div className="template-grid">
+          {recommendations.map((item) => <div className="template-chip" key={item}>策略建议<small>{item}</small></div>)}
+        </div>
       </section>
       <section className="panel wide">
         <div className="report-header">
@@ -791,15 +954,38 @@ function Reports({ data }: { data: AppData }) {
 }
 
 function SettingsPage({ data }: { data: AppData }) {
+  const [role, setRole] = useState({ name: '', dataScope: '个人' as PermissionRole['dataScope'], permissions: '岗位查看、内容创建' });
+  const [rule, setRule] = useState({ keyword: '', category: '合规表达', riskLevel: '高' as SensitiveRule['riskLevel'], suggestion: '' });
+  const addRole = () => {
+    if (!role.name.trim()) return;
+    const item: PermissionRole = {
+      id: `role-${Date.now()}`,
+      name: role.name,
+      dataScope: role.dataScope,
+      permissions: role.permissions.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean),
+    };
+    const next = { ...data, roles: [item, ...data.roles] };
+    localStorage.setItem('hr-assistant-data', JSON.stringify(next));
+    location.reload();
+  };
+  const addRule = () => {
+    if (!rule.keyword.trim()) return;
+    const item: SensitiveRule = {
+      id: `rule-${Date.now()}`,
+      ...rule,
+      enabled: true,
+    };
+    const next = { ...data, sensitiveRules: [item, ...data.sensitiveRules] };
+    localStorage.setItem('hr-assistant-data', JSON.stringify(next));
+    location.reload();
+  };
   const remainingItems = [
-    '接入北森岗位同步、投递数据、面试/Offer/入职结果回流',
-    '接入小红书、脉脉、B站、公众号等平台的真实 API 或授权采集',
-    '浏览器插件半自动发布与平台后台数据抓取',
-    '企业微信/飞书审批提醒和待办通知',
-    'AI 基于历史真实数据推荐平台、发布时间、标题方向',
-    '多触点归因、真实招聘 ROI、成本模型与 BI 同步',
-    '自建招聘落地页、岗位集合页、校招专题页',
-    '权限矩阵后台配置、敏感词规则后台维护、审计导出',
+    '替换本地 localStorage 为后端数据库与登录态',
+    '用真实北森 OpenAPI 替换 CSV 回流入口',
+    '用各平台正式 API/插件替换手动导入平台指标',
+    '完成浏览器插件独立打包和平台页面适配',
+    '接入真实企业微信/飞书消息发送权限',
+    '完善落地页公网部署、表单提交和访问埋点',
   ];
   return (
     <div className="page-grid">
@@ -812,17 +998,47 @@ function SettingsPage({ data }: { data: AppData }) {
       </section>
       <section className="panel">
         <div className="panel-title"><h2>角色权限矩阵</h2><Users size={18} /></div>
+        <div className="form-grid single">
+          <input value={role.name} onChange={(event) => setRole({ ...role, name: event.target.value })} placeholder="角色名称" />
+          <select value={role.dataScope} onChange={(event) => setRole({ ...role, dataScope: event.target.value as PermissionRole['dataScope'] })}>
+            <option>个人</option>
+            <option>团队</option>
+            <option>全部</option>
+          </select>
+          <input value={role.permissions} onChange={(event) => setRole({ ...role, permissions: event.target.value })} placeholder="权限，用顿号分隔" />
+          <button onClick={addRole}><Plus size={16} />新增角色</button>
+        </div>
         {['招聘专员', '招聘主管', '新媒体运营', '技术负责人', '管理层'].map((role) => (
           <div className="compact-row" key={role}>
             <div><strong>{role}</strong><span>岗位、内容、素材、账号、数据范围差异化控制</span></div>
             <Badge tone="info">已配置</Badge>
           </div>
         ))}
+        {data.roles.map((item) => (
+          <div className="compact-row" key={item.id}>
+            <div><strong>{item.name}</strong><span>{item.dataScope} · {item.permissions.join('、')}</span></div>
+            <Badge tone="good">自定义</Badge>
+          </div>
+        ))}
       </section>
       <section className="panel">
         <div className="panel-title"><h2>高风险规则库</h2><ShieldCheck size={18} /></div>
+        <div className="form-grid single">
+          <input value={rule.keyword} onChange={(event) => setRule({ ...rule, keyword: event.target.value })} placeholder="敏感词 / 红线主题" />
+          <input value={rule.category} onChange={(event) => setRule({ ...rule, category: event.target.value })} placeholder="分类" />
+          <select value={rule.riskLevel} onChange={(event) => setRule({ ...rule, riskLevel: event.target.value as SensitiveRule['riskLevel'] })}>
+            <option>低</option>
+            <option>中</option>
+            <option>高</option>
+          </select>
+          <input value={rule.suggestion} onChange={(event) => setRule({ ...rule, suggestion: event.target.value })} placeholder="替代表达建议" />
+          <button onClick={addRule}><Plus size={16} />新增规则</button>
+        </div>
         {['薪酬福利承诺', '业务数据与客户信息', '技术架构与算法细节', '员工照片与个人经历', '竞品与舆情表达', '校招转正承诺', '招聘歧视与虚假宣传'].map((rule) => (
           <div className="rule-row" key={rule}><AlertTriangle size={15} />{rule}</div>
+        ))}
+        {data.sensitiveRules.map((item) => (
+          <div className="rule-row" key={item.id}><AlertTriangle size={15} />{item.keyword} · {item.category} · {item.riskLevel}风险</div>
         ))}
       </section>
       <section className="panel wide">
@@ -835,6 +1051,7 @@ function SettingsPage({ data }: { data: AppData }) {
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>操作日志</h2><ShieldCheck size={18} /></div>
+        <button onClick={() => downloadText('操作审计日志.csv', toCsv(data.auditLogs.map((log) => ({ createdAt: log.createdAt, actor: log.actor, action: log.action, target: log.target }))), 'text/csv;charset=utf-8')}><FileText size={16} />导出审计日志</button>
         {data.auditLogs.length === 0 && <EmptyState title="暂无操作日志" body="录入真实数据后，系统会保留创建、导入、审核和配置动作。" />}
         <table>
           <thead>
