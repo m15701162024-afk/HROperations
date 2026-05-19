@@ -72,6 +72,7 @@ export async function runIntegrationSync(
     statusCode?: number;
     message: string;
     recordCount: number;
+    retryCount?: number;
     data?: unknown;
   }>(`${API_BASE}/api/integrations/sync`, 'POST', token, { integration, syncType, payload });
 }

@@ -565,6 +565,15 @@ function safeParseJson(text: string) {
   }
 }
 
+function integrationExtra(integration: IntegrationConfig) {
+  const parsed = integration.extraConfig ? safeParseJson(integration.extraConfig) : {};
+  return typeof parsed === 'object' && parsed !== null ? parsed as { fields?: Record<string, string>; dedupeKey?: string } : {};
+}
+
+function mappedValue(row: Record<string, string | number | boolean | undefined>, fields: Record<string, string> | undefined, key: string, fallback: string) {
+  return row[fields?.[key] ?? key] ?? row[key] ?? row[fallback];
+}
+
 function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
   const [jobId, setJobId] = useState(data.jobs[0]?.id ?? '');
   const [platform, setPlatform] = useState<Platform>('小红书');
@@ -1053,6 +1062,8 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     message: string,
     recordCount: number,
     nextData: AppData,
+    retryCount = 0,
+    detail = '',
   ): AppData => ({
     ...nextData,
     integrations: nextData.integrations.map((item) => item.id === integrationItem.id ? {
@@ -1068,6 +1079,8 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
       status: ok ? '成功' : '失败',
       message,
       recordCount,
+      retryCount,
+      detail,
       ranAt: new Date().toLocaleString('zh-CN', { hour12: false }),
     }, ...nextData.integrationSyncRuns],
   });
@@ -1075,7 +1088,9 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
   const syncBeisenLeads = async (id: string) => {
     const target = data.integrations.find((item) => item.id === id);
     if (!target) return;
-    const pending = data.landingLeads.filter((lead) => lead.status === '待转入北森');
+    const extra = integrationExtra(target);
+    const syncedCodes = new Set(data.beisenResults.map((item) => item.candidateCode));
+    const pending = data.landingLeads.filter((lead) => lead.status === '待转入北森' && !syncedCodes.has(`lead-${lead.id}`));
     const payload = {
       records: pending.map((lead) => ({
         candidateCode: `lead-${lead.id}`,
@@ -1086,7 +1101,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
         note: lead.note,
         submittedAt: lead.submittedAt,
       })),
-      extraConfig: target.extraConfig ? safeParseJson(target.extraConfig) : undefined,
+      extraConfig: extra,
     };
     const result = await runIntegrationSync(target, '北森线索同步', payload, apiToken);
     const beisenResults: BeisenResult[] = result.ok ? pending.map((lead) => ({
@@ -1098,24 +1113,38 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
       stage: '已投递',
       importedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
     })) : [];
+    const mergedBeisenResults = [...beisenResults, ...data.beisenResults].filter((item, index, list) => (
+      list.findIndex((candidate) => candidate.candidateCode === item.candidateCode && candidate.stage === item.stage) === index
+    ));
     const next = recordSyncRun(target, '北森线索同步', result.ok, result.message, pending.length, {
       ...data,
       landingLeads: result.ok ? data.landingLeads.map((lead) => lead.status === '待转入北森' ? { ...lead, status: '已转入北森' } : lead) : data.landingLeads,
-      beisenResults: result.ok ? [...beisenResults, ...data.beisenResults] : data.beisenResults,
+      beisenResults: result.ok ? mergedBeisenResults : data.beisenResults,
       notifications: [
         makeNotification('北森线索同步结果', `${target.name}：${result.message}，记录 ${pending.length} 条`, '账号与平台', result.ok ? '提醒' : '预警'),
         ...data.notifications,
       ],
-    });
+    }, result.retryCount ?? 0, `去重键：candidateCode；跳过已同步 ${data.landingLeads.filter((lead) => syncedCodes.has(`lead-${lead.id}`)).length} 条`);
     audit('同步北森线索', `${target.name}：${result.message}`, next);
   };
 
   const pullPlatformMetrics = async (id: string) => {
     const target = data.integrations.find((item) => item.id === id);
     if (!target) return;
-    const result = await runIntegrationSync(target, '平台指标拉取', { extraConfig: target.extraConfig ? safeParseJson(target.extraConfig) : undefined }, apiToken);
+    const extra = integrationExtra(target);
+    const result = await runIntegrationSync(target, '平台指标拉取', { extraConfig: extra, since: target.lastSyncAt }, apiToken);
     const rows = normalizeRemoteRows(result.data);
-    const csv = rows.length > 0 ? toCsv(rows) : '';
+    const normalizedRows = rows.map((row) => ({
+      contentId: mappedValue(row, extra.fields, 'contentId', '内容ID'),
+      title: mappedValue(row, extra.fields, 'title', '标题'),
+      views: mappedValue(row, extra.fields, 'views', '曝光'),
+      likes: mappedValue(row, extra.fields, 'likes', '点赞'),
+      comments: mappedValue(row, extra.fields, 'comments', '评论'),
+      saves: mappedValue(row, extra.fields, 'saves', '收藏'),
+      shares: mappedValue(row, extra.fields, 'shares', '分享'),
+      clicks: mappedValue(row, extra.fields, 'clicks', '点击'),
+    }));
+    const csv = normalizedRows.length > 0 ? toCsv(normalizedRows) : '';
     const nextContents = csv ? applyMetricsCsv(data.contents, csv) : data.contents;
     const next = recordSyncRun(target, '平台指标拉取', result.ok, result.message, rows.length || result.recordCount, {
       ...data,
@@ -1124,7 +1153,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
         makeNotification('平台指标拉取结果', `${target.name}：${result.message}，记录 ${rows.length || result.recordCount} 条`, '数据分析', result.ok ? '提醒' : '预警'),
         ...data.notifications,
       ],
-    });
+    }, result.retryCount ?? 0, extra.fields ? `已应用字段映射：${Object.keys(extra.fields).join('、')}` : '未配置字段映射');
     audit('拉取平台指标', `${target.name}：${result.message}`, next);
   };
 
@@ -1371,7 +1400,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
           <details className="version-box">
             <summary>同步运行记录（{data.integrationSyncRuns.length}）</summary>
             {data.integrationSyncRuns.slice(0, 8).map((run) => (
-              <p key={run.id}>{run.syncType} · {run.status} · {run.message} · {run.recordCount} 条 · {run.ranAt}</p>
+              <p key={run.id}>{run.syncType} · {run.status} · {run.message} · {run.recordCount} 条 · 重试 {run.retryCount ?? 0} 次 · {run.detail || '无详情'} · {run.ranAt}</p>
             ))}
           </details>
         )}

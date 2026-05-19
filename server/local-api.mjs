@@ -56,6 +56,12 @@ function requireSession(request, response) {
   return session;
 }
 
+function verifyPublicSignature(request) {
+  const expected = process.env.HR_ASSISTANT_PUBLIC_SECRET;
+  if (!expected) return true;
+  return request.headers['x-hr-signature'] === expected;
+}
+
 function sanitizeFileName(fileName) {
   const plainName = basename(String(fileName || 'asset-file')).replace(/[^\w.\-\u4e00-\u9fa5]/g, '_');
   return plainName || 'asset-file';
@@ -118,6 +124,10 @@ const server = createServer(async (request, response) => {
 
   if (request.url === '/api/track' && request.method === 'POST') {
     try {
+      if (!verifyPublicSignature(request)) {
+        send(response, 401, { ok: false, error: 'Invalid signature' });
+        return;
+      }
       const body = JSON.parse(await readBody(request));
       const data = await repository.readData();
       const eventType = body.eventType === 'click' ? 'clicks' : 'visits';
@@ -147,12 +157,21 @@ const server = createServer(async (request, response) => {
 
   if (request.url === '/api/landing/leads' && request.method === 'POST') {
     try {
+      if (!verifyPublicSignature(request)) {
+        send(response, 401, { ok: false, error: 'Invalid signature' });
+        return;
+      }
       const body = JSON.parse(await readBody(request));
       if (!body.landingPageId || !body.name || !body.contact) {
         send(response, 400, { ok: false, error: 'landingPageId、name、contact 为必填' });
         return;
       }
       const data = await repository.readData();
+      const duplicated = data.landingLeads.some((item) => item.landingPageId === String(body.landingPageId) && item.contact === String(body.contact));
+      if (duplicated) {
+        send(response, 200, { ok: true, duplicated: true });
+        return;
+      }
       const lead = {
         id: `lead-public-${Date.now()}`,
         landingPageId: String(body.landingPageId),
@@ -247,9 +266,11 @@ const server = createServer(async (request, response) => {
     try {
       const body = JSON.parse(await readBody(request));
       const records = Array.isArray(body.records) ? body.records : [];
+      const mapping = typeof body.fieldMapping === 'object' && body.fieldMapping ? body.fieldMapping : {};
       const data = await repository.readData();
       const nextContents = data.contents.map((content) => {
-        const record = records.find((item) => item.contentId === content.id || item.title === content.title || item.title === content.title.replace(/^.+?｜/, ''));
+        const normalizedRecords = records.map((item) => normalizeMetricRecord(item, mapping));
+        const record = normalizedRecords.find((item) => item.contentId === content.id || item.title === content.title || item.title === content.title.replace(/^.+?｜/, ''));
         if (!record) return content;
         return {
           ...content,
@@ -338,6 +359,20 @@ const server = createServer(async (request, response) => {
 
   send(response, 404, { ok: false, error: 'Not found' });
 });
+
+function normalizeMetricRecord(record, mapping) {
+  const valueOf = (standard, fallback) => record[mapping[standard]] ?? record[standard] ?? record[fallback];
+  return {
+    contentId: valueOf('contentId', '内容ID'),
+    title: valueOf('title', '标题'),
+    views: valueOf('views', '曝光'),
+    likes: valueOf('likes', '点赞'),
+    comments: valueOf('comments', '评论'),
+    saves: valueOf('saves', '收藏'),
+    shares: valueOf('shares', '分享'),
+    clicks: valueOf('clicks', '点击'),
+  };
+}
 
 server.listen(port, () => {
   console.log(`HRAssistant local API listening on http://localhost:${port}`);

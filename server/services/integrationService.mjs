@@ -33,7 +33,25 @@ export async function runIntegrationSync(integration, syncType, payload) {
     return { ok: false, message: '缺少接口地址或 Webhook', recordCount: 0 };
   }
 
-  try {
+  let lastError = '';
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const result = await requestIntegration(integration, syncType, payload);
+      return { ...result, retryCount: attempt };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : '同步请求失败';
+    }
+  }
+
+  return {
+    ok: false,
+    message: lastError,
+    recordCount: 0,
+    retryCount: 2,
+  };
+}
+
+async function requestIntegration(integration, syncType, payload) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
     const response = await fetch(integration.endpoint, {
@@ -54,13 +72,6 @@ export async function runIntegrationSync(integration, syncType, payload) {
       recordCount,
       data,
     };
-  } catch (error) {
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : '同步请求失败',
-      recordCount: 0,
-    };
-  }
 }
 
 export async function sendIntegrationMessage(integration, message) {

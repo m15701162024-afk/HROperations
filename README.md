@@ -99,7 +99,8 @@ GET /uploads/:fileName
   src="/hr-assistant-tracker.js"
   data-api-base="https://your-api.example.com"
   data-landing-page-id="landing-page-id-or-slug"
-  data-source-platform="小红书"></script>
+  data-source-platform="小红书"
+  data-public-secret="可选签名密钥"></script>
 ```
 
 SDK 会自动记录访问，并对链接点击记录点击。表单提交可调用：
@@ -112,6 +113,30 @@ window.HRAssistantTracker.submitLead({
   note: '备注'
 });
 ```
+
+如果服务端设置了 `HR_ASSISTANT_PUBLIC_SECRET`，公网埋点和线索提交必须携带相同的 `data-public-secret`，否则会被拒绝。
+
+## 集成字段映射
+
+集成配置的“扩展配置 JSON”支持字段映射和增量参数，例如：
+
+```json
+{
+  "fields": {
+    "contentId": "note_id",
+    "title": "title",
+    "views": "read_count",
+    "likes": "like_count",
+    "comments": "comment_count",
+    "saves": "collect_count",
+    "shares": "share_count",
+    "clicks": "apply_click_count"
+  },
+  "dedupeKey": "candidateCode"
+}
+```
+
+同步失败会自动重试，运行记录会保留重试次数、记录数和字段映射详情。
 
 ## 大模型 API 配置
 

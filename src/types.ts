@@ -171,6 +171,8 @@ export interface IntegrationSyncRun {
   status: '成功' | '失败';
   message: string;
   recordCount: number;
+  retryCount: number;
+  detail?: string;
   ranAt: string;
 }
 

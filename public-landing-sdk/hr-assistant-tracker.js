@@ -5,11 +5,12 @@
   var apiBase = script && script.dataset.apiBase ? script.dataset.apiBase.replace(/\/$/, '') : 'http://localhost:8787';
   var landingPageId = script && script.dataset.landingPageId ? script.dataset.landingPageId : '';
   var sourcePlatform = script && script.dataset.sourcePlatform ? script.dataset.sourcePlatform : '未知';
+  var publicSecret = script && script.dataset.publicSecret ? script.dataset.publicSecret : '';
 
   function post(path, payload) {
     return fetch(apiBase + path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: Object.assign({ 'Content-Type': 'application/json' }, publicSecret ? { 'X-HR-Signature': publicSecret } : {}),
       body: JSON.stringify(payload),
       keepalive: true
     }).catch(function () {});
