@@ -28,7 +28,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, runModelTask, saveRemoteData, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
-import type { AccountType, AppData, AssetItem, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
+import type { AccountType, AppData, AssetItem, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
 
 type Section =
@@ -533,12 +533,27 @@ function findModelApi(data: AppData, purpose: ModelApiConfig['enabledFor'][numbe
     ?? data.modelApis.find((item) => item.enabledFor.includes(purpose));
 }
 
+function compareVersionText(current: string, previous?: string) {
+  if (!previous) return '暂无上一版本可对比';
+  const currentLines = current.split('\n').map((line) => line.trim()).filter(Boolean);
+  const previousLines = previous.split('\n').map((line) => line.trim()).filter(Boolean);
+  const previousSet = new Set(previousLines);
+  const currentSet = new Set(currentLines);
+  const added = currentLines.filter((line) => !previousSet.has(line)).slice(0, 3);
+  const removed = previousLines.filter((line) => !currentSet.has(line)).slice(0, 3);
+  const addedText = added.length > 0 ? `新增：${added.join(' / ')}` : '无新增段落';
+  const removedText = removed.length > 0 ? `删除：${removed.join(' / ')}` : '无删除段落';
+  return `${addedText}；${removedText}`;
+}
+
 function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
   const [jobId, setJobId] = useState(data.jobs[0]?.id ?? '');
   const [platform, setPlatform] = useState<Platform>('小红书');
   const [draft, setDraft] = useState('');
   const [query, setQuery] = useState('');
   const [aiStatus, setAiStatus] = useState('');
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
+  const [revisionDrafts, setRevisionDrafts] = useState<Record<string, string>>({});
 
   const selectedJob = data.jobs.find((job) => job.id === jobId) ?? data.jobs[0];
   const risk = scanRisks(draft);
@@ -628,6 +643,60 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
     });
   };
 
+  const addReviewComment = (id: string, decision: ContentReviewComment['decision']) => {
+    const target = data.contents.find((item) => item.id === id);
+    const comment = reviewDrafts[id]?.trim();
+    if (!target || !comment) return;
+    const review: ContentReviewComment = {
+      id: `rv-${Date.now()}`,
+      contentId: id,
+      reviewer: target.reviewer,
+      stage: target.status,
+      decision,
+      comment,
+      createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    };
+    const nextStatus: ContentStatus = decision === '驳回' ? '驳回修改' : target.status;
+    audit(decision === '驳回' ? '驳回内容' : '提交审核意见', target.title, {
+      ...data,
+      contents: data.contents.map((item) => (item.id === id ? { ...item, status: nextStatus } : item)),
+      reviewComments: [review, ...data.reviewComments],
+      notifications: [
+        makeNotification('内容审核意见已记录', `${target.title}：${decision}`, '内容运营', decision === '驳回' ? '待办' : '提醒'),
+        ...data.notifications,
+      ],
+    });
+    setReviewDrafts({ ...reviewDrafts, [id]: '' });
+  };
+
+  const saveRevision = (id: string) => {
+    const target = data.contents.find((item) => item.id === id);
+    const body = revisionDrafts[id]?.trim();
+    if (!target || !body || body === target.content) return;
+    const versions = data.contentVersions.filter((version) => version.contentId === id);
+    const nextVersionNumber = Math.max(0, ...versions.map((version) => version.version)) + 1;
+    const scanned = scanRisks(body);
+    const version: ContentVersion = {
+      id: `ver-${Date.now()}`,
+      contentId: id,
+      version: nextVersionNumber,
+      body,
+      editor: '当前用户',
+      changeNote: '根据审核意见修订',
+      createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    };
+    audit('保存内容修订', target.title, {
+      ...data,
+      contents: data.contents.map((item) => (
+        item.id === id
+          ? { ...item, content: body, riskLevel: scanned.level, risks: scanned.risks, status: item.status === '驳回修改' ? '待专业审核' : item.status }
+          : item
+      )),
+      contentVersions: [version, ...data.contentVersions],
+    });
+    setRevisionDrafts({ ...revisionDrafts, [id]: '' });
+  };
+
   const publishContent = (id: string) => {
     const target = data.contents.find((item) => item.id === id);
     audit('标记内容已发布', target?.title ?? id, {
@@ -638,7 +707,12 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
 
   const removeContent = (id: string) => {
     const target = data.contents.find((item) => item.id === id);
-    audit('删除内容任务', target?.title ?? id, { ...data, contents: data.contents.filter((item) => item.id !== id) });
+    audit('删除内容任务', target?.title ?? id, {
+      ...data,
+      contents: data.contents.filter((item) => item.id !== id),
+      contentVersions: data.contentVersions.filter((version) => version.contentId !== id),
+      reviewComments: data.reviewComments.filter((comment) => comment.contentId !== id),
+    });
   };
 
   return (
@@ -691,7 +765,13 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
         </div>
         <div className="content-list">
           {filtered.length === 0 && <EmptyState title="暂无真实内容任务" body="录入岗位后可生成内容任务；发布后的指标会进入看板。" />}
-          {filtered.map((item) => (
+          {filtered.map((item) => {
+            const versions = data.contentVersions
+              .filter((version) => version.contentId === item.id)
+              .sort((a, b) => b.version - a.version);
+            const comments = data.reviewComments.filter((comment) => comment.contentId === item.id);
+            const revisionText = revisionDrafts[item.id] ?? item.content;
+            return (
             <article className="content-card" key={item.id}>
               <div>
                 <div className="card-head">
@@ -707,10 +787,38 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
                   <span>截止：{item.dueDate}</span>
                 </div>
                 <details className="version-box">
-                  <summary>版本历史（{data.contentVersions.filter((version) => version.contentId === item.id).length}）</summary>
-                  {data.contentVersions.filter((version) => version.contentId === item.id).map((version) => (
+                  <summary>版本历史与对比（{versions.length}）</summary>
+                  <p className="diff-line">{compareVersionText(versions[0]?.body ?? item.content, versions[1]?.body)}</p>
+                  {versions.map((version) => (
                     <p key={version.id}>V{version.version} · {version.editor} · {version.changeNote} · {version.createdAt}</p>
                   ))}
+                </details>
+                <details className="version-box">
+                  <summary>审核意见（{comments.length}）</summary>
+                  {comments.length === 0 && <p>暂无审核意见</p>}
+                  {comments.map((comment) => (
+                    <p key={comment.id}>{comment.decision} · {comment.reviewer} · {comment.stage} · {comment.comment} · {comment.createdAt}</p>
+                  ))}
+                </details>
+                <div className="review-editor">
+                  <textarea
+                    value={reviewDrafts[item.id] ?? ''}
+                    onChange={(event) => setReviewDrafts({ ...reviewDrafts, [item.id]: event.target.value })}
+                    placeholder="填写审核意见、修改建议或风险说明"
+                  />
+                  <div className="card-actions-inline">
+                    <button className="secondary" onClick={() => addReviewComment(item.id, '修改建议')}>提交意见</button>
+                    <button className="ghost" onClick={() => addReviewComment(item.id, '驳回')}>驳回修改</button>
+                  </div>
+                </div>
+                <details className="version-box">
+                  <summary>修订内容</summary>
+                  <textarea
+                    value={revisionText}
+                    onChange={(event) => setRevisionDrafts({ ...revisionDrafts, [item.id]: event.target.value })}
+                    placeholder="在这里调整内容，保存后生成新版本"
+                  />
+                  <button className="secondary" onClick={() => saveRevision(item.id)}>保存修订版本</button>
                 </details>
               </div>
               <div className="card-actions">
@@ -720,7 +828,8 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
                 <button className="ghost" onClick={() => removeContent(item.id)}>删除</button>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       </section>
     </div>

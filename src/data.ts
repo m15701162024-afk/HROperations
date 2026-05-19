@@ -42,6 +42,7 @@ export const emptyData: AppData = {
   accounts: [],
   contents: [],
   contentVersions: [],
+  reviewComments: [],
   assets: [],
   goals: [],
   reports: [],
@@ -203,6 +204,7 @@ export const seedData: AppData = {
     },
   ],
   contentVersions: [],
+  reviewComments: [],
   assets: [
     {
       id: 'asset-1',

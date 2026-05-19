@@ -455,6 +455,30 @@ td span,
   font-size: 13px;
 }
 
+.version-box textarea,
+.review-editor textarea {
+  min-height: 90px;
+  margin-top: 10px;
+}
+
+.version-box button,
+.review-editor button {
+  margin-top: 8px;
+}
+
+.diff-line {
+  color: #526176;
+  line-height: 1.6;
+}
+
+.review-editor {
+  margin-top: 12px;
+  padding: 10px;
+  background: #f8fbfd;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
 .empty-state {
   display: grid;
   place-items: center;

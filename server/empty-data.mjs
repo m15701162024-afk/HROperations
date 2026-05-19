@@ -3,6 +3,7 @@ export const emptyData = {
   accounts: [],
   contents: [],
   contentVersions: [],
+  reviewComments: [],
   assets: [],
   goals: [],
   reports: [],

@@ -84,6 +84,16 @@ export interface ContentVersion {
   createdAt: string;
 }
 
+export interface ContentReviewComment {
+  id: string;
+  contentId: string;
+  reviewer: string;
+  stage: ContentStatus;
+  decision: '通过' | '修改建议' | '驳回';
+  comment: string;
+  createdAt: string;
+}
+
 export interface AssetItem {
   id: string;
   name: string;
@@ -241,6 +251,7 @@ export interface AppData {
   accounts: PlatformAccount[];
   contents: ContentTask[];
   contentVersions: ContentVersion[];
+  reviewComments: ContentReviewComment[];
   assets: AssetItem[];
   goals: Goal[];
   reports: ReportInsight[];

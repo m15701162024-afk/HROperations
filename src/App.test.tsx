@@ -39,6 +39,7 @@ describe('招聘运营助手', () => {
       accounts: [],
       contents: [],
       contentVersions: [],
+      reviewComments: [],
       assets: [],
       goals: [],
       reports: [],

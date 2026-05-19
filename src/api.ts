@@ -154,6 +154,7 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     accounts: data.accounts ?? [],
     contents: data.contents ?? [],
     contentVersions: data.contentVersions ?? [],
+    reviewComments: data.reviewComments ?? [],
     assets: data.assets ?? [],
     goals: data.goals ?? [],
     reports: data.reports ?? [],
