@@ -25,9 +25,9 @@ import {
   Users,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { generateContent, nextStatus, platformPositioning, platforms, scanRisks, seedData } from './data';
-import type { AppData, AssetItem, ContentTask, JobNeed, Platform, RecruitmentEntry } from './types';
-import { buildReportMarkdown, downloadText, exportJson, parseJobCsv, toCsv } from './utils';
+import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
+import type { AccountType, AppData, AssetItem, ContentTask, JobNeed, Platform, PlatformAccount, RecruitmentEntry } from './types';
+import { applyMetricsCsv, buildReportMarkdown, downloadText, exportJson, parseJobCsv, toCsv } from './utils';
 
 type Section =
   | '工作台'
@@ -52,21 +52,42 @@ const navItems: { key: Section; icon: React.ComponentType<{ size?: number }> }[]
 
 const contentTypes = ['岗位种草', '技术团队内容', '员工故事', '公司/业务介绍', '面试/求职干货', '短视频脚本', '图文笔记', '长文', '校招内容'];
 
+function isLegacyDemoData(data: Partial<AppData>) {
+  const demoJobIds = new Set(['job-1', 'job-2', 'job-3']);
+  const demoContentIds = new Set(['ct-1', 'ct-2', 'ct-3']);
+  return Boolean(
+    data.jobs?.some((job) => demoJobIds.has(job.id))
+    || data.contents?.some((content) => demoContentIds.has(content.id))
+    || data.auditLogs?.some((log) => log.action === '初始化种子数据'),
+  );
+}
+
 function useAppData() {
   const [data, setData] = useState<AppData>(() => {
+    const mode = localStorage.getItem('hr-assistant-data-mode');
+    if (mode !== 'real-v1') {
+      localStorage.setItem('hr-assistant-data-mode', 'real-v1');
+      localStorage.setItem('hr-assistant-data', JSON.stringify(emptyData));
+      return emptyData;
+    }
     const stored = localStorage.getItem('hr-assistant-data');
-    if (!stored) return seedData;
+    if (!stored) return emptyData;
     const parsed = JSON.parse(stored) as Partial<AppData>;
+    if (isLegacyDemoData(parsed)) {
+      localStorage.setItem('hr-assistant-data', JSON.stringify(emptyData));
+      return emptyData;
+    }
     return {
-      ...seedData,
+      ...emptyData,
       ...parsed,
-      entries: parsed.entries ?? seedData.entries,
-      auditLogs: parsed.auditLogs ?? seedData.auditLogs,
+      entries: parsed.entries ?? [],
+      auditLogs: parsed.auditLogs ?? [],
     };
   });
 
   const update = (next: AppData) => {
     setData(next);
+    localStorage.setItem('hr-assistant-data-mode', 'real-v1');
     localStorage.setItem('hr-assistant-data', JSON.stringify(next));
   };
 
@@ -107,8 +128,18 @@ function Badge({ children, tone = 'neutral' }: { children: React.ReactNode; tone
   return <span className={`badge ${tone}`}>{children}</span>;
 }
 
+function EmptyState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="empty-state">
+      <Database size={22} />
+      <strong>{title}</strong>
+      <span>{body}</span>
+    </div>
+  );
+}
+
 function Progress({ current, target }: { current: number; target: number }) {
-  const percent = Math.min(100, Math.round((current / target) * 100));
+  const percent = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
   return (
     <div className="progress" aria-label={`完成度 ${percent}%`}>
       <span style={{ width: `${percent}%` }} />
@@ -152,6 +183,7 @@ function Dashboard({ data }: { data: AppData }) {
           <Target size={18} />
         </div>
         <div className="goal-list">
+          {data.goals.length === 0 && <EmptyState title="暂无真实运营目标" body="请先录入目标或导入真实排期数据，当前进度按 0 计算。" />}
           {data.goals.map((goal) => (
             <article key={goal.id} className="goal-item">
               <div>
@@ -170,6 +202,7 @@ function Dashboard({ data }: { data: AppData }) {
           <h2>高风险待办</h2>
           <AlertTriangle size={18} />
         </div>
+        {data.contents.filter((item) => item.riskLevel === '高').length === 0 && <EmptyState title="暂无高风险待办" body="没有内容数据时高风险数量为 0；录入内容后系统会自动扫描。" />}
         {data.contents.filter((item) => item.riskLevel === '高').map((item) => (
           <div className="compact-row" key={item.id}>
             <div>
@@ -186,6 +219,7 @@ function Dashboard({ data }: { data: AppData }) {
           <h2>自动复盘建议</h2>
           <Bot size={18} />
         </div>
+        {data.reports.length === 0 && <EmptyState title="暂无复盘建议" body="导入平台数据或录入内容指标后，可生成真实周报和运营建议。" />}
         {data.reports.map((report) => (
           <div className="insight" key={report.id}>
             <Badge tone={report.severity === '机会' ? 'good' : report.severity === '风险' ? 'danger' : 'info'}>{report.severity}</Badge>
@@ -290,6 +324,11 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
             </tr>
           </thead>
           <tbody>
+            {data.jobs.length === 0 && (
+              <tr>
+                <td colSpan={6}><EmptyState title="暂无真实岗位需求" body="请通过上方表单录入，或粘贴 CSV 批量导入。" /></td>
+              </tr>
+            )}
             {data.jobs.map((job) => (
               <tr key={job.id}>
                 <td>
@@ -327,13 +366,14 @@ function ContentOps({ data, audit }: { data: AppData; audit: (action: string, ta
 
   const handleCreateTask = () => {
     if (!selectedJob || !draft.trim()) return;
+    const accountId = data.accounts.find((acc) => acc.platform === platform)?.id ?? data.accounts[0]?.id ?? '';
     const scanned = scanRisks(draft);
     const newTask: ContentTask = {
       id: `ct-${Date.now()}`,
       title: `${platform}｜${selectedJob.title}内容初稿`,
       jobId: selectedJob.id,
       platform,
-      accountId: data.accounts.find((acc) => acc.platform === platform)?.id ?? data.accounts[0].id,
+      accountId,
       type: platform === 'B站' || platform === '抖音' ? '短视频脚本' : platform === '小红书' ? '岗位种草' : '技术/行业观点',
       status: 'AI已生成',
       owner: '招聘专员',
@@ -356,25 +396,6 @@ function ContentOps({ data, audit }: { data: AppData; audit: (action: string, ta
     });
   };
 
-  const syncMetrics = () => {
-    const next = {
-      ...data,
-      contents: data.contents.map((item) => ({
-        ...item,
-        status: item.status === '已发布' ? '数据回收中' : item.status,
-        metrics: {
-          views: item.metrics.views + Math.round(Math.random() * 900),
-          likes: item.metrics.likes + Math.round(Math.random() * 80),
-          comments: item.metrics.comments + Math.round(Math.random() * 12),
-          saves: item.metrics.saves + Math.round(Math.random() * 45),
-          shares: item.metrics.shares + Math.round(Math.random() * 20),
-          clicks: item.metrics.clicks + Math.round(Math.random() * 24),
-        },
-      })),
-    };
-    audit('同步平台数据', '内容指标', next);
-  };
-
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -383,7 +404,7 @@ function ContentOps({ data, audit }: { data: AppData; audit: (action: string, ta
           <p>AI 多平台生成、风险识别、审核状态流转、排期发布一体管理。</p>
         </div>
         <div className="toolbar-actions">
-          <button onClick={syncMetrics}><RefreshCw size={16} />模拟同步数据</button>
+          <button onClick={() => downloadText('内容指标导入模板.csv', 'contentId,title,views,likes,comments,saves,shares,clicks\\n', 'text/csv;charset=utf-8')}><FileText size={16} />下载指标模板</button>
           <div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索内容、平台、类型" /></div>
         </div>
       </section>
@@ -393,9 +414,10 @@ function ContentOps({ data, audit }: { data: AppData; audit: (action: string, ta
           <h2>AI 内容生成</h2>
           <Sparkles size={18} />
         </div>
+        {data.jobs.length === 0 && <EmptyState title="请先录入真实岗位" body="AI 内容生成需要真实 JD、岗位卖点和目标平台作为输入。" />}
         <label>
           岗位需求
-          <select value={jobId} onChange={(event) => setJobId(event.target.value)}>
+          <select value={jobId} onChange={(event) => setJobId(event.target.value)} disabled={data.jobs.length === 0}>
             {data.jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
           </select>
         </label>
@@ -406,7 +428,7 @@ function ContentOps({ data, audit }: { data: AppData; audit: (action: string, ta
           </select>
         </label>
         <div className="platform-note">{platformPositioning[platform]}</div>
-        <button onClick={handleGenerate}><Bot size={16} />生成平台内容</button>
+        <button onClick={handleGenerate} disabled={data.jobs.length === 0}><Bot size={16} />生成平台内容</button>
         <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="生成或编辑内容初稿" />
         <div className="risk-box">
           <ShieldCheck size={16} />
@@ -422,6 +444,7 @@ function ContentOps({ data, audit }: { data: AppData; audit: (action: string, ta
           <Filter size={18} />
         </div>
         <div className="content-list">
+          {filtered.length === 0 && <EmptyState title="暂无真实内容任务" body="录入岗位后可生成内容任务；发布后的指标会进入看板。" />}
           {filtered.map((item) => (
             <article className="content-card" key={item.id}>
               <div>
@@ -488,6 +511,7 @@ function Assets({ data, audit }: { data: AppData; audit: (action: string, target
       </section>
       <section className="panel">
         <div className="panel-title"><h2>素材库</h2><Database size={18} /></div>
+        {data.assets.length === 0 && <EmptyState title="暂无真实素材" body="请录入公司介绍、JD、图片授权、FAQ 或技术案例采集记录。" />}
         {data.assets.map((asset) => (
           <div className="asset-row" key={asset.id}>
             <strong>{asset.name}</strong>
@@ -519,6 +543,29 @@ function Assets({ data, audit }: { data: AppData; audit: (action: string, target
 
 function Accounts({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
   const [entry, setEntry] = useState({ platform: '小红书' as Platform, headline: '', url: '', destination: '北森岗位页' as RecruitmentEntry['destination'] });
+  const [account, setAccount] = useState({
+    platform: '小红书' as Platform,
+    name: '',
+    type: '招聘专用账号' as AccountType,
+    owner: '',
+    positioning: '',
+  });
+
+  const createAccount = () => {
+    if (!account.name.trim()) return;
+    const item: PlatformAccount = {
+      id: `acc-${Date.now()}`,
+      ...account,
+      publishingRoles: ['招聘专员'],
+      reviewRule: '默认审核流程',
+      attribution: '招聘团队',
+      authStatus: '未授权',
+      status: '启用',
+    };
+    audit('新增平台账号', item.name, { ...data, accounts: [item, ...data.accounts] });
+    setAccount({ platform: '小红书', name: '', type: '招聘专用账号', owner: '', positioning: '' });
+  };
+
   const createEntry = () => {
     if (!entry.headline.trim() || !entry.url.trim()) return;
     const item: RecruitmentEntry = {
@@ -542,6 +589,24 @@ function Accounts({ data, audit }: { data: AppData; audit: (action: string, targ
         <button onClick={() => exportJson('平台账号与招聘入口.json', { accounts: data.accounts, entries: data.entries })}><FileText size={16} />导出配置</button>
       </section>
       <section className="panel wide">
+        <div className="panel-title"><h2>新增平台账号</h2><Users size={18} /></div>
+        <div className="inline-form">
+          <select value={account.platform} onChange={(event) => setAccount({ ...account, platform: event.target.value as Platform })}>
+            {platforms.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <input value={account.name} onChange={(event) => setAccount({ ...account, name: event.target.value })} placeholder="账号名称" />
+          <select value={account.type} onChange={(event) => setAccount({ ...account, type: event.target.value as AccountType })}>
+            <option>招聘专用账号</option>
+            <option>HR个人IP账号</option>
+            <option>技术负责人账号</option>
+            <option>校招账号</option>
+          </select>
+          <input value={account.owner} onChange={(event) => setAccount({ ...account, owner: event.target.value })} placeholder="负责人" />
+          <button onClick={createAccount}><Plus size={16} />保存账号</button>
+        </div>
+        <input value={account.positioning} onChange={(event) => setAccount({ ...account, positioning: event.target.value })} placeholder="账号定位，例如：岗位种草、校招答疑、技术观点" />
+      </section>
+      <section className="panel wide">
         <table>
           <thead>
             <tr>
@@ -554,6 +619,11 @@ function Accounts({ data, audit }: { data: AppData; audit: (action: string, targ
             </tr>
           </thead>
           <tbody>
+            {data.accounts.length === 0 && (
+              <tr>
+                <td colSpan={6}><EmptyState title="暂无真实平台账号" body="请录入实际运营账号，数据归属和发布权限会基于账号配置计算。" /></td>
+              </tr>
+            )}
             {data.accounts.map((account) => (
               <tr key={account.id}>
                 <td><strong>{account.platform}｜{account.name}</strong><span>{account.type}</span></td>
@@ -583,6 +653,7 @@ function Accounts({ data, audit }: { data: AppData; audit: (action: string, targ
           <button onClick={createEntry}><Plus size={16} />新增入口</button>
         </div>
         <div className="entry-grid">
+          {data.entries.length === 0 && <EmptyState title="暂无真实招聘入口" body="请配置平台主页中的北森或官网入口，后续点击会进入归因看板。" />}
           {data.entries.map((item) => (
             <article key={item.id}>
               <strong>{item.platform}｜{item.headline}</strong>
@@ -597,7 +668,8 @@ function Accounts({ data, audit }: { data: AppData; audit: (action: string, targ
   );
 }
 
-function Analytics({ data }: { data: AppData }) {
+function Analytics({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+  const [metricsCsv, setMetricsCsv] = useState('');
   const byPlatform = platforms.map((platform) => {
     const items = data.contents.filter((item) => item.platform === platform);
     return {
@@ -607,6 +679,12 @@ function Analytics({ data }: { data: AppData }) {
       count: items.length,
     };
   }).filter((item) => item.count > 0);
+  const maxViews = Math.max(...byPlatform.map((p) => p.views), 1);
+  const importMetrics = () => {
+    const nextContents = applyMetricsCsv(data.contents, metricsCsv);
+    audit('导入平台指标', '内容数据', { ...data, contents: nextContents });
+    setMetricsCsv('');
+  };
 
   return (
     <div className="page-grid">
@@ -615,15 +693,21 @@ function Analytics({ data }: { data: AppData }) {
           <h1>数据分析</h1>
           <p>按平台、账号、岗位族群、内容类型分析曝光、互动、点击和跳转漏斗。</p>
         </div>
-        <button><RefreshCw size={16} />同步/导入数据</button>
+        <button onClick={importMetrics}><RefreshCw size={16} />导入指标</button>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>平台指标导入</h2><Database size={18} /></div>
+        <p className="helper">支持字段：contentId/title、views、likes、comments、saves、shares、clicks，也支持中文表头。未导入时看板指标为 0。</p>
+        <textarea className="small-textarea" value={metricsCsv} onChange={(event) => setMetricsCsv(event.target.value)} placeholder="contentId,views,likes,comments,saves,shares,clicks&#10;ct-xxx,1000,20,3,8,2,15" />
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>平台效果对比</h2><BarChart3 size={18} /></div>
         <div className="bar-list">
+          {byPlatform.length === 0 && <EmptyState title="暂无真实平台指标" body="请先发布内容并导入平台后台数据；当前平台曝光、互动和点击均按 0 展示。" />}
           {byPlatform.map((item) => (
             <div key={item.platform} className="bar-row">
               <strong>{item.platform}</strong>
-              <Progress current={item.views} target={Math.max(...byPlatform.map((p) => p.views), 1)} />
+              <Progress current={item.views} target={maxViews} />
               <span>{item.views.toLocaleString()} 曝光 · {item.clicks} 点击</span>
             </div>
           ))}
@@ -631,6 +715,7 @@ function Analytics({ data }: { data: AppData }) {
       </section>
       <section className="panel">
         <div className="panel-title"><h2>岗位族群效果</h2><GitBranch size={18} /></div>
+        {data.jobs.length === 0 && <EmptyState title="暂无岗位族群数据" body="录入真实岗位后，这里会按岗位族群汇总点击。" />}
         {data.jobs.map((job) => {
           const related = data.contents.filter((item) => item.jobId === job.id);
           const clicks = related.reduce((sum, item) => sum + item.metrics.clicks, 0);
@@ -651,6 +736,17 @@ function Analytics({ data }: { data: AppData }) {
 }
 
 function Reports({ data }: { data: AppData }) {
+  const generatedReports = data.reports.length > 0
+    ? data.reports
+    : data.contents.length > 0
+      ? [{
+          id: 'auto-rp-empty',
+          title: '已有内容数据，等待更多真实指标',
+          body: '当前系统已存在内容任务，但复盘需要曝光、互动、点击等真实平台指标支撑。',
+          action: '请在数据分析页导入平台指标 CSV，再生成周报。',
+          severity: '建议' as const,
+        }]
+      : [];
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -666,7 +762,8 @@ function Reports({ data }: { data: AppData }) {
           <Badge tone="good">自动生成</Badge>
         </div>
         <div className="report-grid">
-          {data.reports.map((report) => (
+          {generatedReports.length === 0 && <EmptyState title="暂无真实复盘报告" body="没有真实内容和平台指标时，系统不生成演示洞察。" />}
+          {generatedReports.map((report) => (
             <article key={report.id} className="report-card">
               <Badge tone={report.severity === '机会' ? 'good' : report.severity === '风险' ? 'danger' : 'info'}>{report.severity}</Badge>
               <h3>{report.title}</h3>
@@ -679,10 +776,14 @@ function Reports({ data }: { data: AppData }) {
       <section className="panel wide">
         <div className="panel-title"><h2>高表现内容特征</h2><Sparkles size={18} /></div>
         <div className="template-grid">
-          <div className="template-chip">标题含具体岗位场景<small>提升点击意愿</small></div>
-          <div className="template-chip">强调真实技术挑战<small>适合脉脉/技术社区</small></div>
-          <div className="template-chip">校招内容使用成长路径<small>适合小红书收藏</small></div>
-          <div className="template-chip">CTA 指向主页入口<small>利于归因统计</small></div>
+          {data.contents.length === 0 && <EmptyState title="暂无高表现特征" body="导入真实内容效果后，系统会提炼标题、平台、账号和岗位族群特征。" />}
+          {data.contents.length > 0 && data.contents
+            .slice()
+            .sort((a, b) => b.metrics.clicks - a.metrics.clicks)
+            .slice(0, 4)
+            .map((content) => (
+              <div className="template-chip" key={content.id}>{content.title}<small>{content.platform} · {content.metrics.clicks} 点击</small></div>
+            ))}
         </div>
       </section>
     </div>
@@ -690,6 +791,16 @@ function Reports({ data }: { data: AppData }) {
 }
 
 function SettingsPage({ data }: { data: AppData }) {
+  const remainingItems = [
+    '接入北森岗位同步、投递数据、面试/Offer/入职结果回流',
+    '接入小红书、脉脉、B站、公众号等平台的真实 API 或授权采集',
+    '浏览器插件半自动发布与平台后台数据抓取',
+    '企业微信/飞书审批提醒和待办通知',
+    'AI 基于历史真实数据推荐平台、发布时间、标题方向',
+    '多触点归因、真实招聘 ROI、成本模型与 BI 同步',
+    '自建招聘落地页、岗位集合页、校招专题页',
+    '权限矩阵后台配置、敏感词规则后台维护、审计导出',
+  ];
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -724,6 +835,7 @@ function SettingsPage({ data }: { data: AppData }) {
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>操作日志</h2><ShieldCheck size={18} /></div>
+        {data.auditLogs.length === 0 && <EmptyState title="暂无操作日志" body="录入真实数据后，系统会保留创建、导入、审核和配置动作。" />}
         <table>
           <thead>
             <tr>
@@ -745,6 +857,14 @@ function SettingsPage({ data }: { data: AppData }) {
           </tbody>
         </table>
       </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>剩余待开发项</h2><ClipboardList size={18} /></div>
+        <div className="todo-grid">
+          {remainingItems.map((item) => (
+            <div className="todo-item" key={item}><CheckCircle2 size={16} />{item}</div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -762,7 +882,7 @@ function renderSection(section: Section, data: AppData, update: (data: AppData) 
     case '账号与平台':
       return <Accounts data={data} audit={audit} />;
     case '数据分析':
-      return <Analytics data={data} />;
+      return <Analytics data={data} audit={audit} />;
     case '复盘报告':
       return <Reports data={data} />;
     case '系统配置':

@@ -1,4 +1,4 @@
-import type { AppData, JobNeed, Platform } from './types';
+import type { AppData, ContentTask, JobNeed, Platform } from './types';
 
 export function downloadText(filename: string, text: string, type = 'text/plain;charset=utf-8') {
   const blob = new Blob([text], { type });
@@ -48,6 +48,35 @@ export function parseJobCsv(raw: string): JobNeed[] {
       status: '招聘中',
       beisenUrl: row.beisenUrl || row.北森链接 || '',
       websiteUrl: row.websiteUrl || row.官网链接 || '',
+    };
+  });
+}
+
+export function applyMetricsCsv(contents: ContentTask[], raw: string) {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return contents;
+  const headers = splitCsvLine(lines[0]).map((header) => header.trim());
+  const rows = lines.slice(1).map((line) => {
+    const values = splitCsvLine(line);
+    return Object.fromEntries(headers.map((header, i) => [header, values[i] ?? '']));
+  });
+  return contents.map((content) => {
+    const row = rows.find((item) => item.contentId === content.id || item.内容ID === content.id || item.title === content.title || item.标题 === content.title);
+    if (!row) return content;
+    const numberOf = (...keys: string[]) => {
+      const value = keys.map((key) => row[key]).find((item) => item !== undefined && item !== '');
+      return Number(value ?? 0);
+    };
+    return {
+      ...content,
+      metrics: {
+        views: numberOf('views', '曝光', '阅读', '播放', '曝光量'),
+        likes: numberOf('likes', '点赞', '点赞量'),
+        comments: numberOf('comments', '评论', '评论量'),
+        saves: numberOf('saves', '收藏', '收藏量'),
+        shares: numberOf('shares', '转发', '分享', '转发量'),
+        clicks: numberOf('clicks', '点击', '招聘入口点击', '点击量'),
+      },
     };
   });
 }

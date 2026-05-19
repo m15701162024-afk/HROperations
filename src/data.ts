@@ -37,6 +37,17 @@ export const riskRules = [
   '歧视性招聘条件、虚假宣传',
 ];
 
+export const emptyData: AppData = {
+  jobs: [],
+  accounts: [],
+  contents: [],
+  assets: [],
+  goals: [],
+  reports: [],
+  entries: [],
+  auditLogs: [],
+};
+
 export const seedData: AppData = {
   jobs: [
     {

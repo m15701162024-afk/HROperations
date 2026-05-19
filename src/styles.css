@@ -77,6 +77,11 @@ button:hover {
   filter: brightness(0.96);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
@@ -375,6 +380,23 @@ td span,
   border-top: 1px solid var(--line);
 }
 
+.empty-state {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 110px;
+  padding: 18px;
+  color: var(--muted);
+  text-align: center;
+  background: #f7fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+}
+
+.empty-state strong {
+  color: var(--ink);
+}
+
 .insight:first-of-type {
   border-top: 0;
 }
@@ -655,6 +677,30 @@ textarea {
   gap: 8px;
   border-bottom: 1px solid var(--line);
   color: #5b4550;
+}
+
+.todo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  color: #435165;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  line-height: 1.55;
+}
+
+.todo-item svg {
+  flex: 0 0 auto;
+  color: var(--blue);
+  margin-top: 2px;
 }
 
 @media (max-width: 1080px) {
