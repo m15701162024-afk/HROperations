@@ -53,6 +53,14 @@ export async function testIntegrationConfig(integration: IntegrationConfig, toke
   }>(`${API_BASE}/api/integrations/test`, 'POST', token, integration);
 }
 
+export async function sendIntegrationMessage(integration: IntegrationConfig, message: string, token?: string) {
+  return await requestJson<{
+    ok: boolean;
+    statusCode?: number;
+    message: string;
+  }>(`${API_BASE}/api/integrations/send`, 'POST', token, { integration, message });
+}
+
 export async function testModelApiConfig(config: ModelApiConfig, token?: string) {
   return await requestJson<{
     ok: boolean;

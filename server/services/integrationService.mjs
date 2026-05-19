@@ -28,6 +28,41 @@ export async function testIntegration(integration) {
   }
 }
 
+export async function sendIntegrationMessage(integration, message) {
+  if (!integration?.endpoint) {
+    return { ok: false, message: '缺少接口地址或 Webhook' };
+  }
+  if (integration.type !== '企业微信' && integration.type !== '飞书') {
+    return { ok: false, message: '当前集成类型不支持消息发送' };
+  }
+
+  const body = integration.type === '企业微信'
+    ? { msgtype: 'text', text: { content: message } }
+    : { msg_type: 'text', content: { text: message } };
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(integration.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    return {
+      ok: response.ok,
+      statusCode: response.status,
+      message: response.ok ? '消息发送成功' : `消息发送失败：HTTP ${response.status}`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : '消息发送失败',
+    };
+  }
+}
+
 export async function testModelApi(config) {
   if (!config?.baseUrl || !config?.apiKey || !config?.model) {
     return { ok: false, status: '未配置', message: '请填写 Base URL、API Key 和模型名称' };

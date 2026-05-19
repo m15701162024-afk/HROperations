@@ -26,9 +26,9 @@ import {
   Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, runModelTask, saveRemoteData, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
+import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
-import type { AccountType, AppData, AssetItem, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, LandingPageLead, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
+import type { AccountType, AppData, AssetItem, BeisenResult, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, IntegrationConfig, JobNeed, LandingPage, LandingPageLead, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
 
 type Section =
@@ -1008,6 +1008,25 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     });
   };
 
+  const sendNotificationDigest = async (id: string) => {
+    const target = data.integrations.find((item) => item.id === id);
+    if (!target) return;
+    const pending = data.notifications.filter((item) => item.level === '待办' || item.level === '预警').slice(0, 8);
+    const message = [
+      '招聘运营助手待办摘要',
+      `待办/预警数量：${pending.length}`,
+      ...pending.map((item) => `- ${item.title}：${item.body}`),
+    ].join('\n');
+    const result = await sendIntegrationMessage(target, message, apiToken);
+    audit('发送通知摘要', `${target.name}：${result.message}`, {
+      ...data,
+      notifications: [
+        makeNotification('通知摘要发送结果', `${target.name}：${result.message}`, '账号与平台', result.ok ? '提醒' : '预警'),
+        ...data.notifications,
+      ],
+    });
+  };
+
   const createLanding = () => {
     if (!landing.title.trim()) return;
     const item: LandingPage = {
@@ -1068,6 +1087,44 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     setLandingLeadDrafts({ ...landingLeadDrafts, [landingPage.id]: { ...draft, name: '', contact: '', note: '' } });
   };
 
+  const transferLandingLeadToBeisen = (leadId: string) => {
+    const lead = data.landingLeads.find((item) => item.id === leadId);
+    if (!lead || lead.status === '已转入北森') return;
+    const landingPage = data.landingPages.find((item) => item.id === lead.landingPageId);
+    const result: BeisenResult = {
+      id: `beisen-lead-${Date.now()}`,
+      jobId: lead.targetJobId,
+      sourcePlatform: lead.sourcePlatform,
+      sourceContentId: landingPage?.id,
+      candidateCode: `lead-${lead.id}`,
+      stage: '已投递',
+      importedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    };
+    audit('线索转入北森前置结果', lead.name, {
+      ...data,
+      landingLeads: data.landingLeads.map((item) => item.id === leadId ? { ...item, status: '已转入北森' } : item),
+      beisenResults: [result, ...data.beisenResults],
+      notifications: [
+        makeNotification('线索已进入北森回流池', `${lead.name} 已按“已投递”进入归因数据`, '数据分析', '提醒'),
+        ...data.notifications,
+      ],
+    });
+  };
+
+  const exportLandingLeads = () => {
+    downloadText('落地页线索.csv', toCsv(data.landingLeads.map((lead) => ({
+      id: lead.id,
+      landingPageId: lead.landingPageId,
+      name: lead.name,
+      contact: lead.contact,
+      targetJobId: lead.targetJobId,
+      sourcePlatform: lead.sourcePlatform,
+      note: lead.note,
+      status: lead.status,
+      submittedAt: lead.submittedAt,
+    }))), 'text/csv;charset=utf-8');
+  };
+
   const removeAccount = (id: string) => {
     const target = data.accounts.find((item) => item.id === id);
     audit('删除平台账号', target?.name ?? id, { ...data, accounts: data.accounts.filter((item) => item.id !== id) });
@@ -1085,7 +1142,10 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
           <h1>账号与平台</h1>
           <p>管理平台账号定位、授权状态、发布权限、主页招聘入口和数据归属。</p>
         </div>
-        <button onClick={() => exportJson('平台账号与招聘入口.json', { accounts: data.accounts, entries: data.entries })}><FileText size={16} />导出配置</button>
+        <div className="toolbar-actions">
+          <button onClick={() => exportJson('平台账号与招聘入口.json', { accounts: data.accounts, entries: data.entries, landingPages: data.landingPages })}><FileText size={16} />导出配置</button>
+          <button className="secondary" onClick={exportLandingLeads}><Database size={16} />导出线索</button>
+        </div>
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>新增平台账号</h2><Users size={18} /></div>
@@ -1194,7 +1254,10 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
               <strong>{item.type}｜{item.name}</strong>
               <span>{item.authMode} · {item.endpoint || '未填写接口地址'}</span>
               <Badge tone={item.status === '已连接' ? 'good' : item.status === '连接失败' ? 'danger' : 'warn'}>{item.status}</Badge>
-              <button className="ghost" onClick={() => void testIntegration(item.id)}>测试连接</button>
+              <div className="card-actions-inline">
+                <button className="ghost" onClick={() => void testIntegration(item.id)}>测试连接</button>
+                {(item.type === '企业微信' || item.type === '飞书') && <button className="ghost" onClick={() => void sendNotificationDigest(item.id)}>发送摘要</button>}
+              </div>
             </article>
           ))}
         </div>
@@ -1269,7 +1332,10 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
                   <button className="secondary" onClick={() => submitLandingLead(item)}>提交线索</button>
                 </div>
                 {leads.map((lead) => (
-                  <p key={lead.id}>{lead.name} · {lead.contact} · {lead.sourcePlatform} · {lead.status} · {lead.submittedAt}</p>
+                  <div className="lead-row" key={lead.id}>
+                    <span>{lead.name} · {lead.contact} · {lead.sourcePlatform} · {lead.status} · {lead.submittedAt}</span>
+                    <button className="ghost" disabled={lead.status === '已转入北森'} onClick={() => transferLandingLeadToBeisen(lead.id)}>转入北森</button>
+                  </div>
                 ))}
               </details>
             </article>
