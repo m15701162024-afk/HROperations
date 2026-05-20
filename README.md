@@ -23,11 +23,14 @@ npm run test
 npm run build
 ```
 
-开发模式前端：
+开发模式建议同时启动本地 API 和前端开发服务：
 
 ```bash
+npm run api
 npm run dev
 ```
+
+开发模式下 API 使用 `5173`，Vite 前端使用 `5174` 并代理 `/api` 和 `/uploads`，避免单端口服务与开发服务器互相代理。
 
 单端口部署模式：
 
@@ -47,14 +50,32 @@ HR_ASSISTANT_API_PORT=5173 npm run serve
 
 若前后端分开部署，才需要显式指定 `VITE_API_BASE_URL`；当前推荐单端口部署，不再使用 8788。
 
-本地 API 默认账号：
+台式机长期运行可安装 macOS launchd 守护服务，服务会在登录后自动启动并在异常退出后重启：
+
+```bash
+npm run service:install
+```
+
+卸载服务：
+
+```bash
+npm run service:uninstall
+```
+
+本地 API 管理员账号：
 
 ```text
 账号：admin
-密码：HRAssistant@2026
+密码：首次创建时由 HR_ASSISTANT_ADMIN_PASSWORD 环境变量指定
 ```
 
-首次启动 `npm run api` 时会在 `data/hr-assistant-auth.json` 中创建本地管理员。该文件已被 `.gitignore` 排除，不会提交账号信息。
+首次启动 `npm run api` 且 `data/hr-assistant-auth.json` 不存在时，请先设置初始密码：
+
+```bash
+HR_ASSISTANT_ADMIN_PASSWORD='请替换为强密码' npm run api
+```
+
+创建后会在 `data/hr-assistant-auth.json` 中保存本地管理员的加密口令。该文件已被 `.gitignore` 排除，不会提交账号信息。
 素材上传文件会保存在 `data/uploads/`，该目录同样不会提交到代码仓。
 
 ## 本地服务结构

@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, dirname, extname, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createJsonRepository } from './repositories/jsonRepository.mjs';
 import { createAuthService } from './services/authService.mjs';
@@ -13,13 +13,21 @@ const authFile = resolve(rootDir, 'data/hr-assistant-auth.json');
 const uploadDir = resolve(rootDir, 'data/uploads');
 const distDir = resolve(rootDir, 'dist');
 const port = Number(process.env.HR_ASSISTANT_API_PORT ?? 5173);
+const SECRET_MASK = '********';
+const JSON_BODY_LIMIT = 1024 * 1024;
+const UPLOAD_BODY_LIMIT = 20 * 1024 * 1024;
 
 const repository = createJsonRepository(dataFile);
 const authService = createAuthService(authFile);
 
-async function readBody(request) {
+async function readBody(request, limitBytes = JSON_BODY_LIMIT) {
   const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
+  let total = 0;
+  for await (const chunk of request) {
+    total += chunk.length;
+    if (total > limitBytes) throw new Error(`Request body too large. Limit is ${Math.round(limitBytes / 1024 / 1024)} MB`);
+    chunks.push(chunk);
+  }
   return Buffer.concat(chunks).toString('utf-8');
 }
 
@@ -84,11 +92,58 @@ function contentTypeFor(filePath) {
   return 'application/octet-stream';
 }
 
-async function serveStatic(request, response) {
+function isSafeChildPath(parentDir, candidatePath) {
+  const child = relative(parentDir, candidatePath);
+  return child === '' || (child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child));
+}
+
+function isMaskedSecret(value) {
+  return typeof value === 'string' && value.length > 0 && /^[*•]+$/.test(value);
+}
+
+function redactSecrets(data) {
+  return {
+    ...data,
+    integrations: (data.integrations ?? []).map((item) => ({ ...item, apiKey: item.apiKey ? SECRET_MASK : '' })),
+    modelApis: (data.modelApis ?? []).map((item) => ({ ...item, apiKey: item.apiKey ? SECRET_MASK : '' })),
+  };
+}
+
+function preserveSecrets(incoming, existing) {
+  const existingIntegrations = new Map((existing.integrations ?? []).map((item) => [item.id, item]));
+  const existingModelApis = new Map((existing.modelApis ?? []).map((item) => [item.id, item]));
+  return {
+    ...incoming,
+    integrations: (incoming.integrations ?? []).map((item) => {
+      const previous = existingIntegrations.get(item.id);
+      return previous && isMaskedSecret(item.apiKey) ? { ...item, apiKey: previous.apiKey } : item;
+    }),
+    modelApis: (incoming.modelApis ?? []).map((item) => {
+      const previous = existingModelApis.get(item.id);
+      return previous && isMaskedSecret(item.apiKey) ? { ...item, apiKey: previous.apiKey } : item;
+    }),
+  };
+}
+
+async function hydrateIntegrationConfig(config) {
+  if (!config?.id || (config.apiKey && !isMaskedSecret(config.apiKey))) return config;
+  const data = await repository.readData();
+  const stored = data.integrations.find((item) => item.id === config.id);
+  return stored ? { ...config, apiKey: stored.apiKey } : config;
+}
+
+async function hydrateModelConfig(config) {
+  if (!config?.id || (config.apiKey && !isMaskedSecret(config.apiKey))) return config;
+  const data = await repository.readData();
+  const stored = data.modelApis.find((item) => item.id === config.id);
+  return stored ? { ...config, apiKey: stored.apiKey } : config;
+}
+
+async function serveStatic(pathname, response) {
   try {
-    const rawPath = decodeURIComponent((request.url ?? '/').split('?')[0]);
+    const rawPath = decodeURIComponent(pathname);
     const filePath = rawPath === '/' ? resolve(distDir, 'index.html') : resolve(distDir, rawPath.slice(1));
-    if (!filePath.startsWith(distDir)) {
+    if (!isSafeChildPath(distDir, filePath)) {
       send(response, 400, { ok: false, error: 'Invalid file path' });
       return;
     }
@@ -103,22 +158,25 @@ async function serveStatic(request, response) {
 }
 
 const server = createServer(async (request, response) => {
+  const currentUrl = new URL(request.url ?? '/', 'http://localhost');
+  const pathname = currentUrl.pathname;
+
   if (request.method === 'OPTIONS') {
     send(response, 204, {});
     return;
   }
 
-  if (request.url === '/api/health') {
+  if (pathname === '/api/health') {
     send(response, 200, { ok: true, storage: 'json', auth: 'local' });
     return;
   }
 
-  if (request.url?.startsWith('/uploads/') && request.method === 'GET') {
+  if (pathname.startsWith('/uploads/') && request.method === 'GET') {
     try {
-      const requestedName = decodeURIComponent(request.url.replace('/uploads/', '').split('?')[0]);
+      const requestedName = decodeURIComponent(pathname.replace('/uploads/', ''));
       const safeName = basename(requestedName);
       const filePath = resolve(uploadDir, safeName);
-      if (!filePath.startsWith(uploadDir)) {
+      if (!isSafeChildPath(uploadDir, filePath)) {
         send(response, 400, { ok: false, error: 'Invalid file path' });
         return;
       }
@@ -129,7 +187,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (request.url === '/api/login' && request.method === 'POST') {
+  if (pathname === '/api/login' && request.method === 'POST') {
     try {
       const body = JSON.parse(await readBody(request));
       const result = await authService.login(body.username, body.password);
@@ -138,13 +196,13 @@ const server = createServer(async (request, response) => {
         return;
       }
       send(response, 200, result);
-    } catch {
-      send(response, 400, { ok: false, error: 'Invalid request' });
+    } catch (error) {
+      send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid request' });
     }
     return;
   }
 
-  if (request.url === '/api/track' && request.method === 'POST') {
+  if (pathname === '/api/track' && request.method === 'POST') {
     try {
       if (!verifyPublicSignature(request)) {
         send(response, 401, { ok: false, error: 'Invalid signature' });
@@ -177,7 +235,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (request.url === '/api/landing/leads' && request.method === 'POST') {
+  if (pathname === '/api/landing/leads' && request.method === 'POST') {
     try {
       if (!verifyPublicSignature(request)) {
         send(response, 401, { ok: false, error: 'Invalid signature' });
@@ -228,25 +286,30 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (request.url === '/api/session' && request.method === 'GET') {
+  if (pathname === '/api/session' && request.method === 'GET') {
     const session = requireSession(request, response);
     if (!session) return;
     send(response, 200, { user: session });
     return;
   }
 
-  if (request.url === '/api/data' && request.method === 'GET') {
+  if (pathname === '/api/data' && request.method === 'GET') {
     if (!requireSession(request, response)) return;
-    send(response, 200, await repository.readData());
+    try {
+      send(response, 200, redactSecrets(await repository.readData()));
+    } catch (error) {
+      send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Data store unavailable' });
+    }
     return;
   }
 
-  if (request.url === '/api/data' && request.method === 'PUT') {
+  if (pathname === '/api/data' && request.method === 'PUT') {
     if (!requireSession(request, response)) return;
     try {
       const body = await readBody(request);
       const data = JSON.parse(body);
-      await repository.writeData(data);
+      const existing = await repository.readData();
+      await repository.writeData(preserveSecrets(data, existing));
       send(response, 200, { ok: true });
     } catch (error) {
       send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid request' });
@@ -254,10 +317,10 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (request.url === '/api/assets/upload' && request.method === 'POST') {
+  if (pathname === '/api/assets/upload' && request.method === 'POST') {
     if (!requireSession(request, response)) return;
     try {
-      const body = JSON.parse(await readBody(request));
+      const body = JSON.parse(await readBody(request, UPLOAD_BODY_LIMIT));
       const match = String(body.dataUrl ?? '').match(/^data:([^;]+);base64,(.+)$/);
       if (!match) {
         send(response, 400, { ok: false, error: 'Invalid file payload' });
@@ -283,7 +346,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (request.url === '/api/platform-metrics/import' && request.method === 'POST') {
+  if (pathname === '/api/platform-metrics/import' && request.method === 'POST') {
     if (!requireSession(request, response)) return;
     try {
       const body = JSON.parse(await readBody(request));
@@ -324,55 +387,55 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (request.url === '/api/integrations/test' && request.method === 'POST') {
+  if (pathname === '/api/integrations/test' && request.method === 'POST') {
     if (!requireSession(request, response)) return;
     try {
       const integration = JSON.parse(await readBody(request));
-      send(response, 200, await testIntegration(integration));
+      send(response, 200, await testIntegration(await hydrateIntegrationConfig(integration)));
     } catch (error) {
       send(response, 400, { ok: false, status: '连接失败', message: error instanceof Error ? error.message : 'Invalid request' });
     }
     return;
   }
 
-  if (request.url === '/api/integrations/send' && request.method === 'POST') {
+  if (pathname === '/api/integrations/send' && request.method === 'POST') {
     if (!requireSession(request, response)) return;
     try {
       const body = JSON.parse(await readBody(request));
-      send(response, 200, await sendIntegrationMessage(body.integration, body.message));
+      send(response, 200, await sendIntegrationMessage(await hydrateIntegrationConfig(body.integration), body.message));
     } catch (error) {
       send(response, 400, { ok: false, message: error instanceof Error ? error.message : 'Invalid request' });
     }
     return;
   }
 
-  if (request.url === '/api/integrations/sync' && request.method === 'POST') {
+  if (pathname === '/api/integrations/sync' && request.method === 'POST') {
     if (!requireSession(request, response)) return;
     try {
       const body = JSON.parse(await readBody(request));
-      send(response, 200, await runIntegrationSync(body.integration, body.syncType, body.payload));
+      send(response, 200, await runIntegrationSync(await hydrateIntegrationConfig(body.integration), body.syncType, body.payload));
     } catch (error) {
       send(response, 400, { ok: false, message: error instanceof Error ? error.message : 'Invalid request', recordCount: 0 });
     }
     return;
   }
 
-  if (request.url === '/api/model-apis/test' && request.method === 'POST') {
+  if (pathname === '/api/model-apis/test' && request.method === 'POST') {
     if (!requireSession(request, response)) return;
     try {
       const config = JSON.parse(await readBody(request));
-      send(response, 200, await testModelApi(config));
+      send(response, 200, await testModelApi(await hydrateModelConfig(config)));
     } catch (error) {
       send(response, 400, { ok: false, status: '连接失败', message: error instanceof Error ? error.message : 'Invalid request' });
     }
     return;
   }
 
-  if (request.url === '/api/model-apis/run' && request.method === 'POST') {
+  if (pathname === '/api/model-apis/run' && request.method === 'POST') {
     if (!requireSession(request, response)) return;
     try {
       const body = JSON.parse(await readBody(request));
-      send(response, 200, await runModelApi(body.config, body.task, body.input));
+      send(response, 200, await runModelApi(await hydrateModelConfig(body.config), body.task, body.input));
     } catch (error) {
       send(response, 400, { ok: false, message: error instanceof Error ? error.message : 'Invalid request' });
     }
@@ -380,7 +443,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === 'GET') {
-    await serveStatic(request, response);
+    await serveStatic(pathname, response);
     return;
   }
 

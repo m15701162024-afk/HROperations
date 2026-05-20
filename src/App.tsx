@@ -254,7 +254,7 @@ function LoginScreen({ onLogin, error }: { onLogin: (username: string, password:
         </label>
         {error && <div className="login-error">{error}</div>}
         <button className="full" type="submit" disabled={loading}>{loading ? '登录中' : '登录'}</button>
-        <small>默认本地账号：admin / HRAssistant@2026。首次启动会自动创建本地管理员。</small>
+        <small>本地账号：admin。首次创建管理员时需通过 HR_ASSISTANT_ADMIN_PASSWORD 设置初始密码。</small>
       </form>
     </div>
   );
@@ -1739,9 +1739,8 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
       dataScope: role.dataScope,
       permissions: role.permissions.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean),
     };
-    const next = { ...data, roles: [item, ...data.roles] };
-    localStorage.setItem('hr-assistant-data', JSON.stringify(next));
-    location.reload();
+    update({ ...data, roles: [item, ...data.roles] });
+    setRole({ name: '', dataScope: '个人', permissions: '岗位查看、内容创建' });
   };
   const addRule = () => {
     if (!rule.keyword.trim()) return;
@@ -1750,9 +1749,8 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
       ...rule,
       enabled: true,
     };
-    const next = { ...data, sensitiveRules: [item, ...data.sensitiveRules] };
-    localStorage.setItem('hr-assistant-data', JSON.stringify(next));
-    location.reload();
+    update({ ...data, sensitiveRules: [item, ...data.sensitiveRules] });
+    setRule({ keyword: '', category: '合规表达', riskLevel: '高', suggestion: '' });
   };
   const addUser = () => {
     if (!user.name.trim()) return;
@@ -1937,7 +1935,7 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
               <strong>{item.provider}｜{item.name}</strong>
               <span>{item.baseUrl} · {item.model}</span>
               <span>用途：{item.enabledFor.join('、')}</span>
-              <span>密钥：{item.apiKey ? `已配置（${item.apiKey.slice(0, 4)}...）` : '未配置'}</span>
+              <span>密钥：{item.apiKey ? '已配置' : '未配置'}</span>
               <Badge tone={item.status === '已连接' ? 'good' : item.status === '连接失败' ? 'danger' : 'warn'}>{item.status}</Badge>
               {item.lastTestAt && <span>最近测试：{item.lastTestAt}</span>}
               <div className="card-actions-inline">

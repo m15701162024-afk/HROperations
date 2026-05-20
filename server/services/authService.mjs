@@ -9,7 +9,12 @@ export function createAuthService(authFile) {
     try {
       const raw = await readFile(authFile, 'utf-8');
       return JSON.parse(raw);
-    } catch {
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      const initialPassword = process.env.HR_ASSISTANT_ADMIN_PASSWORD;
+      if (!initialPassword) {
+        throw new Error('首次创建本地管理员前，请先设置 HR_ASSISTANT_ADMIN_PASSWORD 环境变量');
+      }
       const initial = {
         users: [
           {
@@ -17,7 +22,7 @@ export function createAuthService(authFile) {
             username: 'admin',
             name: '本地管理员',
             role: '系统管理员',
-            password: hashPassword('HRAssistant@2026'),
+            password: hashPassword(initialPassword),
           },
         ],
       };
