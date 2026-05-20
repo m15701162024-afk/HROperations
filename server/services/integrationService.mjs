@@ -52,18 +52,23 @@ export async function runIntegrationSync(integration, syncType, payload) {
 }
 
 async function requestIntegration(integration, syncType, payload) {
+    const extra = parseExtraConfig(integration?.extraConfig);
+    const scenario = extra.scenarios?.[syncType] ?? {};
+    const method = scenario.method ?? extra.method ?? (syncType === '平台指标拉取' || syncType === '北森结果回流' ? 'GET' : 'POST');
+    const url = buildUrl(integration.endpoint, scenario.endpointPath ?? extra.endpointPath, scenario.query ?? extra.query);
+    const mappedPayload = mapPayload(payload, scenario.fieldMapping ?? extra.fieldMapping ?? extra.fields);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
-    const response = await fetch(integration.endpoint, {
-      method: syncType === '平台指标拉取' || syncType === '北森结果回流' ? 'GET' : 'POST',
+    const response = await fetch(url, {
+      method,
       headers: buildHeaders(integration),
-      body: syncType === '平台指标拉取' || syncType === '北森结果回流' ? undefined : JSON.stringify(payload ?? {}),
+      body: method === 'GET' ? undefined : JSON.stringify(mappedPayload ?? {}),
       signal: controller.signal,
     });
     clearTimeout(timer);
 
     const text = await response.text();
-    const data = parseJson(text);
+    const data = pickPath(parseJson(text), scenario.resultPath ?? extra.resultPath);
     const recordCount = Array.isArray(data) ? data.length : Number(data?.recordCount ?? data?.count ?? payload?.records?.length ?? 0);
     return {
       ok: response.ok,
@@ -124,6 +129,40 @@ function parseJson(text) {
   } catch {
     return { raw: text };
   }
+}
+
+function parseExtraConfig(raw) {
+  if (!raw) return {};
+  try {
+    return typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch {
+    return {};
+  }
+}
+
+function buildUrl(endpoint, endpointPath = '', query = {}) {
+  const base = String(endpoint ?? '').replace(/\/$/, '');
+  const path = String(endpointPath ?? '').replace(/^\//, '');
+  const url = new URL(path ? `${base}/${path}` : base);
+  Object.entries(query ?? {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
+  });
+  return url.toString();
+}
+
+function mapPayload(payload, fieldMapping) {
+  if (!fieldMapping || typeof fieldMapping !== 'object' || !Array.isArray(payload?.records)) return payload;
+  return {
+    ...payload,
+    records: payload.records.map((record) => Object.fromEntries(
+      Object.entries(fieldMapping).map(([target, source]) => [target, record[source] ?? record[target] ?? '']),
+    )),
+  };
+}
+
+function pickPath(data, path) {
+  if (!path) return data;
+  return String(path).split('.').filter(Boolean).reduce((value, key) => value?.[key], data) ?? data;
 }
 
 export async function testModelApi(config) {

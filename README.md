@@ -13,6 +13,7 @@
 - 数据分析：平台、岗位族群、内容漏斗代理指标
 - 复盘报告：周报/月报洞察、行动建议、高表现内容特征
 - 系统配置：角色权限、审核流程、高风险规则库
+- 生产化配置：北森/平台字段映射、隐私合规台账、上线任务、系统健康检查和手动备份
 
 ## 开发命令
 
@@ -99,12 +100,16 @@ POST /api/integrations/test
 POST /api/integrations/sync
 POST /api/integrations/send
 POST /api/platform-metrics/import
+GET /api/system/health
+POST /api/system/backup
 ```
 
 - 北森集成：在页面配置北森 OpenAPI 地址和 Token 后，可同步待转入北森的落地页线索，并写入回流归因池。
 - 平台 API：配置平台指标接口后，可拉取指标；若接口返回 `records` 或 `metrics` 数组，系统会按 `contentId` 或 `title` 写回内容指标。
 - 企业微信/飞书：配置 Webhook 后，可发送待办/预警摘要。
 - 浏览器插件：`browser-extension/` 是 MV3 插件目录，可在浏览器开发者模式加载，用于采集当前平台页面指标。
+- 字段映射：在系统配置里维护北森、平台 API、BI 的字段映射，并一键写入同类型集成的扩展配置。扩展配置支持 `method`、`endpointPath`、`resultPath`、`fieldMapping`。
+- 健康与备份：系统配置里的健康检查会返回数据文件大小、备份数量和核心数据计数；立即备份会把数据文件复制到 `data/backups/`。
 
 素材上传接口：
 

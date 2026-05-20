@@ -273,6 +273,38 @@ export interface AuditLog {
   createdAt: string;
 }
 
+export interface IntegrationMapping {
+  id: string;
+  name: string;
+  integrationType: IntegrationConfig['type'];
+  scenario: IntegrationSyncRun['syncType'];
+  method: 'GET' | 'POST' | 'PUT';
+  endpointPath: string;
+  resultPath: string;
+  fieldMapping: string;
+  enabled: boolean;
+}
+
+export interface CompliancePolicy {
+  id: string;
+  title: string;
+  scope: '隐私授权' | '招聘合规' | '内容审核' | '数据安全' | '公网落地页';
+  owner: string;
+  status: '草稿' | '生效' | '待更新';
+  content: string;
+  updatedAt: string;
+}
+
+export interface DeploymentTask {
+  id: string;
+  title: string;
+  category: '账号体系' | '数据库' | '平台接口' | '安全合规' | '运维监控' | '插件发布';
+  owner: string;
+  status: '未开始' | '进行中' | '已完成';
+  dueDate: string;
+  note: string;
+}
+
 export interface AppData {
   jobs: JobNeed[];
   accounts: PlatformAccount[];
@@ -296,4 +328,7 @@ export interface AppData {
   costs: CostRecord[];
   notifications: NotificationItem[];
   auditLogs: AuditLog[];
+  integrationMappings: IntegrationMapping[];
+  compliancePolicies: CompliancePolicy[];
+  deploymentTasks: DeploymentTask[];
 }

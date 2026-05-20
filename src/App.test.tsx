@@ -57,6 +57,9 @@ describe('招聘运营助手', () => {
       costs: [],
       notifications: [],
       auditLogs: [],
+      integrationMappings: [],
+      compliancePolicies: [],
+      deploymentTasks: [],
     };
     localStorage.setItem('hr-assistant-data-mode', 'real-v1');
     localStorage.setItem('hr-assistant-data', JSON.stringify(realData));

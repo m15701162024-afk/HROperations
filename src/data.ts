@@ -60,6 +60,9 @@ export const emptyData: AppData = {
   costs: [],
   notifications: [],
   auditLogs: [],
+  integrationMappings: [],
+  compliancePolicies: [],
+  deploymentTasks: [],
 };
 
 export const seedData: AppData = {
@@ -340,6 +343,9 @@ export const seedData: AppData = {
       createdAt: '2026-05-19 11:00',
     },
   ],
+  integrationMappings: [],
+  compliancePolicies: [],
+  deploymentTasks: [],
 };
 
 export function generateContent(job: JobNeed, platform: Platform) {

@@ -126,6 +126,25 @@ export async function uploadAssetFile(file: File, token?: string): Promise<Pick<
   };
 }
 
+export async function loadSystemHealth(token?: string) {
+  return await requestJson<{
+    ok: boolean;
+    storage: string;
+    dataFileSize: number;
+    backupCount: number;
+    latestBackup?: string;
+    counts: Record<string, number>;
+  }>(`${API_BASE}/api/system/health`, 'GET', token);
+}
+
+export async function createSystemBackup(token?: string) {
+  return await requestJson<{
+    ok: boolean;
+    backupFile: string;
+    createdAt: string;
+  }>(`${API_BASE}/api/system/backup`, 'POST', token, {});
+}
+
 class ApiError extends Error {
   constructor(public status: number) {
     super(`HTTP ${status}`);
@@ -203,5 +222,8 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     costs: data.costs ?? [],
     notifications: data.notifications ?? [],
     auditLogs: data.auditLogs ?? [],
+    integrationMappings: data.integrationMappings ?? [],
+    compliancePolicies: data.compliancePolicies ?? [],
+    deploymentTasks: data.deploymentTasks ?? [],
   };
 }

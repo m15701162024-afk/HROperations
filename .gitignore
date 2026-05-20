@@ -8,4 +8,5 @@ coverage/
 hr-assistant-browser-check.png
 data/*.json
 data/uploads/
+data/backups/
 HROperations/

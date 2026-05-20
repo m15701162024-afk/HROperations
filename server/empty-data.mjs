@@ -21,4 +21,7 @@ export const emptyData = {
   costs: [],
   notifications: [],
   auditLogs: [],
+  integrationMappings: [],
+  compliancePolicies: [],
+  deploymentTasks: [],
 };

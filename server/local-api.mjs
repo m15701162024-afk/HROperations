@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createJsonRepository } from './repositories/jsonRepository.mjs';
@@ -11,6 +11,7 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dataFile = resolve(rootDir, 'data/hr-assistant-data.json');
 const authFile = resolve(rootDir, 'data/hr-assistant-auth.json');
 const uploadDir = resolve(rootDir, 'data/uploads');
+const backupDir = resolve(rootDir, 'data/backups');
 const distDir = resolve(rootDir, 'dist');
 const port = Number(process.env.HR_ASSISTANT_API_PORT ?? 5173);
 const SECRET_MASK = '********';
@@ -168,6 +169,48 @@ const server = createServer(async (request, response) => {
 
   if (pathname === '/api/health') {
     send(response, 200, { ok: true, storage: 'json', auth: 'local' });
+    return;
+  }
+
+  if (pathname === '/api/system/health' && request.method === 'GET') {
+    if (!requireSession(request, response)) return;
+    try {
+      const data = await repository.readData();
+      const dataFileStat = await stat(dataFile).catch(() => ({ size: 0 }));
+      const backups = await readdir(backupDir).catch(() => []);
+      const backupFiles = backups.filter((item) => item.endsWith('.json')).sort().reverse();
+      send(response, 200, {
+        ok: true,
+        storage: 'json',
+        dataFileSize: dataFileStat.size,
+        backupCount: backupFiles.length,
+        latestBackup: backupFiles[0],
+        counts: {
+          jobs: data.jobs.length,
+          contents: data.contents.length,
+          accounts: data.accounts.length,
+          integrations: data.integrations.length,
+          landingLeads: data.landingLeads.length,
+          auditLogs: data.auditLogs.length,
+        },
+      });
+    } catch (error) {
+      send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Health check failed' });
+    }
+    return;
+  }
+
+  if (pathname === '/api/system/backup' && request.method === 'POST') {
+    if (!requireSession(request, response)) return;
+    try {
+      await mkdir(backupDir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupFile = resolve(backupDir, `hr-assistant-data-${stamp}.json`);
+      await copyFile(dataFile, backupFile);
+      send(response, 200, { ok: true, backupFile, createdAt: stamp });
+    } catch (error) {
+      send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Backup failed' });
+    }
     return;
   }
 

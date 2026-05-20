@@ -26,9 +26,9 @@ import {
   Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { type ApiUser, loadRemoteData, loginLocalApi, normalizeAppData, runIntegrationSync, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
+import { type ApiUser, createSystemBackup, loadRemoteData, loadSystemHealth, loginLocalApi, normalizeAppData, runIntegrationSync, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
-import type { AccountType, AppData, AssetItem, BeisenResult, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, IntegrationConfig, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
+import type { AccountType, AppData, AssetItem, BeisenResult, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
 
 type Section =
@@ -563,6 +563,11 @@ function safeParseJson(text: string) {
   } catch {
     return { raw: text };
   }
+}
+
+function safeJsonObject(text: string) {
+  const parsed = safeParseJson(text);
+  return typeof parsed === 'object' && parsed !== null && !('raw' in parsed) ? parsed : {};
 }
 
 function integrationExtra(integration: IntegrationConfig) {
@@ -1723,6 +1728,10 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
   const [rule, setRule] = useState({ keyword: '', category: '合规表达', riskLevel: '高' as SensitiveRule['riskLevel'], suggestion: '' });
   const [user, setUser] = useState({ name: '', roleId: '', team: '招聘团队' });
   const [workflow, setWorkflow] = useState({ name: '', platform: '全部' as WorkflowRule['platform'], contentType: '全部', minRiskLevel: '高' as WorkflowRule['minRiskLevel'] });
+  const [mapping, setMapping] = useState({ name: '', integrationType: '北森' as IntegrationMapping['integrationType'], scenario: '北森线索同步' as IntegrationMapping['scenario'], method: 'POST' as IntegrationMapping['method'], endpointPath: '', resultPath: '', fieldMapping: '{"candidateName":"name","mobile":"contact","jobCode":"jobId"}' });
+  const [policy, setPolicy] = useState({ title: '', scope: '隐私授权' as CompliancePolicy['scope'], owner: '', content: '' });
+  const [task, setTask] = useState({ title: '', category: '平台接口' as DeploymentTask['category'], owner: '', dueDate: '', note: '' });
+  const [systemStatus, setSystemStatus] = useState('');
   const [modelApi, setModelApi] = useState({
     provider: 'OpenAI' as ModelApiConfig['provider'],
     name: '',
@@ -1793,6 +1802,74 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
     update({ ...data, modelApis: [item, ...data.modelApis] });
     setModelApi({ provider: 'OpenAI', name: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', model: '', enabledFor: '内容生成、风险识别、复盘建议' });
   };
+  const addIntegrationMapping = () => {
+    if (!mapping.name.trim()) return;
+    const item: IntegrationMapping = {
+      id: `mapping-${Date.now()}`,
+      ...mapping,
+      enabled: true,
+    };
+    update({ ...data, integrationMappings: [item, ...data.integrationMappings] });
+    setMapping({ name: '', integrationType: '北森', scenario: '北森线索同步', method: 'POST', endpointPath: '', resultPath: '', fieldMapping: '{"candidateName":"name","mobile":"contact","jobCode":"jobId"}' });
+  };
+  const applyMappingToIntegration = (id: string) => {
+    const item = data.integrationMappings.find((current) => current.id === id);
+    if (!item) return;
+    const nextExtra = JSON.stringify({
+      method: item.method,
+      endpointPath: item.endpointPath,
+      resultPath: item.resultPath,
+      fieldMapping: safeJsonObject(item.fieldMapping),
+    }, null, 2);
+    update({
+      ...data,
+      integrations: data.integrations.map((integration) => integration.type === item.integrationType ? { ...integration, extraConfig: nextExtra } : integration),
+      auditLogs: [{
+        id: `log-${Date.now()}`,
+        actor: '当前用户',
+        action: '应用集成字段映射',
+        target: item.name,
+        createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      }, ...data.auditLogs],
+    });
+  };
+  const addPolicy = () => {
+    if (!policy.title.trim()) return;
+    const item: CompliancePolicy = {
+      id: `policy-${Date.now()}`,
+      ...policy,
+      status: '生效',
+      updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    };
+    update({ ...data, compliancePolicies: [item, ...data.compliancePolicies] });
+    setPolicy({ title: '', scope: '隐私授权', owner: '', content: '' });
+  };
+  const addDeploymentTask = () => {
+    if (!task.title.trim()) return;
+    const item: DeploymentTask = {
+      id: `deploy-${Date.now()}`,
+      ...task,
+      status: '未开始',
+    };
+    update({ ...data, deploymentTasks: [item, ...data.deploymentTasks] });
+    setTask({ title: '', category: '平台接口', owner: '', dueDate: '', note: '' });
+  };
+  const checkSystemHealth = async () => {
+    try {
+      const result = await loadSystemHealth(apiToken);
+      setSystemStatus(`存储 ${result.storage}，数据文件 ${Math.round(result.dataFileSize / 1024)} KB，备份 ${result.backupCount} 份，内容 ${result.counts.contents} 条，线索 ${result.counts.landingLeads} 条`);
+    } catch {
+      setSystemStatus('系统健康检查失败，请确认已登录本地 API');
+    }
+  };
+  const runBackup = async () => {
+    try {
+      const result = await createSystemBackup(apiToken);
+      setSystemStatus(`备份已生成：${result.backupFile}`);
+    } catch {
+      setSystemStatus('备份失败，请确认本地 API 可用且已登录');
+    }
+  };
   const testModelApi = async (id: string) => {
     const target = data.modelApis.find((item) => item.id === id);
     if (!target) return;
@@ -1819,12 +1896,12 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
     update({ ...emptyData, ...restored });
   };
   const remainingItems = [
-    '生产数据库、对象存储和正式账号体系：已预留本地仓储/上传抽象，待部署资源后替换',
-    '北森 OpenAPI 简历投递、流程状态和候选人回流：已提供配置、测试和同步入口，待真实接口参数',
-    '小红书、脉脉、B站、公众号、抖音、知乎、技术社区：已提供平台 API 拉取和浏览器插件采集入口，待平台权限',
-    '浏览器插件独立打包和页面适配：已创建 MV3 插件目录，待目标浏览器加载测试与平台字段微调',
-    '企业微信/飞书消息发送：已支持 Webhook 摘要发送，待真实机器人/应用权限',
-    '招聘落地页公网部署、独立域名和埋点：已提供 SDK 与公开接口，待域名、服务器和隐私备案配置',
+    '生产存储：已完成本地 JSON 加固、原子写入、备份接口和健康检查，可通过上线台账规划数据库/对象存储替换',
+    '北森 OpenAPI：已提供配置、测试、同步、字段映射和结果回流框架，拿到真实接口字段后可直接配置映射',
+    '新媒体平台：已提供平台 API 拉取、字段映射、CSV 导入和浏览器插件采集框架',
+    '浏览器插件：已创建 MV3 插件目录，默认地址可改为任意内网访问地址',
+    '企业微信/飞书：已支持 Webhook 摘要发送，并纳入集成测试与同步记录',
+    '公网落地页：已提供公开线索接口、埋点 SDK、隐私合规台账和上线任务管理',
   ];
   return (
     <div className="page-grid">
@@ -1976,6 +2053,94 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
             </article>
           ))}
         </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>生产集成字段映射</h2><Link size={18} /></div>
+        <p className="helper">用于把北森、平台 API、BI 的真实字段映射到系统标准字段。保存后可一键写入对应集成的扩展配置。</p>
+        <div className="inline-form">
+          <input value={mapping.name} onChange={(event) => setMapping({ ...mapping, name: event.target.value })} placeholder="映射名称" />
+          <select value={mapping.integrationType} onChange={(event) => setMapping({ ...mapping, integrationType: event.target.value as IntegrationMapping['integrationType'] })}>
+            <option>北森</option>
+            <option>平台API</option>
+            <option>企业微信</option>
+            <option>飞书</option>
+            <option>BI</option>
+          </select>
+          <select value={mapping.scenario} onChange={(event) => setMapping({ ...mapping, scenario: event.target.value as IntegrationMapping['scenario'] })}>
+            <option>北森线索同步</option>
+            <option>北森结果回流</option>
+            <option>平台指标拉取</option>
+            <option>BI同步</option>
+            <option>消息发送</option>
+            <option>其他</option>
+          </select>
+          <select value={mapping.method} onChange={(event) => setMapping({ ...mapping, method: event.target.value as IntegrationMapping['method'] })}>
+            <option>GET</option>
+            <option>POST</option>
+            <option>PUT</option>
+          </select>
+          <button onClick={addIntegrationMapping}><Plus size={16} />保存映射</button>
+        </div>
+        <div className="inline-form model-form">
+          <input value={mapping.endpointPath} onChange={(event) => setMapping({ ...mapping, endpointPath: event.target.value })} placeholder="接口路径，如 api/v1/candidates" />
+          <input value={mapping.resultPath} onChange={(event) => setMapping({ ...mapping, resultPath: event.target.value })} placeholder="结果路径，如 data.records" />
+          <input value={mapping.fieldMapping} onChange={(event) => setMapping({ ...mapping, fieldMapping: event.target.value })} placeholder='字段映射 JSON，如 {"candidateName":"name"}' />
+        </div>
+        <div className="entry-grid">
+          {data.integrationMappings.length === 0 && <EmptyState title="暂无字段映射" body="拿到北森或平台接口字段后，可先在这里维护标准映射。" />}
+          {data.integrationMappings.map((item) => (
+            <article key={item.id}>
+              <strong>{item.name}</strong>
+              <span>{item.integrationType} · {item.scenario} · {item.method} {item.endpointPath || '/'}</span>
+              <span>结果路径：{item.resultPath || '根节点'}</span>
+              <Badge tone={item.enabled ? 'good' : 'warn'}>{item.enabled ? '启用' : '停用'}</Badge>
+              <button className="ghost" onClick={() => applyMappingToIntegration(item.id)}>应用到同类型集成</button>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>隐私合规与上线台账</h2><ShieldCheck size={18} /></div>
+        <div className="inline-form">
+          <input value={policy.title} onChange={(event) => setPolicy({ ...policy, title: event.target.value })} placeholder="制度/文案名称" />
+          <select value={policy.scope} onChange={(event) => setPolicy({ ...policy, scope: event.target.value as CompliancePolicy['scope'] })}>
+            <option>隐私授权</option>
+            <option>招聘合规</option>
+            <option>内容审核</option>
+            <option>数据安全</option>
+            <option>公网落地页</option>
+          </select>
+          <input value={policy.owner} onChange={(event) => setPolicy({ ...policy, owner: event.target.value })} placeholder="负责人" />
+          <button onClick={addPolicy}><Plus size={16} />保存合规项</button>
+        </div>
+        <textarea className="small-textarea" value={policy.content} onChange={(event) => setPolicy({ ...policy, content: event.target.value })} placeholder="隐私授权、候选人告知、内容审核口径或数据保留策略" />
+        <div className="inline-form">
+          <input value={task.title} onChange={(event) => setTask({ ...task, title: event.target.value })} placeholder="上线任务" />
+          <select value={task.category} onChange={(event) => setTask({ ...task, category: event.target.value as DeploymentTask['category'] })}>
+            <option>账号体系</option>
+            <option>数据库</option>
+            <option>平台接口</option>
+            <option>安全合规</option>
+            <option>运维监控</option>
+            <option>插件发布</option>
+          </select>
+          <input value={task.owner} onChange={(event) => setTask({ ...task, owner: event.target.value })} placeholder="负责人" />
+          <input type="date" value={task.dueDate} onChange={(event) => setTask({ ...task, dueDate: event.target.value })} />
+          <button onClick={addDeploymentTask}><Plus size={16} />加入台账</button>
+        </div>
+        <input value={task.note} onChange={(event) => setTask({ ...task, note: event.target.value })} placeholder="上线依赖、账号权限、接口文档、验收说明" />
+        <div className="entry-grid">
+          {data.compliancePolicies.map((item) => <article key={item.id}><strong>{item.title}</strong><span>{item.scope} · {item.owner || '未分配'} · {item.updatedAt}</span><p>{item.content}</p><Badge tone="good">{item.status}</Badge></article>)}
+          {data.deploymentTasks.map((item) => <article key={item.id}><strong>{item.title}</strong><span>{item.category} · {item.owner || '未分配'} · {item.dueDate || '未定日期'}</span><p>{item.note}</p><Badge tone={item.status === '已完成' ? 'good' : item.status === '进行中' ? 'info' : 'warn'}>{item.status}</Badge></article>)}
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>系统健康与备份</h2><Database size={18} /></div>
+        <div className="toolbar-actions">
+          <button onClick={() => void checkSystemHealth()}><RefreshCw size={16} />健康检查</button>
+          <button onClick={() => void runBackup()}><Database size={16} />立即备份</button>
+        </div>
+        {systemStatus && <div className="platform-note"><ShieldCheck size={16} />{systemStatus}</div>}
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>操作日志</h2><ShieldCheck size={18} /></div>
