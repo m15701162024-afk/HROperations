@@ -6,8 +6,8 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? defaultApiBase();
 const DISABLE_API = import.meta.env.MODE === 'test' || import.meta.env.VITE_DISABLE_API === 'true';
 
 function defaultApiBase() {
-  if (typeof window !== 'undefined' && window.location.hostname) {
-    return `${window.location.protocol}//${window.location.hostname}:8788`;
+  if (typeof window !== 'undefined' && window.location.origin) {
+    return window.location.origin;
   }
   return 'http://localhost:8788';
 }

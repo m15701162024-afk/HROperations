@@ -41,14 +41,16 @@ npm run dev
 npm run dev:full
 ```
 
-前端会优先连接 `http://当前访问主机:8788/api/data`。例如内网访问 `http://10.100.60.5:5173/` 时，前端会自动连接 `http://10.100.60.5:8788`。如果本地 API 没启动，会自动回退到浏览器 `localStorage`，页面左下角会显示当前存储模式。
+前端默认通过当前访问地址的 `/api` 访问后端。例如内网访问 `http://10.100.60.5:5173/` 时，浏览器请求 `http://10.100.60.5:5173/api/...`，再由 Vite 代理到台式机本机 `8788` 端口。这样内网用户不需要直接访问 `8788`。如果本地 API 没启动，会自动回退到浏览器 `localStorage`，页面左下角会显示当前存储模式。
 
 部署到固定内网地址时，也可以显式指定：
 
 ```bash
 HR_ASSISTANT_API_PORT=8788 npm run api
-VITE_API_BASE_URL=http://10.100.60.5:8788 npm run dev
+npm run dev
 ```
+
+若前后端分开部署，才需要显式指定 `VITE_API_BASE_URL`。
 
 本地 API 默认账号：
 
