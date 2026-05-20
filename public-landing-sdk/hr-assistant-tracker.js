@@ -2,7 +2,7 @@
 
 (function () {
   var script = document.currentScript;
-  var apiBase = script && script.dataset.apiBase ? script.dataset.apiBase.replace(/\/$/, '') : 'http://localhost:8788';
+  var apiBase = script && script.dataset.apiBase ? script.dataset.apiBase.replace(/\/$/, '') : 'http://localhost:5173';
   var landingPageId = script && script.dataset.landingPageId ? script.dataset.landingPageId : '';
   var sourcePlatform = script && script.dataset.sourcePlatform ? script.dataset.sourcePlatform : '未知';
   var publicSecret = script && script.dataset.publicSecret ? script.dataset.publicSecret : '';

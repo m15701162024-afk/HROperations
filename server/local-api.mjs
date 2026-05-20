@@ -11,7 +11,8 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dataFile = resolve(rootDir, 'data/hr-assistant-data.json');
 const authFile = resolve(rootDir, 'data/hr-assistant-auth.json');
 const uploadDir = resolve(rootDir, 'data/uploads');
-const port = Number(process.env.HR_ASSISTANT_API_PORT ?? 8788);
+const distDir = resolve(rootDir, 'dist');
+const port = Number(process.env.HR_ASSISTANT_API_PORT ?? 5173);
 
 const repository = createJsonRepository(dataFile);
 const authService = createAuthService(authFile);
@@ -69,6 +70,9 @@ function sanitizeFileName(fileName) {
 
 function contentTypeFor(filePath) {
   const ext = extname(filePath).toLowerCase();
+  if (ext === '.html') return 'text/html; charset=utf-8';
+  if (ext === '.js') return 'text/javascript; charset=utf-8';
+  if (ext === '.css') return 'text/css; charset=utf-8';
   if (ext === '.png') return 'image/png';
   if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
   if (ext === '.gif') return 'image/gif';
@@ -78,6 +82,24 @@ function contentTypeFor(filePath) {
   if (ext === '.md') return 'text/markdown; charset=utf-8';
   if (ext === '.csv') return 'text/csv; charset=utf-8';
   return 'application/octet-stream';
+}
+
+async function serveStatic(request, response) {
+  try {
+    const rawPath = decodeURIComponent((request.url ?? '/').split('?')[0]);
+    const filePath = rawPath === '/' ? resolve(distDir, 'index.html') : resolve(distDir, rawPath.slice(1));
+    if (!filePath.startsWith(distDir)) {
+      send(response, 400, { ok: false, error: 'Invalid file path' });
+      return;
+    }
+    sendFile(response, 200, await readFile(filePath), contentTypeFor(filePath));
+  } catch {
+    try {
+      sendFile(response, 200, await readFile(resolve(distDir, 'index.html')), 'text/html; charset=utf-8');
+    } catch {
+      send(response, 404, { ok: false, error: 'Frontend build not found. Run npm run build first.' });
+    }
+  }
 }
 
 const server = createServer(async (request, response) => {
@@ -357,6 +379,11 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (request.method === 'GET') {
+    await serveStatic(request, response);
+    return;
+  }
+
   send(response, 404, { ok: false, error: 'Not found' });
 });
 
@@ -375,6 +402,6 @@ function normalizeMetricRecord(record, mapping) {
 }
 
 server.listen(port, () => {
-  console.log(`HRAssistant local API listening on http://localhost:${port}`);
+  console.log(`HRAssistant listening on http://localhost:${port}`);
   console.log(`Data file: ${dataFile}`);
 });

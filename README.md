@@ -23,34 +23,29 @@ npm run test
 npm run build
 ```
 
-本地持久化 API：
-
-```bash
-npm run api
-```
-
-另开一个终端运行前端：
+开发模式前端：
 
 ```bash
 npm run dev
 ```
 
-也可以使用组合命令：
+单端口部署模式：
 
 ```bash
-npm run dev:full
+npm run serve
 ```
 
-前端默认通过当前访问地址的 `/api` 访问后端。例如内网访问 `http://10.100.60.5:5173/` 时，浏览器请求 `http://10.100.60.5:5173/api/...`，再由 Vite 代理到台式机本机 `8788` 端口。这样内网用户不需要直接访问 `8788`。如果本地 API 没启动，会自动回退到浏览器 `localStorage`，页面左下角会显示当前存储模式。
+`npm run serve` 会先构建前端，再启动统一服务。
+
+前端、后端和 API 统一使用 `5173` 端口。例如内网访问 `http://10.100.60.5:5173/`，API 健康检查地址是 `http://10.100.60.5:5173/api/health`。如果统一服务没启动，页面会自动回退到浏览器 `localStorage`，页面左下角会显示当前存储模式。
 
 部署到固定内网地址时，也可以显式指定：
 
 ```bash
-HR_ASSISTANT_API_PORT=8788 npm run api
-npm run dev
+HR_ASSISTANT_API_PORT=5173 npm run serve
 ```
 
-若前后端分开部署，才需要显式指定 `VITE_API_BASE_URL`。
+若前后端分开部署，才需要显式指定 `VITE_API_BASE_URL`；当前推荐单端口部署，不再使用 8788。
 
 本地 API 默认账号：
 

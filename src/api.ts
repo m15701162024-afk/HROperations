@@ -9,7 +9,7 @@ function defaultApiBase() {
   if (typeof window !== 'undefined' && window.location.origin) {
     return window.location.origin;
   }
-  return 'http://localhost:8788';
+  return 'http://localhost:5173';
 }
 
 export interface ApiUser {

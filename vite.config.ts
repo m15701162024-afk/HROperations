@@ -2,7 +2,7 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
-const apiPort = process.env.HR_ASSISTANT_API_PORT ?? '8788';
+const apiPort = process.env.HR_ASSISTANT_API_PORT ?? '5173';
 const apiTarget = process.env.HR_ASSISTANT_API_TARGET ?? `http://127.0.0.1:${apiPort}`;
 
 export default defineConfig({

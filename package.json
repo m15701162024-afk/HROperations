@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "api": "HR_ASSISTANT_API_PORT=${HR_ASSISTANT_API_PORT:-8788} node server/local-api.mjs",
-    "dev:full": "HR_ASSISTANT_API_PORT=${HR_ASSISTANT_API_PORT:-8788} node server/local-api.mjs & vite --host 0.0.0.0",
+    "api": "HR_ASSISTANT_API_PORT=${HR_ASSISTANT_API_PORT:-5173} node server/local-api.mjs",
+    "serve": "npm run build && npm run api",
+    "dev:full": "npm run serve",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
