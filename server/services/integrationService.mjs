@@ -132,6 +132,10 @@ export async function testModelApi(config) {
   }
 
   const base = config.baseUrl.replace(/\/$/, '');
+  if (config.provider === 'DeepSeek') {
+    return await testChatCompletion(base, config, 'DeepSeek API 连接测试通过');
+  }
+
   const url = `${base}/models`;
   try {
     const controller = new AbortController();
@@ -146,9 +150,47 @@ export async function testModelApi(config) {
     });
     clearTimeout(timer);
     if (!response.ok) {
+      if (response.status === 404 || response.status === 405) {
+        return await testChatCompletion(base, config, '模型 API 连接测试通过');
+      }
       return { ok: false, status: '连接失败', statusCode: response.status, message: `模型接口连接失败：HTTP ${response.status}` };
     }
     return { ok: true, status: '已连接', statusCode: response.status, message: '模型 API 连接测试通过' };
+  } catch (error) {
+    return {
+      ok: false,
+      status: '连接失败',
+      message: error instanceof Error ? error.message : '模型 API 连接失败',
+    };
+  }
+}
+
+async function testChatCompletion(base, config, successMessage) {
+  const url = `${base}/chat/completions`;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        temperature: 0,
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!response.ok) {
+      const text = await response.text();
+      return { ok: false, status: '连接失败', statusCode: response.status, message: `模型接口连接失败：HTTP ${response.status}${text ? `，${text.slice(0, 120)}` : ''}` };
+    }
+    return { ok: true, status: '已连接', statusCode: response.status, message: successMessage };
   } catch (error) {
     return {
       ok: false,

@@ -11,7 +11,7 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dataFile = resolve(rootDir, 'data/hr-assistant-data.json');
 const authFile = resolve(rootDir, 'data/hr-assistant-auth.json');
 const uploadDir = resolve(rootDir, 'data/uploads');
-const port = Number(process.env.HR_ASSISTANT_API_PORT ?? 8787);
+const port = Number(process.env.HR_ASSISTANT_API_PORT ?? 8788);
 
 const repository = createJsonRepository(dataFile);
 const authService = createAuthService(authFile);

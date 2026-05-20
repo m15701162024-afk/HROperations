@@ -2,8 +2,15 @@ import { emptyData } from './data';
 import type { AppData } from './types';
 import type { AssetItem, IntegrationConfig, IntegrationSyncRun, ModelApiConfig } from './types';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? defaultApiBase();
 const DISABLE_API = import.meta.env.MODE === 'test' || import.meta.env.VITE_DISABLE_API === 'true';
+
+function defaultApiBase() {
+  if (typeof window !== 'undefined' && window.location.hostname) {
+    return `${window.location.protocol}//${window.location.hostname}:8788`;
+  }
+  return 'http://localhost:8788';
+}
 
 export interface ApiUser {
   id: string;

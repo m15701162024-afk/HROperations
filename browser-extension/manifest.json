@@ -12,7 +12,8 @@
     "https://*.douyin.com/*",
     "https://*.zhihu.com/*",
     "https://*/*",
-    "http://localhost:8787/*"
+    "http://localhost:8788/*",
+    "http://10.100.60.5:8788/*"
   ],
   "action": {
     "default_title": "招聘运营助手",
