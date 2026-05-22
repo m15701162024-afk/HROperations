@@ -25,7 +25,7 @@ import {
   Target,
   Users,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { type ApiUser, createSystemBackup, loadRemoteData, loadSystemHealth, loginLocalApi, normalizeAppData, runIntegrationSync, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
 import type { AccountType, AppData, AssetItem, BeisenResult, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
@@ -70,6 +70,7 @@ function useAppData() {
   const [authRequired, setAuthRequired] = useState(false);
   const [authError, setAuthError] = useState('');
   const [apiToken, setApiToken] = useState(() => localStorage.getItem('hr-assistant-api-token') ?? '');
+  const saveQueue = useRef(Promise.resolve(false));
   const [data, setData] = useState<AppData>(() => {
     const mode = localStorage.getItem('hr-assistant-data-mode');
     if (mode !== 'real-v1') {
@@ -113,7 +114,8 @@ function useAppData() {
     setData(next);
     localStorage.setItem('hr-assistant-data-mode', 'real-v1');
     localStorage.setItem('hr-assistant-data', JSON.stringify(next));
-    void saveRemoteData(next, apiToken).then((saved) => {
+    saveQueue.current = saveQueue.current.then(() => saveRemoteData(next, apiToken), () => saveRemoteData(next, apiToken));
+    void saveQueue.current.then((saved) => {
       if (saved) setStorageMode('本地API');
     });
   };
@@ -572,7 +574,11 @@ function safeJsonObject(text: string) {
 
 function integrationExtra(integration: IntegrationConfig) {
   const parsed = integration.extraConfig ? safeParseJson(integration.extraConfig) : {};
-  return typeof parsed === 'object' && parsed !== null ? parsed as { fields?: Record<string, string>; dedupeKey?: string } : {};
+  return typeof parsed === 'object' && parsed !== null ? parsed as { fields?: Record<string, string>; fieldMapping?: Record<string, string>; dedupeKey?: string } : {};
+}
+
+function integrationFieldMapping(extra: { fields?: Record<string, string>; fieldMapping?: Record<string, string> }) {
+  return extra.fieldMapping ?? extra.fields;
 }
 
 function mappedValue(row: Record<string, string | number | boolean | undefined>, fields: Record<string, string> | undefined, key: string, fallback: string) {
@@ -1137,17 +1143,18 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     const target = data.integrations.find((item) => item.id === id);
     if (!target) return;
     const extra = integrationExtra(target);
+    const fieldMapping = integrationFieldMapping(extra);
     const result = await runIntegrationSync(target, '平台指标拉取', { extraConfig: extra, since: target.lastSyncAt }, apiToken);
     const rows = normalizeRemoteRows(result.data);
     const normalizedRows = rows.map((row) => ({
-      contentId: mappedValue(row, extra.fields, 'contentId', '内容ID'),
-      title: mappedValue(row, extra.fields, 'title', '标题'),
-      views: mappedValue(row, extra.fields, 'views', '曝光'),
-      likes: mappedValue(row, extra.fields, 'likes', '点赞'),
-      comments: mappedValue(row, extra.fields, 'comments', '评论'),
-      saves: mappedValue(row, extra.fields, 'saves', '收藏'),
-      shares: mappedValue(row, extra.fields, 'shares', '分享'),
-      clicks: mappedValue(row, extra.fields, 'clicks', '点击'),
+      contentId: mappedValue(row, fieldMapping, 'contentId', '内容ID'),
+      title: mappedValue(row, fieldMapping, 'title', '标题'),
+      views: mappedValue(row, fieldMapping, 'views', '曝光'),
+      likes: mappedValue(row, fieldMapping, 'likes', '点赞'),
+      comments: mappedValue(row, fieldMapping, 'comments', '评论'),
+      saves: mappedValue(row, fieldMapping, 'saves', '收藏'),
+      shares: mappedValue(row, fieldMapping, 'shares', '分享'),
+      clicks: mappedValue(row, fieldMapping, 'clicks', '点击'),
     }));
     const csv = normalizedRows.length > 0 ? toCsv(normalizedRows) : '';
     const nextContents = csv ? applyMetricsCsv(data.contents, csv) : data.contents;
@@ -1158,7 +1165,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
         makeNotification('平台指标拉取结果', `${target.name}：${result.message}，记录 ${rows.length || result.recordCount} 条`, '数据分析', result.ok ? '提醒' : '预警'),
         ...data.notifications,
       ],
-    }, result.retryCount ?? 0, extra.fields ? `已应用字段映射：${Object.keys(extra.fields).join('、')}` : '未配置字段映射');
+    }, result.retryCount ?? 0, fieldMapping ? `已应用字段映射：${Object.keys(fieldMapping).join('、')}` : '未配置字段映射');
     audit('拉取平台指标', `${target.name}：${result.message}`, next);
   };
 
@@ -1820,6 +1827,7 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
       endpointPath: item.endpointPath,
       resultPath: item.resultPath,
       fieldMapping: safeJsonObject(item.fieldMapping),
+      fields: safeJsonObject(item.fieldMapping),
     }, null, 2);
     update({
       ...data,

@@ -4,12 +4,13 @@ export async function testIntegration(integration) {
   }
 
   try {
+    const requestConfig = buildIntegrationRequest(integration, '测试连接', { text: 'HRAssistant connection test' });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(integration.endpoint, {
-      method: integration.type === '企业微信' || integration.type === '飞书' ? 'POST' : 'GET',
+    const response = await fetch(requestConfig.url, {
+      method: requestConfig.method,
       headers: buildHeaders(integration),
-      body: integration.type === '企业微信' || integration.type === '飞书' ? JSON.stringify({ text: 'HRAssistant connection test' }) : undefined,
+      body: requestConfig.method === 'GET' ? undefined : JSON.stringify(requestConfig.payload ?? {}),
       signal: controller.signal,
     });
     clearTimeout(timer);
@@ -52,23 +53,19 @@ export async function runIntegrationSync(integration, syncType, payload) {
 }
 
 async function requestIntegration(integration, syncType, payload) {
-    const extra = parseExtraConfig(integration?.extraConfig);
-    const scenario = extra.scenarios?.[syncType] ?? {};
-    const method = scenario.method ?? extra.method ?? (syncType === '平台指标拉取' || syncType === '北森结果回流' ? 'GET' : 'POST');
-    const url = buildUrl(integration.endpoint, scenario.endpointPath ?? extra.endpointPath, scenario.query ?? extra.query);
-    const mappedPayload = mapPayload(payload, scenario.fieldMapping ?? extra.fieldMapping ?? extra.fields);
+    const requestConfig = buildIntegrationRequest(integration, syncType, payload);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
-    const response = await fetch(url, {
-      method,
+    const response = await fetch(requestConfig.url, {
+      method: requestConfig.method,
       headers: buildHeaders(integration),
-      body: method === 'GET' ? undefined : JSON.stringify(mappedPayload ?? {}),
+      body: requestConfig.method === 'GET' ? undefined : JSON.stringify(requestConfig.payload ?? {}),
       signal: controller.signal,
     });
     clearTimeout(timer);
 
     const text = await response.text();
-    const data = pickPath(parseJson(text), scenario.resultPath ?? extra.resultPath);
+    const data = pickPath(parseJson(text), requestConfig.resultPath);
     const recordCount = Array.isArray(data) ? data.length : Number(data?.recordCount ?? data?.count ?? payload?.records?.length ?? 0);
     return {
       ok: response.ok,
@@ -77,6 +74,24 @@ async function requestIntegration(integration, syncType, payload) {
       recordCount,
       data,
     };
+}
+
+function buildIntegrationRequest(integration, syncType, payload) {
+  const extra = parseExtraConfig(integration?.extraConfig);
+  const scenario = extra.scenarios?.[syncType] ?? {};
+  const fallbackMethod = integration.type === '企业微信' || integration.type === '飞书'
+    ? 'POST'
+    : syncType === '平台指标拉取' || syncType === '北森结果回流'
+      ? 'GET'
+      : 'POST';
+  const method = String(scenario.method ?? extra.method ?? fallbackMethod).toUpperCase();
+  const fieldMapping = scenario.fieldMapping ?? scenario.fields ?? extra.fieldMapping ?? extra.fields;
+  return {
+    method,
+    url: buildUrl(integration.endpoint, scenario.endpointPath ?? extra.endpointPath, scenario.query ?? extra.query),
+    payload: mapPayload(payload, fieldMapping),
+    resultPath: scenario.resultPath ?? extra.resultPath,
+  };
 }
 
 export async function sendIntegrationMessage(integration, message) {

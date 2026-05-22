@@ -17,6 +17,7 @@ const port = Number(process.env.HR_ASSISTANT_API_PORT ?? 5173);
 const SECRET_MASK = '********';
 const JSON_BODY_LIMIT = 1024 * 1024;
 const UPLOAD_BODY_LIMIT = 20 * 1024 * 1024;
+const requirePublicSecret = process.env.HR_ASSISTANT_REQUIRE_PUBLIC_SECRET === 'true' || process.env.NODE_ENV === 'production';
 
 const repository = createJsonRepository(dataFile);
 const authService = createAuthService(authFile);
@@ -68,7 +69,7 @@ function requireSession(request, response) {
 
 function verifyPublicSignature(request) {
   const expected = process.env.HR_ASSISTANT_PUBLIC_SECRET;
-  if (!expected) return true;
+  if (!expected) return !requirePublicSecret;
   return request.headers['x-hr-signature'] === expected;
 }
 

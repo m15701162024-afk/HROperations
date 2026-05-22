@@ -144,7 +144,7 @@ window.HRAssistantTracker.submitLead({
 });
 ```
 
-如果服务端设置了 `HR_ASSISTANT_PUBLIC_SECRET`，公网埋点和线索提交必须携带相同的 `data-public-secret`，否则会被拒绝。
+如果服务端设置了 `HR_ASSISTANT_PUBLIC_SECRET`，公网埋点和线索提交必须携带相同的 `data-public-secret`，否则会被拒绝。生产环境或设置 `HR_ASSISTANT_REQUIRE_PUBLIC_SECRET=true` 时，未配置 `HR_ASSISTANT_PUBLIC_SECRET` 会直接拒绝公开埋点和线索提交。
 
 ## 集成字段映射
 
@@ -152,7 +152,7 @@ window.HRAssistantTracker.submitLead({
 
 ```json
 {
-  "fields": {
+  "fieldMapping": {
     "contentId": "note_id",
     "title": "title",
     "views": "read_count",
@@ -162,11 +162,13 @@ window.HRAssistantTracker.submitLead({
     "shares": "share_count",
     "clicks": "apply_click_count"
   },
+  "endpointPath": "api/v1/metrics",
+  "resultPath": "data.records",
   "dedupeKey": "candidateCode"
 }
 ```
 
-同步失败会自动重试，运行记录会保留重试次数、记录数和字段映射详情。
+`fields` 作为旧配置别名仍然兼容；新配置建议使用 `fieldMapping`。同步失败会自动重试，运行记录会保留重试次数、记录数和字段映射详情。连接测试会复用 `method`、`endpointPath`、`resultPath` 等扩展配置，避免 base URL 测试与真实同步路径不一致。
 
 ## 大模型 API 配置
 
