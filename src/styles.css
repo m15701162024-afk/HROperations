@@ -874,6 +874,34 @@ textarea {
   font-size: 13px;
 }
 
+.checklist-row,
+.checkbox-line,
+.permission-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.checklist-row label,
+.checkbox-line,
+.permission-grid label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: #425166;
+  font-size: 13px;
+}
+
+.permission-grid {
+  margin: 10px 0 12px;
+}
+
 .stat-button,
 .clickable-card,
 .platform-card {

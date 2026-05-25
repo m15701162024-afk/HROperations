@@ -472,6 +472,8 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
   const [csv, setCsv] = useState('');
   const [editingId, setEditingId] = useState('');
   const [detailId, setDetailId] = useState('');
+  const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
+  const [closeReason, setCloseReason] = useState('');
   const [activePanel, setActivePanel] = useState<'录入岗位' | '批量导入' | '岗位库'>('录入岗位');
 
   const createJob = () => {
@@ -553,6 +555,31 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
       jobs: data.jobs.map((job) => job.id === id ? { ...job, status } : job),
     });
   };
+  const toggleSelectJob = (id: string) => {
+    setSelectedJobIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  };
+  const batchUpdateJobStatus = (status: JobNeed['status']) => {
+    if (selectedJobIds.length === 0) return;
+    audit('批量更新岗位状态', `${selectedJobIds.length} 个岗位：${status}${closeReason ? `，原因：${closeReason}` : ''}`, {
+      ...data,
+      jobs: data.jobs.map((job) => selectedJobIds.includes(job.id) ? { ...job, status } : job),
+      notifications: [
+        makeNotification('岗位批量状态更新', `${selectedJobIds.length} 个岗位已更新为 ${status}${closeReason ? `，原因：${closeReason}` : ''}`, '招聘需求', '提醒'),
+        ...data.notifications,
+      ],
+    });
+    setSelectedJobIds([]);
+    setCloseReason('');
+  };
+  const duplicateJob = (job: JobNeed) => {
+    const copy: JobNeed = {
+      ...job,
+      id: `job-${Date.now()}`,
+      title: `${job.title}（复制）`,
+      status: '招聘中',
+    };
+    audit('复制岗位需求', copy.title, { ...data, jobs: [copy, ...data.jobs] });
+  };
 
   return (
     <div className="page-grid">
@@ -602,9 +629,17 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
         <button className="full" onClick={importJobs}><Database size={16} />解析并导入</button>
       </section>}
       {activePanel === '岗位库' && <section className="panel wide">
+        <div className="inline-form">
+          <input value={closeReason} onChange={(event) => setCloseReason(event.target.value)} placeholder="批量暂停/关闭原因，可选" />
+          <button className="secondary" onClick={() => batchUpdateJobStatus('招聘中')}>批量开启</button>
+          <button className="ghost" onClick={() => batchUpdateJobStatus('暂停')}>批量暂停</button>
+          <button className="ghost" onClick={() => batchUpdateJobStatus('关闭')}>批量关闭</button>
+          <Badge tone="info">已选 {selectedJobIds.length}</Badge>
+        </div>
         <table>
           <thead>
             <tr>
+              <th>选择</th>
               <th>岗位</th>
               <th>族群</th>
               <th>层级</th>
@@ -617,11 +652,12 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
           <tbody>
             {data.jobs.length === 0 && (
               <tr>
-                <td colSpan={7}><EmptyState title="暂无真实岗位需求" body="请通过上方表单录入，或粘贴 CSV 批量导入。" /></td>
+                <td colSpan={8}><EmptyState title="暂无真实岗位需求" body="请通过上方表单录入，或粘贴 CSV 批量导入。" /></td>
               </tr>
             )}
             {data.jobs.map((job) => (
               <tr key={job.id}>
+                <td><input type="checkbox" checked={selectedJobIds.includes(job.id)} onChange={() => toggleSelectJob(job.id)} /></td>
                 <td>
                   <strong>{job.title}</strong>
                   <span>{job.persona}</span>
@@ -635,6 +671,7 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
                   <div className="row-actions">
                     <button className="ghost" onClick={() => setDetailId(detailId === job.id ? '' : job.id)}>详情</button>
                     <button className="ghost" onClick={() => startEditJob(job)}>编辑</button>
+                    <button className="ghost" onClick={() => duplicateJob(job)}>复制</button>
                     <button className="ghost" onClick={() => toggleJobStatus(job.id, job.status === '招聘中' ? '暂停' : '招聘中')}>{job.status === '招聘中' ? '暂停' : '开启'}</button>
                     <button className="ghost" onClick={() => removeJob(job.id)}>删除</button>
                   </div>
@@ -740,6 +777,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
   const [revisionDrafts, setRevisionDrafts] = useState<Record<string, string>>({});
   const [calendarView, setCalendarView] = useState<'周视图' | '月视图'>('月视图');
   const [scheduleDetailId, setScheduleDetailId] = useState('');
+  const [publishChecks, setPublishChecks] = useState<Record<string, string[]>>({});
 
   const selectedJob = data.jobs.find((job) => job.id === jobId) ?? data.jobs[0];
   const risk = scanRisks(draft);
@@ -899,9 +937,26 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
 
   const publishContent = (id: string) => {
     const target = data.contents.find((item) => item.id === id);
+    const checks = publishChecks[id] ?? [];
+    if (checks.length < 3) {
+      audit('发布检查未通过', target?.title ?? id, {
+        ...data,
+        notifications: [
+          makeNotification('发布检查未完成', `${target?.title ?? id} 需要完成合规、素材授权、入口配置检查`, '内容运营', '预警'),
+          ...data.notifications,
+        ],
+      });
+      return;
+    }
     audit('标记内容已发布', target?.title ?? id, {
       ...data,
       contents: data.contents.map((item) => item.id === id ? { ...item, status: '已发布', publishedAt: new Date().toISOString().slice(0, 10) } : item),
+    });
+  };
+  const togglePublishCheck = (id: string, check: string) => {
+    setPublishChecks((current) => {
+      const checks = current[id] ?? [];
+      return { ...current, [id]: checks.includes(check) ? checks.filter((item) => item !== check) : [...checks, check] };
     });
   };
 
@@ -1035,6 +1090,11 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
               <div className="template-chip">效果数据<small>{scheduleDetail.metrics.views} 曝光 · {scheduleDetail.metrics.clicks} 点击</small></div>
             </div>
             <p>{scheduleDetail.content}</p>
+            <div className="checklist-row">
+              {['合规已审', '素材已授权', '入口已配置'].map((check) => (
+                <label key={check}><input type="checkbox" checked={(publishChecks[scheduleDetail.id] ?? []).includes(check)} onChange={() => togglePublishCheck(scheduleDetail.id, check)} />{check}</label>
+              ))}
+            </div>
             <div className="card-actions-inline">
               <button className="secondary" onClick={() => advance(scheduleDetail.id)}>推进审核</button>
               <button className="ghost" onClick={() => publishContent(scheduleDetail.id)}>标记发布</button>
@@ -1110,6 +1170,14 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
                     placeholder="在这里调整内容，保存后生成新版本"
                   />
                   <button className="secondary" onClick={() => saveRevision(item.id)}>保存修订版本</button>
+                </details>
+                <details className="version-box">
+                  <summary>发布前检查</summary>
+                  <div className="checklist-row">
+                    {['合规已审', '素材已授权', '入口已配置'].map((check) => (
+                      <label key={check}><input type="checkbox" checked={(publishChecks[item.id] ?? []).includes(check)} onChange={() => togglePublishCheck(item.id, check)} />{check}</label>
+                    ))}
+                  </div>
                 </details>
               </div>
               <div className="card-actions">
@@ -1990,9 +2058,17 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   const [metricsCsv, setMetricsCsv] = useState('');
   const [beisenCsv, setBeisenCsv] = useState('');
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | '全部'>('全部');
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [cost, setCost] = useState({ targetType: '内容' as CostRecord['targetType'], targetId: '', laborCost: 0, mediaCost: 0, productionCost: 0 });
+  const inDateRange = (date?: string) => {
+    if (!date) return true;
+    if (dateRange.from && date < dateRange.from) return false;
+    if (dateRange.to && date > dateRange.to) return false;
+    return true;
+  };
+  const filteredContentsByDate = data.contents.filter((item) => inDateRange(item.publishedAt ?? item.dueDate));
   const byPlatform = platforms.map((platform) => {
-    const items = data.contents.filter((item) => item.platform === platform);
+    const items = filteredContentsByDate.filter((item) => item.platform === platform);
     return {
       platform,
       views: items.reduce((sum, item) => sum + item.metrics.views, 0),
@@ -2001,7 +2077,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
     };
   }).filter((item) => item.count > 0);
   const maxViews = Math.max(...byPlatform.map((p) => p.views), 1);
-  const selectedContents = selectedPlatform === '全部' ? data.contents : data.contents.filter((item) => item.platform === selectedPlatform);
+  const selectedContents = selectedPlatform === '全部' ? filteredContentsByDate : filteredContentsByDate.filter((item) => item.platform === selectedPlatform);
   const selectedResults = selectedPlatform === '全部' ? data.beisenResults : data.beisenResults.filter((item) => item.sourcePlatform === selectedPlatform);
   const importMetrics = () => {
     const nextContents = applyMetricsCsv(data.contents, metricsCsv);
@@ -2047,6 +2123,11 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>平台下钻</h2><BarChart3 size={18} /></div>
+        <div className="inline-form">
+          <input type="date" value={dateRange.from} onChange={(event) => setDateRange({ ...dateRange, from: event.target.value })} />
+          <input type="date" value={dateRange.to} onChange={(event) => setDateRange({ ...dateRange, to: event.target.value })} />
+          <button className="ghost" onClick={() => setDateRange({ from: '', to: '' })}>清空时间筛选</button>
+        </div>
         <div className="module-tabs">
           <button className={selectedPlatform === '全部' ? 'active' : ''} onClick={() => setSelectedPlatform('全部')}>全部</button>
           {platforms.map((platform) => <button key={platform} className={selectedPlatform === platform ? 'active' : ''} onClick={() => setSelectedPlatform(platform)}>{platform}</button>)}
@@ -2182,6 +2263,7 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
   const [fileName, setFileName] = useState('手动粘贴.csv');
   const [lastImportMessage, setLastImportMessage] = useState('');
   const [mappingText, setMappingText] = useState('{"岗位名称":"title","平台":"platform","账号名称":"name","曝光":"views","点击":"clicks","候选人编号":"candidateCode"}');
+  const [confirmImport, setConfirmImport] = useState(false);
   const mappedCsv = remapCsv(csv, mappingText);
   const preview = csvPreviewRows(mappedCsv);
   const allRows = csvAllRows(mappedCsv);
@@ -2212,6 +2294,10 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
     let next: AppData = data;
     let recordCount = 0;
     const errors = [...(missing.length > 0 ? [`缺少必要字段：${missing.join('、')}`] : []), ...rowErrors];
+    if (!confirmImport) {
+      setLastImportMessage(errors.length === 0 ? `预检通过：将导入 ${allRows.rows.length} 行，请勾选确认后再导入` : errors.join('；'));
+      return;
+    }
     if (errors.length === 0) {
       if (source === '岗位') {
         const jobs = parseJobCsv(mappedCsv);
@@ -2280,6 +2366,7 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
     audit('执行数据导入', `${source}：${run.status}`, { ...next, importRuns: [run, ...next.importRuns] });
     setLastImportMessage(errors.length === 0 ? `已导入 ${recordCount} 条${source}数据` : errors.join('；'));
     if (errors.length === 0) setCsv('');
+    setConfirmImport(false);
   };
 
   return (
@@ -2313,6 +2400,7 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
           <input value={fileName} onChange={(event) => setFileName(event.target.value)} placeholder="文件名" />
           <button onClick={runImport}><Database size={16} />校验并导入</button>
         </div>
+        <label className="checkbox-line"><input type="checkbox" checked={confirmImport} onChange={(event) => setConfirmImport(event.target.checked)} />确认写入业务数据</label>
         <textarea className="small-textarea" value={csv} onChange={(event) => setCsv(event.target.value)} placeholder={templates[source]} />
         <textarea className="small-textarea" value={mappingText} onChange={(event) => setMappingText(event.target.value)} placeholder='字段映射 JSON，例如 {"岗位名称":"title","曝光":"views"}' />
         <div className="platform-note"><Database size={16} />识别到 {allRows.rows.length} 行数据，预览显示前 {preview.rows.length} 行。必要字段：{requiredHeaders[source].join('、')}</div>
@@ -2742,6 +2830,12 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
     model: '',
     enabledFor: '内容生成、风险识别、复盘建议',
   });
+  const permissionOptions = ['工作台查看', '岗位查看', '内容查看', '内容创建', '内容审核', '素材查看', '账号查看', '数据查看', '数据导入', '复盘查看', 'AI配置', '系统配置', '全部'];
+  const toggleRolePermission = (permission: string) => {
+    const current = role.permissions.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean);
+    const next = current.includes(permission) ? current.filter((item) => item !== permission) : [...current, permission];
+    setRole({ ...role, permissions: next.join('、') });
+  };
   const addRole = () => {
     if (!role.name.trim()) return;
     const item: PermissionRole = {
@@ -2969,6 +3063,18 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
 	          <input value={role.permissions} onChange={(event) => setRole({ ...role, permissions: event.target.value })} placeholder="权限，用顿号分隔" />
 	          <button onClick={addRole}><Plus size={16} />新增角色</button>
 	        </div>
+        <div className="permission-grid">
+          {permissionOptions.map((permission) => (
+            <label key={permission}>
+              <input
+                type="checkbox"
+                checked={role.permissions.split(/[、,，/]/).map((item) => item.trim()).includes(permission)}
+                onChange={() => toggleRolePermission(permission)}
+              />
+              {permission}
+            </label>
+          ))}
+        </div>
         <div className="module-tabs">
           {(['招聘专员', '运营管理员', '技术审核人', '管理层'] as const).map((item) => <button key={item} onClick={() => applyRolePreset(item)}>{item}预设</button>)}
         </div>
