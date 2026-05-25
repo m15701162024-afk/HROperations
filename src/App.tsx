@@ -281,6 +281,7 @@ function LoginScreen({ onLogin, error }: { onLogin: (username: string, password:
 
 function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; openSection: (section: Section) => void }) {
   const [goal, setGoal] = useState({ title: '', dimension: '平台', target: 0, current: 0, metric: '发布篇数' });
+  const [drilldown, setDrilldown] = useState<'内容' | '曝光' | '互动' | '点击' | ''>('');
   const totals = useMemo(() => {
     const published = data.contents.filter((item) => item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘').length;
     const views = data.contents.reduce((sum, item) => sum + item.metrics.views, 0);
@@ -334,17 +335,37 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
           <p>当前版本覆盖 PRD 中的一期核心闭环：岗位需求、AI 生成、风险识别、排期发布、数据看板、素材与账号权限、复盘沉淀。</p>
         </div>
         <div className="hero-actions">
-          <button><Sparkles size={16} />生成内容</button>
-          <button className="secondary"><BarChart3 size={16} />查看看板</button>
+          <button onClick={() => openSection('内容运营')}><Sparkles size={16} />生成内容</button>
+          <button className="secondary" onClick={() => openSection('数据分析')}><BarChart3 size={16} />查看看板</button>
         </div>
       </div>
 
       <div className="stats-row">
-        <StatCard label="内容发布数量" value={totals.published} note="已发布/回收/复盘" icon={FileText} />
-        <StatCard label="曝光/阅读/播放" value={totals.views.toLocaleString()} note="全平台合计" icon={Rocket} />
-        <StatCard label="互动量" value={totals.interactions.toLocaleString()} note="赞评藏转合计" icon={PieChart} />
-        <StatCard label="招聘入口点击" value={totals.clicks.toLocaleString()} note="北森/官网跳转前" icon={Link} />
+        <button className="stat-button" onClick={() => setDrilldown(drilldown === '内容' ? '' : '内容')}><StatCard label="内容发布数量" value={totals.published} note="已发布/回收/复盘" icon={FileText} /></button>
+        <button className="stat-button" onClick={() => setDrilldown(drilldown === '曝光' ? '' : '曝光')}><StatCard label="曝光/阅读/播放" value={totals.views.toLocaleString()} note="全平台合计" icon={Rocket} /></button>
+        <button className="stat-button" onClick={() => setDrilldown(drilldown === '互动' ? '' : '互动')}><StatCard label="互动量" value={totals.interactions.toLocaleString()} note="赞评藏转合计" icon={PieChart} /></button>
+        <button className="stat-button" onClick={() => setDrilldown(drilldown === '点击' ? '' : '点击')}><StatCard label="招聘入口点击" value={totals.clicks.toLocaleString()} note="北森/官网跳转前" icon={Link} /></button>
       </div>
+      {drilldown && (
+        <section className="panel wide">
+          <div className="panel-title"><h2>{drilldown}数据下钻</h2><BarChart3 size={18} /></div>
+          <div className="entry-grid">
+            {platforms.map((platform) => {
+              const contents = data.contents.filter((item) => item.platform === platform);
+              const views = contents.reduce((sum, item) => sum + item.metrics.views, 0);
+              const clicks = contents.reduce((sum, item) => sum + item.metrics.clicks, 0);
+              const interactions = contents.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
+              return (
+                <article key={platform}>
+                  <strong>{platform}</strong>
+                  <span>{contents.length} 内容 · {views} 曝光 · {interactions} 互动 · {clicks} 点击</span>
+                  <button className="ghost" onClick={() => openSection('数据分析')}>进入平台分析</button>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="panel wide">
         <div className="panel-title">
@@ -451,6 +472,7 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
   const [csv, setCsv] = useState('');
   const [editingId, setEditingId] = useState('');
   const [detailId, setDetailId] = useState('');
+  const [activePanel, setActivePanel] = useState<'录入岗位' | '批量导入' | '岗位库'>('录入岗位');
 
   const createJob = () => {
     if (!form.title.trim()) return;
@@ -496,6 +518,7 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
   };
   const startEditJob = (job: JobNeed) => {
     setEditingId(job.id);
+    setActivePanel('录入岗位');
     setForm({
       title: job.title,
       family: job.family,
@@ -540,28 +563,45 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
         </div>
         <button onClick={exportJobs}><FileText size={16} />导出岗位CSV</button>
       </section>
-      <section className="panel">
+      <section className="panel wide">
+        <div className="module-tabs">
+          {(['录入岗位', '批量导入', '岗位库'] as const).map((item) => (
+            <button key={item} className={activePanel === item ? 'active' : ''} onClick={() => setActivePanel(item)}>{item}</button>
+          ))}
+        </div>
+      </section>
+      {activePanel === '录入岗位' && <section className="panel wide">
         <div className="panel-title"><h2>新增岗位需求</h2><Plus size={18} /></div>
         <div className="form-grid">
           <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="岗位名称" />
           <input value={form.family} onChange={(event) => setForm({ ...form, family: event.target.value })} placeholder="岗位族群" />
+          <input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} placeholder="城市" />
           <input value={form.level} onChange={(event) => setForm({ ...form, level: event.target.value })} placeholder="岗位层级" />
+          <select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as JobNeed['type'] })}>
+            <option>社招</option>
+            <option>校招</option>
+            <option>实习</option>
+            <option>职能</option>
+          </select>
           <input value={form.targetPlatforms} onChange={(event) => setForm({ ...form, targetPlatforms: event.target.value })} placeholder="目标平台，用顿号分隔" />
           <textarea value={form.jd} onChange={(event) => setForm({ ...form, jd: event.target.value })} placeholder="JD / 岗位描述" />
+          <textarea value={form.persona} onChange={(event) => setForm({ ...form, persona: event.target.value })} placeholder="候选人画像：年限、能力、关注点、求职顾虑" />
           <textarea value={form.sellingPoints} onChange={(event) => setForm({ ...form, sellingPoints: event.target.value })} placeholder="岗位卖点，用顿号分隔" />
+          <input value={form.beisenUrl} onChange={(event) => setForm({ ...form, beisenUrl: event.target.value })} placeholder="北森岗位链接" />
+          <input value={form.websiteUrl} onChange={(event) => setForm({ ...form, websiteUrl: event.target.value })} placeholder="官网招聘链接" />
         </div>
         <div className="card-actions-inline">
           <button className="full" onClick={editingId ? saveJobEdit : createJob}><Plus size={16} />{editingId ? '保存编辑' : '保存岗位'}</button>
           {editingId && <button className="secondary" onClick={() => { setEditingId(''); setForm(emptyJob); }}>取消编辑</button>}
         </div>
-      </section>
-      <section className="panel">
+      </section>}
+      {activePanel === '批量导入' && <section className="panel wide">
         <div className="panel-title"><h2>CSV 导入</h2><Database size={18} /></div>
         <p className="helper">支持字段：title/family/city/level/type/jd/persona/sellingPoints/targetPlatforms，或中文表头。</p>
         <textarea className="small-textarea" value={csv} onChange={(event) => setCsv(event.target.value)} placeholder="title,family,city&#10;高级前端,前端,杭州" />
         <button className="full" onClick={importJobs}><Database size={16} />解析并导入</button>
-      </section>
-      <section className="panel wide">
+      </section>}
+      {activePanel === '岗位库' && <section className="panel wide">
         <table>
           <thead>
             <tr>
@@ -606,13 +646,22 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
         {detailId && data.jobs.filter((job) => job.id === detailId).map((job) => (
           <div className="detail-panel" key={job.id}>
             <strong>{job.title}</strong>
+            <div className="template-grid">
+              <div className="template-chip">岗位基础<small>{job.city} · {job.type} · {job.family} · {job.level}</small></div>
+              <div className="template-chip">内容覆盖<small>{data.contents.filter((content) => content.jobId === job.id).length} 条内容 · {job.targetPlatforms.join('、')}</small></div>
+              <div className="template-chip">北森回流<small>{data.beisenResults.filter((result) => result.jobId === job.id).length} 条候选人结果</small></div>
+            </div>
             <p>{job.jd || '暂无 JD'}</p>
             <span>候选人画像：{job.persona || '未填写'}</span>
             <span>岗位卖点：{job.sellingPoints.join('、') || '未填写'}</span>
             <span>北森入口：{job.beisenUrl || '未配置'} · 官网入口：{job.websiteUrl || '未配置'}</span>
+            <div className="card-actions-inline">
+              <button className="secondary" onClick={() => startEditJob(job)}>编辑当前岗位</button>
+              <button className="ghost" onClick={() => downloadText(`${job.title}-内容简报.md`, `# ${job.title}\n\n## JD\n${job.jd}\n\n## 候选人画像\n${job.persona}\n\n## 岗位卖点\n${job.sellingPoints.join('、')}`, 'text/markdown;charset=utf-8')}>导出岗位简报</button>
+            </div>
           </div>
         ))}
-      </section>
+      </section>}
     </div>
   );
 }
@@ -690,6 +739,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
   const [revisionDrafts, setRevisionDrafts] = useState<Record<string, string>>({});
   const [calendarView, setCalendarView] = useState<'周视图' | '月视图'>('月视图');
+  const [scheduleDetailId, setScheduleDetailId] = useState('');
 
   const selectedJob = data.jobs.find((job) => job.id === jobId) ?? data.jobs[0];
   const risk = scanRisks(draft);
@@ -707,6 +757,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
     const target = item === 'B站' || item === '抖音' ? 1 : item === '公众号' || item === '知乎' || item === '技术社区' ? 2 : 3;
     return { platform: item, count, target };
   });
+  const scheduleDetail = data.contents.find((item) => item.id === scheduleDetailId);
 
   const handleGenerate = async () => {
     if (!selectedJob) return;
@@ -943,12 +994,28 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
                   <b>{item.title}</b>
                   {daysUntil(item.dueDate) < 0 && item.status !== '已发布' && <Badge tone="danger">已逾期</Badge>}
                   <Badge tone={item.status === '已发布' ? 'good' : item.riskLevel === '高' ? 'danger' : 'info'}>{item.status}</Badge>
+                  <button className="ghost" onClick={() => setScheduleDetailId(scheduleDetailId === item.id ? '' : item.id)}>下钻</button>
                   <input type="date" value={item.dueDate} onChange={(event) => updateContentField(item.id, { dueDate: event.target.value })} />
                 </div>
               ))}
             </article>
           ))}
         </div>
+        {scheduleDetail && (
+          <div className="detail-panel">
+            <strong>{scheduleDetail.title}</strong>
+            <div className="template-grid">
+              <div className="template-chip">内容状态<small>{scheduleDetail.status} · {scheduleDetail.riskLevel}风险</small></div>
+              <div className="template-chip">协作信息<small>{scheduleDetail.owner} 负责 · {scheduleDetail.reviewer} 审核</small></div>
+              <div className="template-chip">效果数据<small>{scheduleDetail.metrics.views} 曝光 · {scheduleDetail.metrics.clicks} 点击</small></div>
+            </div>
+            <p>{scheduleDetail.content}</p>
+            <div className="card-actions-inline">
+              <button className="secondary" onClick={() => advance(scheduleDetail.id)}>推进审核</button>
+              <button className="ghost" onClick={() => publishContent(scheduleDetail.id)}>标记发布</button>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="panel wide">
@@ -1038,6 +1105,13 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
   const [asset, setAsset] = useState({ name: '', category: '公司/业务介绍', owner: '招聘专员', scope: '招聘内容可用' });
   const [assetFile, setAssetFile] = useState<File | null>(null);
   const [uploadStatus, setUploadStatus] = useState('');
+  const [activePanel, setActivePanel] = useState<'素材库' | '采集表' | '模板案例'>('素材库');
+  const [templateDetail, setTemplateDetail] = useState('');
+  const collectionTemplates = [
+    { name: '技术案例采集表', fields: '项目背景、技术挑战、技术栈、解决方案、团队分工、业务价值、可公开范围、禁止公开内容、适合平台、审核人' },
+    { name: '员工访谈采集表', fields: '员工角色、加入时间、成长经历、印象项目、团队氛围、管理风格、候选人建议、实名授权、照片授权、有效期' },
+    { name: '岗位卖点采集表', fields: '岗位名称、候选人关注点、薪酬范围口径、技术挑战、团队氛围、成长路径、工作强度说明、禁用表达' },
+  ];
 
   const createAsset = async () => {
     if (!asset.name.trim()) return;
@@ -1088,6 +1162,13 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
         <button onClick={() => exportJson('素材资产.json', data.assets)}><FileText size={16} />导出素材</button>
       </section>
       <section className="panel wide">
+        <div className="module-tabs">
+          {(['素材库', '采集表', '模板案例'] as const).map((item) => (
+            <button key={item} className={activePanel === item ? 'active' : ''} onClick={() => setActivePanel(item)}>{item}</button>
+          ))}
+        </div>
+      </section>
+      {activePanel === '素材库' && <section className="panel wide">
         <div className="panel-title"><h2>新增素材记录</h2><Plus size={18} /></div>
         <div className="inline-form">
           <input value={asset.name} onChange={(event) => setAsset({ ...asset, name: event.target.value })} placeholder="素材名称" />
@@ -1101,8 +1182,8 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
           <button onClick={() => void createAsset()}><Plus size={16} />保存</button>
         </div>
         {uploadStatus && <p className="upload-note">{uploadStatus}</p>}
-      </section>
-      <section className="panel">
+      </section>}
+      {activePanel === '素材库' && <section className="panel wide">
         <div className="panel-title"><h2>素材库</h2><Database size={18} /></div>
         {data.assets.length === 0 && <EmptyState title="暂无真实素材" body="请录入公司介绍、JD、图片授权、FAQ 或技术案例采集记录。" />}
         {data.assets.map((asset) => (
@@ -1141,24 +1222,50 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
             <button className="ghost" onClick={() => removeAsset(asset.id)}>删除</button>
           </div>
         ))}
-      </section>
-      <section className="panel">
+      </section>}
+      {activePanel === '采集表' && <section className="panel wide">
         <div className="panel-title"><h2>采集表框架</h2><FileText size={18} /></div>
-        <div className="template-block">
-          <h3>技术案例采集表</h3>
-          <p>项目背景、技术挑战、技术栈、解决方案、团队分工、业务价值、可公开范围、禁止公开内容、适合平台、审核人。</p>
+        <div className="entry-grid">
+          {collectionTemplates.map((item) => (
+            <article key={item.name}>
+              <strong>{item.name}</strong>
+              <span>{item.fields}</span>
+              <div className="card-actions-inline">
+                <button className="secondary" onClick={() => setTemplateDetail(item.name)}>打开填写</button>
+                <button className="ghost" onClick={() => downloadText(`${item.name}.csv`, `${item.fields.replaceAll('、', ',')}\n`, 'text/csv;charset=utf-8')}>下载采集表</button>
+              </div>
+            </article>
+          ))}
         </div>
-        <div className="template-block">
-          <h3>员工访谈采集表</h3>
-          <p>员工角色、加入时间、成长经历、印象项目、团队氛围、管理风格、候选人建议、实名授权、照片授权、有效期。</p>
-        </div>
-      </section>
-      <section className="panel wide">
+        {templateDetail && (
+          <div className="detail-panel">
+            <strong>{templateDetail}</strong>
+            <textarea className="small-textarea" placeholder="在这里粘贴或填写采集内容，确认后可保存为素材记录。示例：项目背景/技术挑战/可公开范围..." />
+            <button className="secondary" onClick={() => {
+              setAsset({ ...asset, name: `${templateDetail}-${nowText()}`, category: templateDetail, scope: '待审核后使用' });
+              setActivePanel('素材库');
+            }}>带入新增素材</button>
+          </div>
+        )}
+      </section>}
+      {activePanel === '模板案例' && <section className="panel wide">
         <div className="panel-title"><h2>模板库与案例库</h2><BookOpen size={18} /></div>
         <div className="template-grid">
-          {contentTypes.map((type) => <div key={type} className="template-chip">{type}<small>标题/开头/CTA/标签结构化沉淀</small></div>)}
+          {contentTypes.map((type) => (
+            <button key={type} className="template-chip clickable-card" onClick={() => setTemplateDetail(type)}>
+              {type}<small>标题/开头/CTA/标签结构化沉淀</small>
+            </button>
+          ))}
         </div>
-      </section>
+        {templateDetail && (
+          <div className="detail-panel">
+            <strong>{templateDetail}模板</strong>
+            <p>标题结构：目标人群 + 场景痛点 + 岗位/团队亮点。正文结构：真实场景、岗位价值、候选人关注点回应、行动入口。</p>
+            <textarea className="small-textarea" defaultValue={`【${templateDetail}】标题示例\n开头：候选人最关心的问题是什么？\n正文：结合岗位、团队、技术挑战和成长空间展开。\nCTA：查看岗位/私信沟通/进入招聘落地页。`} />
+            <button className="ghost" onClick={() => downloadText(`${templateDetail}模板.md`, `# ${templateDetail}模板\n\n标题结构：目标人群 + 场景痛点 + 岗位/团队亮点\n\n正文结构：真实场景、岗位价值、候选人关注点回应、行动入口`, 'text/markdown;charset=utf-8')}>导出模板</button>
+          </div>
+        )}
+      </section>}
     </div>
   );
 }
@@ -1169,6 +1276,8 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
   const [landing, setLanding] = useState({ title: '', slug: '', pageType: '岗位集合页' as LandingPage['pageType'], destinationUrl: '' });
   const [editingAccountId, setEditingAccountId] = useState('');
   const [editingEntryId, setEditingEntryId] = useState('');
+  const [activePanel, setActivePanel] = useState<'平台总览' | '账号入口' | 'API集成' | '落地页'>('平台总览');
+  const [selectedPlatform, setSelectedPlatform] = useState<Platform>('小红书');
   const [landingLeadDrafts, setLandingLeadDrafts] = useState<Record<string, { name: string; contact: string; targetJobId: string; sourcePlatform: Platform | '未知'; note: string }>>({});
   const [account, setAccount] = useState({
     platform: '小红书' as Platform,
@@ -1177,6 +1286,12 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     owner: '',
     positioning: '',
   });
+  const platformDetail = {
+    accounts: data.accounts.filter((item) => item.platform === selectedPlatform),
+    entries: data.entries.filter((item) => item.platform === selectedPlatform),
+    contents: data.contents.filter((item) => item.platform === selectedPlatform),
+    results: data.beisenResults.filter((item) => item.sourcePlatform === selectedPlatform),
+  };
 
   const createAccount = () => {
     if (!account.name.trim()) return;
@@ -1515,6 +1630,43 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
         </div>
       </section>
       <section className="panel wide">
+        <div className="module-tabs">
+          {(['平台总览', '账号入口', 'API集成', '落地页'] as const).map((item) => (
+            <button key={item} className={activePanel === item ? 'active' : ''} onClick={() => setActivePanel(item)}>{item}</button>
+          ))}
+        </div>
+      </section>
+      {activePanel === '平台总览' && <section className="panel wide">
+        <div className="panel-title"><h2>平台详情下钻</h2><BarChart3 size={18} /></div>
+        <div className="platform-card-grid">
+          {platforms.map((item) => {
+            const contentCount = data.contents.filter((content) => content.platform === item).length;
+            const accountCount = data.accounts.filter((account) => account.platform === item).length;
+            const entryCount = data.entries.filter((entry) => entry.platform === item).length;
+            return (
+              <button key={item} className={`platform-card ${selectedPlatform === item ? 'active' : ''}`} onClick={() => setSelectedPlatform(item)}>
+                <strong>{item}</strong>
+                <span>{platformPositioning[item]}</span>
+                <small>{accountCount} 账号 · {entryCount} 入口 · {contentCount} 内容</small>
+              </button>
+            );
+          })}
+        </div>
+        <div className="detail-panel">
+          <strong>{selectedPlatform} 运营详情</strong>
+          <div className="template-grid">
+            <div className="template-chip">账号<small>{platformDetail.accounts.map((item) => item.name).join('、') || '未配置'}</small></div>
+            <div className="template-chip">入口<small>{platformDetail.entries.map((item) => item.headline).join('、') || '未配置'}</small></div>
+            <div className="template-chip">内容效果<small>{platformDetail.contents.reduce((sum, item) => sum + item.metrics.views, 0)} 曝光 · {platformDetail.contents.reduce((sum, item) => sum + item.metrics.clicks, 0)} 点击</small></div>
+            <div className="template-chip">北森回流<small>{platformDetail.results.length} 条</small></div>
+          </div>
+          <div className="card-actions-inline">
+            <button className="secondary" onClick={() => { setAccount({ ...account, platform: selectedPlatform, positioning: platformPositioning[selectedPlatform] }); setActivePanel('账号入口'); }}>配置该平台账号</button>
+            <button className="ghost" onClick={() => { setIntegration({ ...integration, type: '平台API', name: `${selectedPlatform} API`, extraConfig: JSON.stringify({ platform: selectedPlatform, fields: { contentId: 'contentId', views: 'views', clicks: 'clicks' } }, null, 2) }); setActivePanel('API集成'); }}>配置该平台 API</button>
+          </div>
+        </div>
+      </section>}
+      {activePanel === '账号入口' && <section className="panel wide">
         <div className="panel-title"><h2>新增平台账号</h2><Users size={18} /></div>
         <div className="inline-form">
           <select value={account.platform} onChange={(event) => setAccount({ ...account, platform: event.target.value as Platform })}>
@@ -1532,8 +1684,8 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
           {editingAccountId && <button className="secondary" onClick={() => { setEditingAccountId(''); setAccount({ platform: '小红书', name: '', type: '招聘专用账号', owner: '', positioning: '' }); }}>取消</button>}
         </div>
         <input value={account.positioning} onChange={(event) => setAccount({ ...account, positioning: event.target.value })} placeholder="账号定位，例如：岗位种草、校招答疑、技术观点" />
-      </section>
-      <section className="panel wide">
+      </section>}
+      {activePanel === '账号入口' && <section className="panel wide">
         <table>
           <thead>
             <tr>
@@ -1570,8 +1722,8 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
             ))}
           </tbody>
         </table>
-      </section>
-      <section className="panel wide">
+      </section>}
+      {activePanel === '账号入口' && <section className="panel wide">
         <div className="panel-title"><h2>平台主页招聘入口</h2><Link size={18} /></div>
         <div className="inline-form">
           <select value={entry.platform} onChange={(event) => setEntry({ ...entry, platform: event.target.value as Platform })}>
@@ -1602,9 +1754,14 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
             </article>
           ))}
         </div>
-      </section>
-      <section className="panel wide">
+      </section>}
+      {activePanel === 'API集成' && <section className="panel wide">
         <div className="panel-title"><h2>平台与系统集成配置</h2><RefreshCw size={18} /></div>
+        <div className="usage-steps">
+          <div><b>1</b><span>选择北森/平台API/企微飞书</span></div>
+          <div><b>2</b><span>填写接口地址、Token、字段映射</span></div>
+          <div><b>3</b><span>测试连接后执行同步或拉取</span></div>
+        </div>
         <div className="inline-form">
           <select value={integration.type} onChange={(event) => setIntegration({ ...integration, type: event.target.value as IntegrationConfig['type'] })}>
             <option>北森</option>
@@ -1651,8 +1808,8 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
             ))}
           </details>
         )}
-      </section>
-      <section className="panel wide">
+      </section>}
+      {activePanel === '落地页' && <section className="panel wide">
         <div className="panel-title"><h2>招聘落地页</h2><FileText size={18} /></div>
         <div className="inline-form">
           <input value={landing.title} onChange={(event) => setLanding({ ...landing, title: event.target.value })} placeholder="页面标题" />
@@ -1732,7 +1889,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
             );
           })}
         </div>
-      </section>
+      </section>}
     </div>
   );
 }
@@ -1740,6 +1897,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
 function Analytics({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
   const [metricsCsv, setMetricsCsv] = useState('');
   const [beisenCsv, setBeisenCsv] = useState('');
+  const [selectedPlatform, setSelectedPlatform] = useState<Platform | '全部'>('全部');
   const [cost, setCost] = useState({ targetType: '内容' as CostRecord['targetType'], targetId: '', laborCost: 0, mediaCost: 0, productionCost: 0 });
   const byPlatform = platforms.map((platform) => {
     const items = data.contents.filter((item) => item.platform === platform);
@@ -1751,6 +1909,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
     };
   }).filter((item) => item.count > 0);
   const maxViews = Math.max(...byPlatform.map((p) => p.views), 1);
+  const selectedContents = selectedPlatform === '全部' ? data.contents : data.contents.filter((item) => item.platform === selectedPlatform);
+  const selectedResults = selectedPlatform === '全部' ? data.beisenResults : data.beisenResults.filter((item) => item.sourcePlatform === selectedPlatform);
   const importMetrics = () => {
     const nextContents = applyMetricsCsv(data.contents, metricsCsv);
     audit('导入平台指标', '内容数据', { ...data, contents: nextContents });
@@ -1784,6 +1944,27 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           <p>按平台、账号、岗位族群、内容类型分析曝光、互动、点击和跳转漏斗。</p>
         </div>
         <button onClick={importMetrics}><RefreshCw size={16} />导入指标</button>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>使用路径</h2><Target size={18} /></div>
+        <div className="usage-steps">
+          <div><b>1</b><span>先在“内容运营”发布内容，或在“导入中心”导入内容指标</span></div>
+          <div><b>2</b><span>再导入北森回流结果，建立平台/内容/岗位归因</span></div>
+          <div><b>3</b><span>最后按平台下钻看曝光、点击、投递和入职效果</span></div>
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>平台下钻</h2><BarChart3 size={18} /></div>
+        <div className="module-tabs">
+          <button className={selectedPlatform === '全部' ? 'active' : ''} onClick={() => setSelectedPlatform('全部')}>全部</button>
+          {platforms.map((platform) => <button key={platform} className={selectedPlatform === platform ? 'active' : ''} onClick={() => setSelectedPlatform(platform)}>{platform}</button>)}
+        </div>
+        <div className="stats-row compact-stats">
+          <StatCard label="内容数" value={selectedContents.length} note="当前筛选平台" icon={FileText} />
+          <StatCard label="曝光" value={selectedContents.reduce((sum, item) => sum + item.metrics.views, 0)} note="真实导入后计算" icon={Rocket} />
+          <StatCard label="点击" value={selectedContents.reduce((sum, item) => sum + item.metrics.clicks, 0)} note="招聘入口点击" icon={Link} />
+          <StatCard label="北森回流" value={selectedResults.length} note="投递/面试/入职" icon={Users} />
+        </div>
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>平台指标导入</h2><Database size={18} /></div>
@@ -1880,11 +2061,27 @@ function csvPreviewRows(csv: string) {
   };
 }
 
+function csvAllRows(csv: string) {
+  const rows = csv.trim().split(/\r?\n/).filter(Boolean);
+  if (rows.length === 0) return { headers: [] as string[], rows: [] as string[][] };
+  const headers = rows[0].split(',').map((item) => item.trim());
+  return {
+    headers,
+    rows: rows.slice(1).map((row) => row.split(',').map((item) => item.trim())),
+  };
+}
+
+function rowObject(headers: string[], row: string[]) {
+  return Object.fromEntries(headers.map((header, index) => [header, row[index] ?? '']));
+}
+
 function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
   const [source, setSource] = useState<ImportRun['source']>('岗位');
   const [csv, setCsv] = useState('');
   const [fileName, setFileName] = useState('手动粘贴.csv');
+  const [lastImportMessage, setLastImportMessage] = useState('');
   const preview = csvPreviewRows(csv);
+  const allRows = csvAllRows(csv);
   const requiredHeaders: Record<ImportRun['source'], string[]> = {
     岗位: ['title'],
     内容指标: ['contentId'],
@@ -1921,8 +2118,8 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
         next = { ...next, beisenResults: [...results, ...next.beisenResults] };
       }
       if (source === '账号') {
-        const accounts = preview.rows.map((row) => {
-          const object = Object.fromEntries(preview.headers.map((header, index) => [header, row[index] ?? '']));
+        const accounts = allRows.rows.map((row) => {
+          const object = rowObject(allRows.headers, row);
           return {
             id: `acc-${Date.now()}-${Math.random().toString(16).slice(2)}`,
             platform: (object.platform || '小红书') as Platform,
@@ -1941,8 +2138,8 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
         next = { ...next, accounts: [...accounts, ...next.accounts] };
       }
       if (source === '素材') {
-        const assets = preview.rows.map((row) => {
-          const object = Object.fromEntries(preview.headers.map((header, index) => [header, row[index] ?? '']));
+        const assets = allRows.rows.map((row) => {
+          const object = rowObject(allRows.headers, row);
           return {
             id: `asset-${Date.now()}-${Math.random().toString(16).slice(2)}`,
             name: object.name || '未命名素材',
@@ -1971,6 +2168,7 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
       createdAt: nowText(),
     };
     audit('执行数据导入', `${source}：${run.status}`, { ...next, importRuns: [run, ...next.importRuns] });
+    setLastImportMessage(errors.length === 0 ? `已导入 ${recordCount} 条${source}数据` : errors.join('；'));
     if (errors.length === 0) setCsv('');
   };
 
@@ -1984,6 +2182,16 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
         <button onClick={() => downloadText(`${source}导入模板.csv`, templates[source], 'text/csv;charset=utf-8')}><FileText size={16} />下载模板</button>
       </section>
       <section className="panel wide">
+        <div className="module-tabs">
+          {(['岗位', '内容指标', '北森结果', '账号', '素材'] as ImportRun['source'][]).map((item) => (
+            <button key={item} className={source === item ? 'active' : ''} onClick={() => setSource(item)}>{item}</button>
+          ))}
+        </div>
+        <div className="usage-steps">
+          <div><b>1</b><span>选择导入类型并下载模板</span></div>
+          <div><b>2</b><span>粘贴真实 CSV 数据，系统先预览前 5 行</span></div>
+          <div><b>3</b><span>校验通过后写入对应业务模块</span></div>
+        </div>
         <div className="inline-form">
           <select value={source} onChange={(event) => setSource(event.target.value as ImportRun['source'])}>
             <option>岗位</option>
@@ -1996,6 +2204,8 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
           <button onClick={runImport}><Database size={16} />校验并导入</button>
         </div>
         <textarea className="small-textarea" value={csv} onChange={(event) => setCsv(event.target.value)} placeholder={templates[source]} />
+        <div className="platform-note"><Database size={16} />识别到 {allRows.rows.length} 行数据，预览显示前 {preview.rows.length} 行。必要字段：{requiredHeaders[source].join('、')}</div>
+        {lastImportMessage && <div className="platform-note"><CheckCircle2 size={16} />{lastImportMessage}</div>}
         {missing.length > 0 && <div className="platform-note danger-note"><AlertTriangle size={16} />缺少必要字段：{missing.join('、')}</div>}
         <table>
           <thead><tr>{preview.headers.map((header) => <th key={header}>{header}</th>)}</tr></thead>
@@ -2167,6 +2377,29 @@ function AiWorkbench({ data, audit, apiToken }: { data: AppData; audit: (action:
   const [template, setTemplate] = useState({ task: '内容生成' as PromptTemplate['task'], name: '', provider: '通用', prompt: '' });
   const [runDraft, setRunDraft] = useState({ templateId: '', modelApiId: '', input: '' });
   const [status, setStatus] = useState('');
+  const [modelApi, setModelApi] = useState({
+    provider: 'DeepSeek' as ModelApiConfig['provider'],
+    name: '',
+    baseUrl: 'https://api.deepseek.com/v1',
+    apiKey: '',
+    model: 'deepseek-chat',
+    enabledFor: '内容生成、风险识别、复盘建议、标题推荐',
+  });
+  const addWorkbenchModelApi = () => {
+    if (!modelApi.name.trim()) return;
+    const item: ModelApiConfig = {
+      id: `model-api-${Date.now()}`,
+      provider: modelApi.provider,
+      name: modelApi.name,
+      baseUrl: modelApi.baseUrl,
+      apiKey: modelApi.apiKey,
+      model: modelApi.model,
+      enabledFor: modelApi.enabledFor.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean) as ModelApiConfig['enabledFor'],
+      status: modelApi.baseUrl && modelApi.apiKey && modelApi.model ? '待验证' : '未配置',
+    };
+    audit('保存统一大模型配置', item.name, { ...data, modelApis: [item, ...data.modelApis] });
+    setModelApi({ provider: 'DeepSeek', name: '', baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat', enabledFor: '内容生成、风险识别、复盘建议、标题推荐' });
+  };
   const addTemplate = () => {
     if (!template.name.trim() || !template.prompt.trim()) return;
     const item: PromptTemplate = {
@@ -2216,7 +2449,45 @@ function AiWorkbench({ data, audit, apiToken }: { data: AppData; audit: (action:
       <section className="toolbar">
         <div>
           <h1>AI 工作台</h1>
-          <p>管理提示词模板、任务试跑、调用日志、失败重试和模型配置使用情况。</p>
+          <p>统一管理大模型 Token/API、提示词模板、任务试跑、调用日志和失败重试；内容、复盘、风险识别都从这里读取模型配置。</p>
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>统一模型入口</h2><LockKeyhole size={18} /></div>
+        <div className="usage-steps">
+          <div><b>1</b><span>在这里保存 DeepSeek/OpenAI 兼容 API</span></div>
+          <div><b>2</b><span>选择模型用途：内容生成、风险识别、复盘建议、标题推荐</span></div>
+          <div><b>3</b><span>各业务模块自动读取启用模型，不再分别维护 Token</span></div>
+        </div>
+        <div className="inline-form">
+          <select value={modelApi.provider} onChange={(event) => setModelApi({ ...modelApi, provider: event.target.value as ModelApiConfig['provider'] })}>
+            <option>DeepSeek</option>
+            <option>OpenAI</option>
+            <option>Azure OpenAI</option>
+            <option>通义千问</option>
+            <option>智谱</option>
+            <option>私有模型</option>
+            <option>其他</option>
+          </select>
+          <input value={modelApi.name} onChange={(event) => setModelApi({ ...modelApi, name: event.target.value })} placeholder="配置名称，例如 DeepSeek 招聘助手" />
+          <input value={modelApi.baseUrl} onChange={(event) => setModelApi({ ...modelApi, baseUrl: event.target.value })} placeholder="API Base URL" />
+          <input value={modelApi.model} onChange={(event) => setModelApi({ ...modelApi, model: event.target.value })} placeholder="模型名称" />
+          <button onClick={addWorkbenchModelApi}><Plus size={16} />保存模型</button>
+        </div>
+        <div className="inline-form model-form">
+          <input type="password" value={modelApi.apiKey} onChange={(event) => setModelApi({ ...modelApi, apiKey: event.target.value })} placeholder="API Key / Token" />
+          <input value={modelApi.enabledFor} onChange={(event) => setModelApi({ ...modelApi, enabledFor: event.target.value })} placeholder="用途，用顿号分隔" />
+        </div>
+        <div className="entry-grid">
+          {data.modelApis.length === 0 && <EmptyState title="暂无统一模型配置" body="保存模型后，内容生成、风险识别和复盘建议会统一调用这里的配置。" />}
+          {data.modelApis.map((item) => (
+            <article key={item.id}>
+              <strong>{item.provider}｜{item.name}</strong>
+              <span>{item.baseUrl} · {item.model} · {item.apiKey ? 'Token已配置' : 'Token未配置'}</span>
+              <span>用途：{item.enabledFor.join('、')}</span>
+              <Badge tone={item.status === '已连接' ? 'good' : item.status === '连接失败' ? 'danger' : 'warn'}>{item.status}</Badge>
+            </article>
+          ))}
         </div>
       </section>
       <section className="panel wide">
@@ -2330,6 +2601,12 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
     };
     update({ ...data, users: [item, ...data.users] });
     setUser({ name: '', roleId: '', team: '招聘团队' });
+  };
+  const removeRole = (id: string) => {
+    update({ ...data, roles: data.roles.filter((item) => item.id !== id), users: data.users.map((item) => item.roleId === id ? { ...item, roleId: '' } : item) });
+  };
+  const updateUserStatus = (id: string, status: UserProfile['status']) => {
+    update({ ...data, users: data.users.map((item) => item.id === id ? { ...item, status } : item) });
   };
   const addWorkflow = () => {
     if (!workflow.name.trim()) return;
@@ -2519,7 +2796,7 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
         {data.roles.map((item) => (
           <div className="compact-row" key={item.id}>
             <div><strong>{item.name}</strong><span>{item.dataScope} · {item.permissions.join('、')}</span></div>
-            <Badge tone="good">自定义</Badge>
+            <div className="row-actions"><Badge tone="good">自定义</Badge><button className="ghost" onClick={() => removeRole(item.id)}>删除</button></div>
           </div>
         ))}
       </section>
@@ -2538,7 +2815,10 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
         {data.users.map((item) => (
           <div className="compact-row" key={item.id}>
             <div><strong>{item.name}</strong><span>{item.team} · {data.roles.find((roleItem) => roleItem.id === item.roleId)?.name ?? item.roleId}</span></div>
-            <Badge tone="good">{item.status}</Badge>
+            <select value={item.status} onChange={(event) => updateUserStatus(item.id, event.target.value as UserProfile['status'])}>
+              <option>启用</option>
+              <option>停用</option>
+            </select>
           </div>
         ))}
       </section>

@@ -825,6 +825,103 @@ textarea {
   gap: 12px;
 }
 
+.module-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.module-tabs button {
+  width: auto;
+  min-height: 36px;
+  color: #425166;
+  background: #f5f7fa;
+  border: 1px solid var(--line);
+}
+
+.module-tabs button.active {
+  color: #fff;
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+.usage-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.usage-steps div {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.usage-steps b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 24px;
+  height: 24px;
+  color: #fff;
+  background: var(--blue);
+  border-radius: 50%;
+  font-size: 13px;
+}
+
+.stat-button,
+.clickable-card,
+.platform-card {
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+}
+
+.stat-button {
+  display: block;
+}
+
+.stat-button .stat-card {
+  height: 100%;
+}
+
+.platform-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.platform-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.platform-card.active {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(50, 103, 214, 0.12);
+}
+
+.platform-card span,
+.platform-card small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.compact-stats {
+  margin-top: 12px;
+}
+
 .lead-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
