@@ -71,7 +71,7 @@ describe('招聘运营助手', () => {
     expect(screen.getByDisplayValue(/内容初稿/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /保存为内容任务/ }));
-    expect(screen.getByText(/小红书｜高级前端工程师内容初稿/)).toBeInTheDocument();
+    expect(screen.getAllByText(/小红书｜高级前端工程师内容初稿/).length).toBeGreaterThan(0);
   });
 
   it('detects high risk expressions', () => {

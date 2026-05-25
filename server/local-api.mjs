@@ -94,6 +94,81 @@ function contentTypeFor(filePath) {
   return 'application/octet-stream';
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[char]);
+}
+
+function renderLandingPage(page, jobs) {
+  const linkedJobs = jobs.filter((job) => page.linkedJobIds?.includes(job.id));
+  const jobOptions = linkedJobs.length > 0 ? linkedJobs : jobs;
+  const jobCards = jobOptions.map((job) => `
+    <article class="job">
+      <h2>${escapeHtml(job.title)}</h2>
+      <p>${escapeHtml(job.city)} · ${escapeHtml(job.family)} · ${escapeHtml(job.level)}</p>
+      <p>${escapeHtml(job.persona || job.jd || '欢迎了解岗位详情')}</p>
+      <ul>${(job.sellingPoints ?? []).map((point) => `<li>${escapeHtml(point)}</li>`).join('')}</ul>
+    </article>
+  `).join('');
+  const options = jobOptions.map((job) => `<option value="${escapeHtml(job.id)}">${escapeHtml(job.title)}</option>`).join('');
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(page.title)}</title>
+  <style>
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#172033;background:#f5f7fa}
+    header{padding:48px 24px;color:#fff;background:#172235}
+    main{max-width:1080px;margin:0 auto;padding:24px;display:grid;gap:18px}
+    h1{margin:0 0 12px;font-size:34px}
+    .job,form{padding:18px;background:#fff;border:1px solid #dce3eb;border-radius:8px}
+    .job h2{margin:0 0 8px}.job p{color:#526176;line-height:1.7}
+    form{display:grid;gap:12px}input,select,textarea,button{font:inherit;min-height:40px;padding:8px 10px;border:1px solid #dce3eb;border-radius:6px}
+    textarea{min-height:96px}button{color:#fff;background:#1b5f9e;cursor:pointer}
+    .ok{display:none;color:#147c58;background:#e7f6ef;padding:12px;border-radius:6px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>${escapeHtml(page.title)}</h1>
+    <p>${escapeHtml(page.pageType)} · 欢迎留下联系方式，招聘团队会尽快联系你。</p>
+  </header>
+  <main>
+    ${jobCards || '<article class="job"><h2>岗位信息待发布</h2><p>请稍后查看最新招聘机会。</p></article>'}
+    <form id="leadForm">
+      <strong>投递意向登记</strong>
+      <input name="name" placeholder="姓名" required />
+      <input name="contact" placeholder="手机号 / 邮箱 / 微信" required />
+      <select name="targetJobId">${options}<option value="">其他岗位</option></select>
+      <textarea name="note" placeholder="补充说明"></textarea>
+      <button type="submit">提交联系方式</button>
+      <div class="ok" id="ok">提交成功，招聘团队会尽快联系你。</div>
+    </form>
+  </main>
+  <script src="/hr-assistant-tracker.js" data-api-base="" data-landing-page-id="${escapeHtml(page.slug || page.id)}" data-source-platform="未知"></script>
+  <script>
+    document.getElementById('leadForm').addEventListener('submit', async function(event){
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(event.target).entries());
+      if (window.HRAssistantTracker) {
+        await window.HRAssistantTracker.submitLead(data);
+      } else {
+        await fetch('/api/landing/leads', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ...data, landingPageId: '${escapeHtml(page.slug || page.id)}', sourcePlatform: '未知' }) });
+      }
+      document.getElementById('ok').style.display='block';
+      event.target.reset();
+    });
+  </script>
+</body>
+</html>`;
+}
+
 function isSafeChildPath(parentDir, candidatePath) {
   const child = relative(parentDir, candidatePath);
   return child === '' || (child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child));
@@ -227,6 +302,22 @@ const server = createServer(async (request, response) => {
       sendFile(response, 200, await readFile(filePath), contentTypeFor(filePath));
     } catch {
       send(response, 404, { ok: false, error: 'File not found' });
+    }
+    return;
+  }
+
+  if (pathname.startsWith('/landing/') && request.method === 'GET') {
+    try {
+      const slug = decodeURIComponent(pathname.replace('/landing/', ''));
+      const data = await repository.readData();
+      const page = data.landingPages.find((item) => item.slug === slug || item.id === slug);
+      if (!page || page.status !== '已发布') {
+        send(response, 404, { ok: false, error: 'Landing page not found' });
+        return;
+      }
+      sendFile(response, 200, renderLandingPage(page, data.jobs), 'text/html; charset=utf-8');
+    } catch (error) {
+      send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Landing render failed' });
     }
     return;
   }

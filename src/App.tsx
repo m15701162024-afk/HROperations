@@ -53,6 +53,16 @@ const navItems: { key: Section; icon: React.ComponentType<{ size?: number }> }[]
 ];
 
 const contentTypes = ['岗位种草', '技术团队内容', '员工故事', '公司/业务介绍', '面试/求职干货', '短视频脚本', '图文笔记', '长文', '校招内容'];
+const sectionPermissions: Record<Section, string> = {
+  工作台: '工作台查看',
+  招聘需求: '岗位查看',
+  内容运营: '内容查看',
+  素材资产: '素材查看',
+  账号与平台: '账号查看',
+  数据分析: '数据查看',
+  复盘报告: '复盘查看',
+  系统配置: '系统配置',
+};
 
 function isLegacyDemoData(data: Partial<AppData>) {
   const demoJobIds = new Set(['job-1', 'job-2', 'job-3']);
@@ -419,6 +429,8 @@ const emptyJob: Omit<JobNeed, 'id' | 'sellingPoints' | 'targetPlatforms' | 'stat
 function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
   const [form, setForm] = useState(emptyJob);
   const [csv, setCsv] = useState('');
+  const [editingId, setEditingId] = useState('');
+  const [detailId, setDetailId] = useState('');
 
   const createJob = () => {
     if (!form.title.trim()) return;
@@ -462,6 +474,42 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
       contents: data.contents.filter((content) => content.jobId !== id),
     });
   };
+  const startEditJob = (job: JobNeed) => {
+    setEditingId(job.id);
+    setForm({
+      title: job.title,
+      family: job.family,
+      city: job.city,
+      level: job.level,
+      type: job.type,
+      jd: job.jd,
+      persona: job.persona,
+      sellingPoints: job.sellingPoints.join('、'),
+      targetPlatforms: job.targetPlatforms.join('、'),
+      beisenUrl: job.beisenUrl,
+      websiteUrl: job.websiteUrl,
+    });
+  };
+  const saveJobEdit = () => {
+    const target = data.jobs.find((job) => job.id === editingId);
+    if (!target || !form.title.trim()) return;
+    const nextJob: JobNeed = {
+      ...target,
+      ...form,
+      sellingPoints: form.sellingPoints.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean),
+      targetPlatforms: form.targetPlatforms.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean) as Platform[],
+    };
+    audit('编辑岗位需求', nextJob.title, { ...data, jobs: data.jobs.map((job) => job.id === editingId ? nextJob : job) });
+    setEditingId('');
+    setForm(emptyJob);
+  };
+  const toggleJobStatus = (id: string, status: JobNeed['status']) => {
+    const target = data.jobs.find((job) => job.id === id);
+    audit('更新岗位状态', `${target?.title ?? id}：${status}`, {
+      ...data,
+      jobs: data.jobs.map((job) => job.id === id ? { ...job, status } : job),
+    });
+  };
 
   return (
     <div className="page-grid">
@@ -482,7 +530,10 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
           <textarea value={form.jd} onChange={(event) => setForm({ ...form, jd: event.target.value })} placeholder="JD / 岗位描述" />
           <textarea value={form.sellingPoints} onChange={(event) => setForm({ ...form, sellingPoints: event.target.value })} placeholder="岗位卖点，用顿号分隔" />
         </div>
-        <button className="full" onClick={createJob}><Plus size={16} />保存岗位</button>
+        <div className="card-actions-inline">
+          <button className="full" onClick={editingId ? saveJobEdit : createJob}><Plus size={16} />{editingId ? '保存编辑' : '保存岗位'}</button>
+          {editingId && <button className="secondary" onClick={() => { setEditingId(''); setForm(emptyJob); }}>取消编辑</button>}
+        </div>
       </section>
       <section className="panel">
         <div className="panel-title"><h2>CSV 导入</h2><Database size={18} /></div>
@@ -518,13 +569,29 @@ function Jobs({ data, audit }: { data: AppData; audit: (action: string, target: 
                 <td>{job.family}</td>
                 <td>{job.level}</td>
                 <td>{job.targetPlatforms.join(' / ')}</td>
-                <td><Badge tone="good">{job.status}</Badge></td>
+                <td><Badge tone={job.status === '招聘中' ? 'good' : job.status === '暂停' ? 'warn' : 'neutral'}>{job.status}</Badge></td>
                 <td><Badge tone="info">北森/官网</Badge></td>
-                <td><button className="ghost" onClick={() => removeJob(job.id)}>删除</button></td>
+                <td>
+                  <div className="row-actions">
+                    <button className="ghost" onClick={() => setDetailId(detailId === job.id ? '' : job.id)}>详情</button>
+                    <button className="ghost" onClick={() => startEditJob(job)}>编辑</button>
+                    <button className="ghost" onClick={() => toggleJobStatus(job.id, job.status === '招聘中' ? '暂停' : '招聘中')}>{job.status === '招聘中' ? '暂停' : '开启'}</button>
+                    <button className="ghost" onClick={() => removeJob(job.id)}>删除</button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+        {detailId && data.jobs.filter((job) => job.id === detailId).map((job) => (
+          <div className="detail-panel" key={job.id}>
+            <strong>{job.title}</strong>
+            <p>{job.jd || '暂无 JD'}</p>
+            <span>候选人画像：{job.persona || '未填写'}</span>
+            <span>岗位卖点：{job.sellingPoints.join('、') || '未填写'}</span>
+            <span>北森入口：{job.beisenUrl || '未配置'} · 官网入口：{job.websiteUrl || '未配置'}</span>
+          </div>
+        ))}
       </section>
     </div>
   );
@@ -597,6 +664,14 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
   const selectedJob = data.jobs.find((job) => job.id === jobId) ?? data.jobs[0];
   const risk = scanRisks(draft);
   const filtered = data.contents.filter((item) => item.title.includes(query) || item.platform.includes(query) || item.type.includes(query));
+  const calendarItems = data.contents
+    .slice()
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    .reduce<Record<string, ContentTask[]>>((acc, item) => {
+      const key = item.publishedAt ?? item.dueDate;
+      acc[key] = [...(acc[key] ?? []), item];
+      return acc;
+    }, {});
 
   const handleGenerate = async () => {
     if (!selectedJob) return;
@@ -753,6 +828,14 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
       reviewComments: data.reviewComments.filter((comment) => comment.contentId !== id),
     });
   };
+  const updateContentField = (id: string, patch: Partial<ContentTask>) => {
+    const target = data.contents.find((item) => item.id === id);
+    if (!target) return;
+    audit('编辑内容任务', target.title, {
+      ...data,
+      contents: data.contents.map((item) => item.id === id ? { ...item, ...patch } : item),
+    });
+  };
 
   return (
     <div className="page-grid">
@@ -799,6 +882,28 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
 
       <section className="panel wide">
         <div className="panel-title">
+          <h2>排期日历</h2>
+          <ClipboardList size={18} />
+        </div>
+        {Object.keys(calendarItems).length === 0 && <EmptyState title="暂无内容排期" body="生成内容任务后，会按截止日期和发布时间进入排期日历。" />}
+        <div className="calendar-grid">
+          {Object.entries(calendarItems).map(([date, items]) => (
+            <article key={date} className="calendar-day">
+              <strong>{date}</strong>
+              {items.map((item) => (
+                <div key={item.id} className="calendar-item">
+                  <span>{item.platform} · {item.type}</span>
+                  <b>{item.title}</b>
+                  <Badge tone={item.status === '已发布' ? 'good' : item.riskLevel === '高' ? 'danger' : 'info'}>{item.status}</Badge>
+                </div>
+              ))}
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel wide">
+        <div className="panel-title">
           <h2>内容任务与审核流</h2>
           <Filter size={18} />
         </div>
@@ -824,6 +929,11 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
                   <span>负责人：{item.owner}</span>
                   <span>审核：{item.reviewer}</span>
                   <span>截止：{item.dueDate}</span>
+                </div>
+                <div className="inline-form compact-edit">
+                  <input value={item.owner} onChange={(event) => updateContentField(item.id, { owner: event.target.value })} placeholder="负责人" />
+                  <input value={item.reviewer} onChange={(event) => updateContentField(item.id, { reviewer: event.target.value })} placeholder="审核人" />
+                  <input type="date" value={item.dueDate} onChange={(event) => updateContentField(item.id, { dueDate: event.target.value })} />
                 </div>
                 <details className="version-box">
                   <summary>版本历史与对比（{versions.length}）</summary>
@@ -981,6 +1091,8 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
   const [entry, setEntry] = useState({ platform: '小红书' as Platform, headline: '', url: '', destination: '北森岗位页' as RecruitmentEntry['destination'] });
   const [integration, setIntegration] = useState({ type: '北森' as IntegrationConfig['type'], name: '', endpoint: '', apiKey: '', extraConfig: '', authMode: 'Token' as IntegrationConfig['authMode'] });
   const [landing, setLanding] = useState({ title: '', slug: '', pageType: '岗位集合页' as LandingPage['pageType'], destinationUrl: '' });
+  const [editingAccountId, setEditingAccountId] = useState('');
+  const [editingEntryId, setEditingEntryId] = useState('');
   const [landingLeadDrafts, setLandingLeadDrafts] = useState<Record<string, { name: string; contact: string; targetJobId: string; sourcePlatform: Platform | '未知'; note: string }>>({});
   const [account, setAccount] = useState({
     platform: '小红书' as Platform,
@@ -992,6 +1104,15 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
 
   const createAccount = () => {
     if (!account.name.trim()) return;
+    if (editingAccountId) {
+      const target = data.accounts.find((item) => item.id === editingAccountId);
+      if (!target) return;
+      const next = { ...target, ...account };
+      audit('编辑平台账号', next.name, { ...data, accounts: data.accounts.map((item) => item.id === editingAccountId ? next : item) });
+      setEditingAccountId('');
+      setAccount({ platform: '小红书', name: '', type: '招聘专用账号', owner: '', positioning: '' });
+      return;
+    }
     const item: PlatformAccount = {
       id: `acc-${Date.now()}`,
       ...account,
@@ -1007,6 +1128,15 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
 
   const createEntry = () => {
     if (!entry.headline.trim() || !entry.url.trim()) return;
+    if (editingEntryId) {
+      const target = data.entries.find((item) => item.id === editingEntryId);
+      if (!target) return;
+      const next = { ...target, ...entry };
+      audit('编辑招聘入口', next.headline, { ...data, entries: data.entries.map((item) => item.id === editingEntryId ? next : item) });
+      setEditingEntryId('');
+      setEntry({ platform: '小红书', headline: '', url: '', destination: '北森岗位页' });
+      return;
+    }
     const item: RecruitmentEntry = {
       id: `entry-${Date.now()}`,
       ...entry,
@@ -1276,6 +1406,14 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     const target = data.entries.find((item) => item.id === id);
     audit('删除招聘入口', target?.headline ?? id, { ...data, entries: data.entries.filter((item) => item.id !== id) });
   };
+  const startEditAccount = (item: PlatformAccount) => {
+    setEditingAccountId(item.id);
+    setAccount({ platform: item.platform, name: item.name, type: item.type, owner: item.owner, positioning: item.positioning });
+  };
+  const startEditEntry = (item: RecruitmentEntry) => {
+    setEditingEntryId(item.id);
+    setEntry({ platform: item.platform, headline: item.headline, url: item.url, destination: item.destination });
+  };
 
   return (
     <div className="page-grid">
@@ -1303,7 +1441,8 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
             <option>校招账号</option>
           </select>
           <input value={account.owner} onChange={(event) => setAccount({ ...account, owner: event.target.value })} placeholder="负责人" />
-          <button onClick={createAccount}><Plus size={16} />保存账号</button>
+          <button onClick={createAccount}><Plus size={16} />{editingAccountId ? '保存编辑' : '保存账号'}</button>
+          {editingAccountId && <button className="secondary" onClick={() => { setEditingAccountId(''); setAccount({ platform: '小红书', name: '', type: '招聘专用账号', owner: '', positioning: '' }); }}>取消</button>}
         </div>
         <input value={account.positioning} onChange={(event) => setAccount({ ...account, positioning: event.target.value })} placeholder="账号定位，例如：岗位种草、校招答疑、技术观点" />
       </section>
@@ -1334,7 +1473,12 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
                 <td>{account.publishingRoles.join(' / ')}</td>
                 <td><Badge tone={account.authStatus === '已授权' ? 'good' : account.authStatus === '授权过期' ? 'danger' : 'warn'}>{account.authStatus}</Badge></td>
                 <td>{account.attribution}</td>
-                <td><button className="ghost" onClick={() => removeAccount(account.id)}>删除</button></td>
+                <td>
+                  <div className="row-actions">
+                    <button className="ghost" onClick={() => startEditAccount(account)}>编辑</button>
+                    <button className="ghost" onClick={() => removeAccount(account.id)}>删除</button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1353,7 +1497,8 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
             <option>公司官网招聘页</option>
             <option>自建落地页</option>
           </select>
-          <button onClick={createEntry}><Plus size={16} />新增入口</button>
+          <button onClick={createEntry}><Plus size={16} />{editingEntryId ? '保存入口' : '新增入口'}</button>
+          {editingEntryId && <button className="secondary" onClick={() => { setEditingEntryId(''); setEntry({ platform: '小红书', headline: '', url: '', destination: '北森岗位页' }); }}>取消</button>}
         </div>
         <div className="entry-grid">
           {data.entries.length === 0 && <EmptyState title="暂无真实招聘入口" body="请配置平台主页中的北森或官网入口，后续点击会进入归因看板。" />}
@@ -1363,7 +1508,10 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
               <span>{item.destination} · {item.trackingCode}</span>
               <span>{item.url}</span>
               <Badge tone="info">{item.clicks} 点击</Badge>
-              <button className="ghost" onClick={() => removeEntry(item.id)}>删除</button>
+              <div className="row-actions">
+                <button className="ghost" onClick={() => startEditEntry(item)}>编辑</button>
+                <button className="ghost" onClick={() => removeEntry(item.id)}>删除</button>
+              </div>
             </article>
           ))}
         </div>
@@ -2215,9 +2363,19 @@ function renderSection(
   }
 }
 
+function canAccessSection(section: Section, data: AppData, apiUser: ApiUser | null) {
+  if (!apiUser || apiUser.role === '系统管理员' || apiUser.role === '管理员') return true;
+  const role = data.roles.find((item) => item.name === apiUser.role || item.id === apiUser.role);
+  if (!role) return section === '工作台';
+  const permission = sectionPermissions[section];
+  return role.permissions.includes(permission) || role.permissions.includes('全部') || role.permissions.includes(`${section}管理`);
+}
+
 export function App() {
   const [section, setSection] = useState<Section>('工作台');
   const { data, update, audit, resetData, storageMode, apiUser, apiToken, authRequired, authError, login, logout } = useAppData();
+  const permittedNavItems = navItems.filter(({ key }) => canAccessSection(key, data, apiUser));
+  const activeSection = canAccessSection(section, data, apiUser) ? section : permittedNavItems[0]?.key ?? '工作台';
 
   if (authRequired) {
     return <LoginScreen onLogin={login} error={authError} />;
@@ -2231,8 +2389,8 @@ export function App() {
           <span>招聘运营助手</span>
         </div>
         <nav>
-          {navItems.map(({ key, icon: Icon }) => (
-            <button key={key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>
+          {permittedNavItems.map(({ key, icon: Icon }) => (
+            <button key={key} className={activeSection === key ? 'active' : ''} onClick={() => setSection(key)}>
               <Icon size={18} />
               {key}
             </button>
@@ -2247,7 +2405,7 @@ export function App() {
         </div>
       </aside>
       <main>
-        {renderSection(section, data, update, audit, resetData, apiToken)}
+        {renderSection(activeSection, data, update, audit, resetData, apiToken)}
       </main>
     </div>
   );

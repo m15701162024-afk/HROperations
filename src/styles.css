@@ -549,6 +549,34 @@ td span {
   flex-wrap: wrap;
 }
 
+.row-actions,
+.card-actions-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.detail-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 14px;
+  color: var(--muted);
+  background: #f8fbfd;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.detail-panel strong {
+  color: var(--ink);
+}
+
+.detail-panel p {
+  margin: 0;
+  line-height: 1.7;
+}
+
 .file-button {
   min-height: 36px;
   border-radius: 6px;
@@ -577,6 +605,39 @@ td span {
 
 .generator {
   align-self: start;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.calendar-day {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.calendar-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.calendar-item span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.compact-edit {
+  margin-top: 12px;
 }
 
 label {
