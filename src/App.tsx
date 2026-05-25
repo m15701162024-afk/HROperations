@@ -28,7 +28,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type ApiUser, createSystemBackup, loadRemoteData, loadSystemHealth, loginLocalApi, normalizeAppData, runIntegrationSync, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
-import type { AccountType, AppData, AssetItem, BeisenResult, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
+import type { AccountType, AppData, AssetItem, BeisenResult, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, UserProfile, WorkflowRule } from './types';
 import type { ImportRun, ModelRunLog, PluginRule, PromptTemplate, ReportAction } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
 
@@ -922,6 +922,27 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
       contents: data.contents.map((item) => item.id === id ? { ...item, ...patch } : item),
     });
   };
+  const shiftContentDate = (id: string, days: number) => {
+    const target = data.contents.find((item) => item.id === id);
+    if (!target) return;
+    const base = target.dueDate ? new Date(target.dueDate) : new Date();
+    base.setDate(base.getDate() + days);
+    updateContentField(id, { dueDate: base.toISOString().slice(0, 10) });
+  };
+  const duplicateContent = (id: string) => {
+    const target = data.contents.find((item) => item.id === id);
+    if (!target) return;
+    const copy: ContentTask = {
+      ...target,
+      id: `ct-${Date.now()}`,
+      title: `${target.title}（复制）`,
+      status: '草稿',
+      dueDate: new Date().toISOString().slice(0, 10),
+      publishedAt: undefined,
+      metrics: { views: 0, likes: 0, comments: 0, saves: 0, shares: 0, clicks: 0 },
+    };
+    audit('复制内容任务', copy.title, { ...data, contents: [copy, ...data.contents] });
+  };
 
   return (
     <div className="page-grid">
@@ -995,6 +1016,10 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
                   {daysUntil(item.dueDate) < 0 && item.status !== '已发布' && <Badge tone="danger">已逾期</Badge>}
                   <Badge tone={item.status === '已发布' ? 'good' : item.riskLevel === '高' ? 'danger' : 'info'}>{item.status}</Badge>
                   <button className="ghost" onClick={() => setScheduleDetailId(scheduleDetailId === item.id ? '' : item.id)}>下钻</button>
+                  <div className="row-actions">
+                    <button className="ghost" onClick={() => shiftContentDate(item.id, -1)}>前移</button>
+                    <button className="ghost" onClick={() => shiftContentDate(item.id, 1)}>后移</button>
+                  </div>
                   <input type="date" value={item.dueDate} onChange={(event) => updateContentField(item.id, { dueDate: event.target.value })} />
                 </div>
               ))}
@@ -1013,6 +1038,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
             <div className="card-actions-inline">
               <button className="secondary" onClick={() => advance(scheduleDetail.id)}>推进审核</button>
               <button className="ghost" onClick={() => publishContent(scheduleDetail.id)}>标记发布</button>
+              <button className="ghost" onClick={() => duplicateContent(scheduleDetail.id)}>复制任务</button>
             </div>
           </div>
         )}
@@ -1090,6 +1116,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
                 <Badge tone="info">{item.status}</Badge>
                 <button onClick={() => advance(item.id)}><CheckCircle2 size={16} />推进状态</button>
                 <button className="secondary" onClick={() => publishContent(item.id)}><Rocket size={16} />标记发布</button>
+                <button className="ghost" onClick={() => duplicateContent(item.id)}>复制</button>
                 <button className="ghost" onClick={() => removeContent(item.id)}>删除</button>
               </div>
             </article>
@@ -1107,6 +1134,7 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
   const [uploadStatus, setUploadStatus] = useState('');
   const [activePanel, setActivePanel] = useState<'素材库' | '采集表' | '模板案例'>('素材库');
   const [templateDetail, setTemplateDetail] = useState('');
+  const [collectionDraft, setCollectionDraft] = useState('');
   const collectionTemplates = [
     { name: '技术案例采集表', fields: '项目背景、技术挑战、技术栈、解决方案、团队分工、业务价值、可公开范围、禁止公开内容、适合平台、审核人' },
     { name: '员工访谈采集表', fields: '员工角色、加入时间、成长经历、印象项目、团队氛围、管理风格、候选人建议、实名授权、照片授权、有效期' },
@@ -1150,6 +1178,24 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
     const target = data.assets.find((item) => item.id === id);
     if (!target) return;
     audit('更新素材授权', target.name, { ...data, assets: data.assets.map((item) => item.id === id ? { ...item, ...patch } : item) });
+  };
+  const saveCollectionAsAsset = () => {
+    if (!templateDetail || !collectionDraft.trim()) return;
+    const item: AssetItem = {
+      id: `asset-${Date.now()}`,
+      name: `${templateDetail}-${nowText()}`,
+      category: templateDetail,
+      owner: '招聘团队',
+      scope: '待审核后使用',
+      platforms: ['小红书', '脉脉', '公众号'],
+      riskLevel: collectionDraft.includes('客户') || collectionDraft.includes('薪酬') ? '高' : '中',
+      authorization: '待审核',
+      expiresAt: '',
+      usageCount: 0,
+    };
+    audit('采集表保存为素材', item.name, { ...data, assets: [item, ...data.assets] });
+    setCollectionDraft('');
+    setActivePanel('素材库');
   };
 
   return (
@@ -1240,11 +1286,14 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
         {templateDetail && (
           <div className="detail-panel">
             <strong>{templateDetail}</strong>
-            <textarea className="small-textarea" placeholder="在这里粘贴或填写采集内容，确认后可保存为素材记录。示例：项目背景/技术挑战/可公开范围..." />
-            <button className="secondary" onClick={() => {
-              setAsset({ ...asset, name: `${templateDetail}-${nowText()}`, category: templateDetail, scope: '待审核后使用' });
-              setActivePanel('素材库');
-            }}>带入新增素材</button>
+            <textarea className="small-textarea" value={collectionDraft} onChange={(event) => setCollectionDraft(event.target.value)} placeholder="在这里粘贴或填写采集内容，确认后可保存为素材记录。示例：项目背景/技术挑战/可公开范围..." />
+            <div className="card-actions-inline">
+              <button className="secondary" onClick={saveCollectionAsAsset}>保存为素材</button>
+              <button className="ghost" onClick={() => {
+                setAsset({ ...asset, name: `${templateDetail}-${nowText()}`, category: templateDetail, scope: '待审核后使用' });
+                setActivePanel('素材库');
+              }}>带入新增素材</button>
+            </div>
           </div>
         )}
       </section>}
@@ -1278,6 +1327,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
   const [editingEntryId, setEditingEntryId] = useState('');
   const [activePanel, setActivePanel] = useState<'平台总览' | '账号入口' | 'API集成' | '落地页'>('平台总览');
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('小红书');
+  const [editingIntegrationId, setEditingIntegrationId] = useState('');
   const [landingLeadDrafts, setLandingLeadDrafts] = useState<Record<string, { name: string; contact: string; targetJobId: string; sourcePlatform: Platform | '未知'; note: string }>>({});
   const [account, setAccount] = useState({
     platform: '小红书' as Platform,
@@ -1341,6 +1391,17 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
 
   const createIntegration = () => {
     if (!integration.name.trim()) return;
+    if (editingIntegrationId) {
+      const target = data.integrations.find((item) => item.id === editingIntegrationId);
+      if (!target) return;
+      audit('编辑集成配置', integration.name, {
+        ...data,
+        integrations: data.integrations.map((item) => item.id === editingIntegrationId ? { ...target, ...integration, status: integration.endpoint ? '待验证' : '未配置' } : item),
+      });
+      setEditingIntegrationId('');
+      setIntegration({ type: '北森', name: '', endpoint: '', apiKey: '', extraConfig: '', authMode: 'Token' });
+      return;
+    }
     const item: IntegrationConfig = {
       id: `integration-${Date.now()}`,
       ...integration,
@@ -1348,6 +1409,22 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     };
     audit('新增集成配置', item.name, { ...data, integrations: [item, ...data.integrations] });
     setIntegration({ type: '北森', name: '', endpoint: '', apiKey: '', extraConfig: '', authMode: 'Token' });
+  };
+  const applyPlatformApiPreset = (platformName: Platform) => {
+    setIntegration({
+      type: '平台API',
+      name: `${platformName} 指标接口`,
+      endpoint: '',
+      apiKey: '',
+      authMode: 'Token',
+      extraConfig: JSON.stringify({
+        platform: platformName,
+        method: 'GET',
+        endpointPath: '/metrics',
+        fields: { contentId: 'contentId', title: 'title', views: 'views', likes: 'likes', comments: 'comments', saves: 'saves', shares: 'shares', clicks: 'clicks' },
+      }, null, 2),
+    });
+    setActivePanel('API集成');
   };
 
   const testIntegration = async (id: string) => {
@@ -1608,6 +1685,15 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     const target = data.entries.find((item) => item.id === id);
     audit('删除招聘入口', target?.headline ?? id, { ...data, entries: data.entries.filter((item) => item.id !== id) });
   };
+  const startEditIntegration = (item: IntegrationConfig) => {
+    setEditingIntegrationId(item.id);
+    setIntegration({ type: item.type, name: item.name, endpoint: item.endpoint, apiKey: item.apiKey ?? '', extraConfig: item.extraConfig ?? '', authMode: item.authMode });
+    setActivePanel('API集成');
+  };
+  const removeIntegration = (id: string) => {
+    const target = data.integrations.find((item) => item.id === id);
+    audit('删除集成配置', target?.name ?? id, { ...data, integrations: data.integrations.filter((item) => item.id !== id) });
+  };
   const startEditAccount = (item: PlatformAccount) => {
     setEditingAccountId(item.id);
     setAccount({ platform: item.platform, name: item.name, type: item.type, owner: item.owner, positioning: item.positioning });
@@ -1662,7 +1748,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
           </div>
           <div className="card-actions-inline">
             <button className="secondary" onClick={() => { setAccount({ ...account, platform: selectedPlatform, positioning: platformPositioning[selectedPlatform] }); setActivePanel('账号入口'); }}>配置该平台账号</button>
-            <button className="ghost" onClick={() => { setIntegration({ ...integration, type: '平台API', name: `${selectedPlatform} API`, extraConfig: JSON.stringify({ platform: selectedPlatform, fields: { contentId: 'contentId', views: 'views', clicks: 'clicks' } }, null, 2) }); setActivePanel('API集成'); }}>配置该平台 API</button>
+            <button className="ghost" onClick={() => applyPlatformApiPreset(selectedPlatform)}>配置该平台 API</button>
           </div>
         </div>
       </section>}
@@ -1780,7 +1866,11 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
             <option>文件导入</option>
             <option>未配置</option>
           </select>
-          <button onClick={createIntegration}><Plus size={16} />保存集成</button>
+          <button onClick={createIntegration}><Plus size={16} />{editingIntegrationId ? '保存编辑' : '保存集成'}</button>
+          {editingIntegrationId && <button className="secondary" onClick={() => { setEditingIntegrationId(''); setIntegration({ type: '北森', name: '', endpoint: '', apiKey: '', extraConfig: '', authMode: 'Token' }); }}>取消</button>}
+        </div>
+        <div className="module-tabs">
+          {platforms.map((item) => <button key={item} onClick={() => applyPlatformApiPreset(item)}>{item} API模板</button>)}
         </div>
         <textarea className="small-textarea" value={integration.extraConfig} onChange={(event) => setIntegration({ ...integration, extraConfig: event.target.value })} placeholder={'扩展配置 JSON，例如：{"tenantId":"xxx","appId":"xxx","fields":{"name":"candidateName"}}'} />
         <div className="entry-grid">
@@ -1796,6 +1886,8 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
                 {item.type === '北森' && <button className="ghost" onClick={() => void syncBeisenLeads(item.id)}>同步线索</button>}
                 {item.type === '平台API' && <button className="ghost" onClick={() => void pullPlatformMetrics(item.id)}>拉取指标</button>}
                 {(item.type === '企业微信' || item.type === '飞书') && <button className="ghost" onClick={() => void sendNotificationDigest(item.id)}>发送摘要</button>}
+                <button className="ghost" onClick={() => startEditIntegration(item)}>编辑</button>
+                <button className="ghost" onClick={() => removeIntegration(item.id)}>删除</button>
               </div>
             </article>
           ))}
@@ -2075,13 +2167,24 @@ function rowObject(headers: string[], row: string[]) {
   return Object.fromEntries(headers.map((header, index) => [header, row[index] ?? '']));
 }
 
+function remapCsv(csv: string, mappingText: string) {
+  const parsedMapping = safeJsonObject(mappingText) as Record<string, string>;
+  const rows = csv.trim().split(/\r?\n/).filter(Boolean);
+  if (rows.length === 0) return csv;
+  const headers = rows[0].split(',').map((item) => item.trim());
+  const mappedHeaders = headers.map((header) => parsedMapping[header] || header);
+  return [mappedHeaders.join(','), ...rows.slice(1)].join('\n');
+}
+
 function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
   const [source, setSource] = useState<ImportRun['source']>('岗位');
   const [csv, setCsv] = useState('');
   const [fileName, setFileName] = useState('手动粘贴.csv');
   const [lastImportMessage, setLastImportMessage] = useState('');
-  const preview = csvPreviewRows(csv);
-  const allRows = csvAllRows(csv);
+  const [mappingText, setMappingText] = useState('{"岗位名称":"title","平台":"platform","账号名称":"name","曝光":"views","点击":"clicks","候选人编号":"candidateCode"}');
+  const mappedCsv = remapCsv(csv, mappingText);
+  const preview = csvPreviewRows(mappedCsv);
+  const allRows = csvAllRows(mappedCsv);
   const requiredHeaders: Record<ImportRun['source'], string[]> = {
     岗位: ['title'],
     内容指标: ['contentId'],
@@ -2090,6 +2193,13 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
     素材: ['name', 'category'],
   };
   const missing = requiredHeaders[source].filter((header) => !preview.headers.includes(header));
+  const rowErrors = allRows.rows
+    .map((row, index) => {
+      const object = rowObject(allRows.headers, row);
+      const emptyFields = requiredHeaders[source].filter((header) => !String(object[header] ?? '').trim());
+      return emptyFields.length > 0 ? `第 ${index + 2} 行缺少：${emptyFields.join('、')}` : '';
+    })
+    .filter(Boolean);
   const templates: Record<ImportRun['source'], string> = {
     岗位: 'title,family,city,level,type,jd,persona,sellingPoints,targetPlatforms,beisenUrl,websiteUrl\n',
     内容指标: 'contentId,title,views,likes,comments,saves,shares,clicks\n',
@@ -2101,19 +2211,19 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
     if (!csv.trim()) return;
     let next: AppData = data;
     let recordCount = 0;
-    const errors = missing.length > 0 ? [`缺少必要字段：${missing.join('、')}`] : [];
+    const errors = [...(missing.length > 0 ? [`缺少必要字段：${missing.join('、')}`] : []), ...rowErrors];
     if (errors.length === 0) {
       if (source === '岗位') {
-        const jobs = parseJobCsv(csv);
+        const jobs = parseJobCsv(mappedCsv);
         recordCount = jobs.length;
         next = { ...next, jobs: [...jobs, ...next.jobs] };
       }
       if (source === '内容指标') {
-        next = { ...next, contents: applyMetricsCsv(next.contents, csv) };
-        recordCount = Math.max(0, csv.trim().split(/\r?\n/).length - 1);
+        next = { ...next, contents: applyMetricsCsv(next.contents, mappedCsv) };
+        recordCount = Math.max(0, mappedCsv.trim().split(/\r?\n/).length - 1);
       }
       if (source === '北森结果') {
-        const results = parseBeisenCsv(csv);
+        const results = parseBeisenCsv(mappedCsv);
         recordCount = results.length;
         next = { ...next, beisenResults: [...results, ...next.beisenResults] };
       }
@@ -2161,7 +2271,7 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
       id: `import-${Date.now()}`,
       source,
       fileName,
-      mapping: preview.headers.join(' -> '),
+      mapping: mappingText,
       status: errors.length === 0 ? '成功' : '失败',
       recordCount,
       errorRows: errors,
@@ -2204,9 +2314,16 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
           <button onClick={runImport}><Database size={16} />校验并导入</button>
         </div>
         <textarea className="small-textarea" value={csv} onChange={(event) => setCsv(event.target.value)} placeholder={templates[source]} />
+        <textarea className="small-textarea" value={mappingText} onChange={(event) => setMappingText(event.target.value)} placeholder='字段映射 JSON，例如 {"岗位名称":"title","曝光":"views"}' />
         <div className="platform-note"><Database size={16} />识别到 {allRows.rows.length} 行数据，预览显示前 {preview.rows.length} 行。必要字段：{requiredHeaders[source].join('、')}</div>
         {lastImportMessage && <div className="platform-note"><CheckCircle2 size={16} />{lastImportMessage}</div>}
         {missing.length > 0 && <div className="platform-note danger-note"><AlertTriangle size={16} />缺少必要字段：{missing.join('、')}</div>}
+        {rowErrors.length > 0 && (
+          <div className="platform-note danger-note">
+            <AlertTriangle size={16} />发现 {rowErrors.length} 条错误行
+            <button className="ghost" onClick={() => downloadText(`${source}导入错误行.txt`, rowErrors.join('\n'), 'text/plain;charset=utf-8')}>下载错误行</button>
+          </div>
+        )}
         <table>
           <thead><tr>{preview.headers.map((header) => <th key={header}>{header}</th>)}</tr></thead>
           <tbody>{preview.rows.map((row, index) => <tr key={index}>{preview.headers.map((header, cell) => <td key={header}>{row[cell]}</td>)}</tr>)}</tbody>
@@ -2234,6 +2351,8 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
   const [aiRecommendations, setAiRecommendations] = useState<string[]>([]);
   const [aiStatus, setAiStatus] = useState('');
   const [actionDraft, setActionDraft] = useState({ title: '', owner: '', dueDate: '', reportId: '' });
+  const [selectedReportId, setSelectedReportId] = useState('');
+  const [reportEdit, setReportEdit] = useState({ title: '', body: '', action: '', severity: '建议' as ReportInsight['severity'] });
   const recommendations = aiRecommendations.length > 0 ? aiRecommendations : buildRecommendations(data);
   const sortedContents = data.contents.slice().sort((a, b) => (b.metrics.clicks + b.metrics.likes + b.metrics.comments) - (a.metrics.clicks + a.metrics.likes + a.metrics.comments));
   const generatedReports = data.reports.length > 0
@@ -2292,6 +2411,20 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
     const target = data.reportActions.find((item) => item.id === id);
     audit('更新复盘行动项', `${target?.title ?? id}：${status}`, { ...data, reportActions: data.reportActions.map((item) => item.id === id ? { ...item, status } : item) });
   };
+  const openReport = (report: ReportInsight) => {
+    setSelectedReportId(report.id);
+    setReportEdit({ title: report.title, body: report.body, action: report.action, severity: report.severity });
+  };
+  const saveReportEdit = () => {
+    const target = data.reports.find((item) => item.id === selectedReportId);
+    if (!target) return;
+    audit('编辑复盘报告', reportEdit.title, { ...data, reports: data.reports.map((item) => item.id === selectedReportId ? { ...item, ...reportEdit } : item) });
+  };
+  const removeReport = (id: string) => {
+    const target = data.reports.find((item) => item.id === id);
+    audit('删除复盘报告', target?.title ?? id, { ...data, reports: data.reports.filter((item) => item.id !== id), reportActions: data.reportActions.filter((item) => item.reportId !== id) });
+    if (selectedReportId === id) setSelectedReportId('');
+  };
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -2324,9 +2457,30 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
               <h3>{report.title}</h3>
               <p>{report.body}</p>
               <strong>行动计划：{report.action}</strong>
+              <div className="card-actions-inline">
+                <button className="secondary" onClick={() => openReport(report)}>打开详情</button>
+                {data.reports.some((item) => item.id === report.id) && <button className="ghost" onClick={() => removeReport(report.id)}>删除</button>}
+              </div>
             </article>
           ))}
         </div>
+        {selectedReportId && (
+          <div className="detail-panel">
+            <strong>复盘报告详情</strong>
+            <input value={reportEdit.title} onChange={(event) => setReportEdit({ ...reportEdit, title: event.target.value })} placeholder="报告标题" />
+            <textarea className="small-textarea" value={reportEdit.body} onChange={(event) => setReportEdit({ ...reportEdit, body: event.target.value })} placeholder="报告正文" />
+            <textarea className="small-textarea" value={reportEdit.action} onChange={(event) => setReportEdit({ ...reportEdit, action: event.target.value })} placeholder="行动计划" />
+            <select value={reportEdit.severity} onChange={(event) => setReportEdit({ ...reportEdit, severity: event.target.value as ReportInsight['severity'] })}>
+              <option>机会</option>
+              <option>风险</option>
+              <option>建议</option>
+            </select>
+            <div className="card-actions-inline">
+              <button className="secondary" onClick={saveReportEdit}>保存报告</button>
+              <button className="ghost" onClick={() => downloadText(`${reportEdit.title || '复盘报告'}.md`, `# ${reportEdit.title}\n\n${reportEdit.body}\n\n## 行动计划\n${reportEdit.action}`, 'text/markdown;charset=utf-8')}>导出当前报告</button>
+            </div>
+          </div>
+        )}
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>高低表现内容对比</h2><Sparkles size={18} /></div>
@@ -2399,6 +2553,20 @@ function AiWorkbench({ data, audit, apiToken }: { data: AppData; audit: (action:
     };
     audit('保存统一大模型配置', item.name, { ...data, modelApis: [item, ...data.modelApis] });
     setModelApi({ provider: 'DeepSeek', name: '', baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat', enabledFor: '内容生成、风险识别、复盘建议、标题推荐' });
+  };
+  const testWorkbenchModelApi = async (id: string) => {
+    const target = data.modelApis.find((item) => item.id === id);
+    if (!target) return;
+    const result = await testModelApiConfig(target, apiToken);
+    audit('测试统一大模型配置', `${target.name}：${result.message}`, {
+      ...data,
+      modelApis: data.modelApis.map((item) => item.id === id ? { ...item, status: result.status, lastTestAt: nowText() } : item),
+      notifications: [makeNotification('大模型连接测试', `${target.name}：${result.message}`, 'AI工作台', result.ok ? '提醒' : '预警'), ...data.notifications],
+    });
+  };
+  const removeWorkbenchModelApi = (id: string) => {
+    const target = data.modelApis.find((item) => item.id === id);
+    audit('删除统一大模型配置', target?.name ?? id, { ...data, modelApis: data.modelApis.filter((item) => item.id !== id) });
   };
   const addTemplate = () => {
     if (!template.name.trim() || !template.prompt.trim()) return;
@@ -2486,6 +2654,11 @@ function AiWorkbench({ data, audit, apiToken }: { data: AppData; audit: (action:
               <span>{item.baseUrl} · {item.model} · {item.apiKey ? 'Token已配置' : 'Token未配置'}</span>
               <span>用途：{item.enabledFor.join('、')}</span>
               <Badge tone={item.status === '已连接' ? 'good' : item.status === '连接失败' ? 'danger' : 'warn'}>{item.status}</Badge>
+              {item.lastTestAt && <span>最近测试：{item.lastTestAt}</span>}
+              <div className="card-actions-inline">
+                <button className="ghost" onClick={() => void testWorkbenchModelApi(item.id)}>测试连接</button>
+                <button className="ghost" onClick={() => removeWorkbenchModelApi(item.id)}>删除</button>
+              </div>
             </article>
           ))}
         </div>
@@ -2607,6 +2780,15 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
   };
   const updateUserStatus = (id: string, status: UserProfile['status']) => {
     update({ ...data, users: data.users.map((item) => item.id === id ? { ...item, status } : item) });
+  };
+  const applyRolePreset = (preset: '招聘专员' | '运营管理员' | '技术审核人' | '管理层') => {
+    const presets: Record<typeof preset, { dataScope: PermissionRole['dataScope']; permissions: string }> = {
+      招聘专员: { dataScope: '个人', permissions: '工作台查看、岗位查看、内容查看、内容创建、素材查看、账号查看、数据查看' },
+      运营管理员: { dataScope: '团队', permissions: '工作台查看、岗位查看、内容查看、内容创建、素材查看、账号查看、数据查看、复盘查看、数据导入、AI配置' },
+      技术审核人: { dataScope: '团队', permissions: '工作台查看、内容查看、内容审核、素材查看' },
+      管理层: { dataScope: '全部', permissions: '全部' },
+    };
+    setRole({ name: preset, ...presets[preset] });
   };
   const addWorkflow = () => {
     if (!workflow.name.trim()) return;
@@ -2777,15 +2959,18 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
       </section>
       <section className="panel">
         <div className="panel-title"><h2>角色权限矩阵</h2><Users size={18} /></div>
-        <div className="form-grid single">
-          <input value={role.name} onChange={(event) => setRole({ ...role, name: event.target.value })} placeholder="角色名称" />
+	        <div className="form-grid single">
+	          <input value={role.name} onChange={(event) => setRole({ ...role, name: event.target.value })} placeholder="角色名称" />
           <select value={role.dataScope} onChange={(event) => setRole({ ...role, dataScope: event.target.value as PermissionRole['dataScope'] })}>
             <option>个人</option>
             <option>团队</option>
             <option>全部</option>
           </select>
-          <input value={role.permissions} onChange={(event) => setRole({ ...role, permissions: event.target.value })} placeholder="权限，用顿号分隔" />
-          <button onClick={addRole}><Plus size={16} />新增角色</button>
+	          <input value={role.permissions} onChange={(event) => setRole({ ...role, permissions: event.target.value })} placeholder="权限，用顿号分隔" />
+	          <button onClick={addRole}><Plus size={16} />新增角色</button>
+	        </div>
+        <div className="module-tabs">
+          {(['招聘专员', '运营管理员', '技术审核人', '管理层'] as const).map((item) => <button key={item} onClick={() => applyRolePreset(item)}>{item}预设</button>)}
         </div>
         {['招聘专员', '招聘主管', '新媒体运营', '技术负责人', '管理层'].map((role) => (
           <div className="compact-row" key={role}>
