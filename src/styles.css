@@ -832,6 +832,45 @@ textarea {
   margin-top: 10px;
 }
 
+.segmented,
+.compact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.segmented button {
+  width: auto;
+  min-height: 34px;
+}
+
+.segmented button.active {
+  color: #fff;
+  background: var(--blue);
+}
+
+.frequency-grid {
+  margin-bottom: 14px;
+}
+
+.calendar-grid.week-mode {
+  grid-template-columns: repeat(7, minmax(160px, 1fr));
+  overflow-x: auto;
+}
+
+.calendar-item input {
+  width: 100%;
+  min-height: 32px;
+  margin-top: 4px;
+}
+
+.danger-note {
+  color: #8a2c2c;
+  background: #fff1f1;
+  border-color: #ffd0d0;
+}
+
 .lead-form button {
   margin-top: 0;
 }

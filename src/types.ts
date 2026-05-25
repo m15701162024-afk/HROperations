@@ -305,6 +305,58 @@ export interface DeploymentTask {
   note: string;
 }
 
+export interface ImportRun {
+  id: string;
+  source: '岗位' | '内容指标' | '北森结果' | '账号' | '素材';
+  fileName: string;
+  mapping: string;
+  status: '成功' | '失败';
+  recordCount: number;
+  errorRows: string[];
+  createdAt: string;
+}
+
+export interface ReportAction {
+  id: string;
+  reportId: string;
+  title: string;
+  owner: string;
+  dueDate: string;
+  status: '未开始' | '进行中' | '已完成';
+  createdAt: string;
+}
+
+export interface PromptTemplate {
+  id: string;
+  task: '内容生成' | '风险识别' | '复盘建议' | '标题推荐';
+  name: string;
+  provider: string;
+  prompt: string;
+  enabled: boolean;
+  updatedAt: string;
+}
+
+export interface ModelRunLog {
+  id: string;
+  modelApiId: string;
+  task: PromptTemplate['task'];
+  status: '成功' | '失败';
+  inputSummary: string;
+  outputPreview: string;
+  message: string;
+  ranAt: string;
+}
+
+export interface PluginRule {
+  id: string;
+  platform: Platform;
+  name: string;
+  urlPattern: string;
+  selectors: string;
+  enabled: boolean;
+  updatedAt: string;
+}
+
 export interface AppData {
   jobs: JobNeed[];
   accounts: PlatformAccount[];
@@ -331,4 +383,9 @@ export interface AppData {
   integrationMappings: IntegrationMapping[];
   compliancePolicies: CompliancePolicy[];
   deploymentTasks: DeploymentTask[];
+  importRuns: ImportRun[];
+  reportActions: ReportAction[];
+  promptTemplates: PromptTemplate[];
+  modelRunLogs: ModelRunLog[];
+  pluginRules: PluginRule[];
 }

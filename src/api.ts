@@ -225,5 +225,10 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     integrationMappings: data.integrationMappings ?? [],
     compliancePolicies: data.compliancePolicies ?? [],
     deploymentTasks: data.deploymentTasks ?? [],
+    importRuns: data.importRuns ?? [],
+    reportActions: data.reportActions ?? [],
+    promptTemplates: data.promptTemplates ?? [],
+    modelRunLogs: data.modelRunLogs ?? [],
+    pluginRules: data.pluginRules ?? [],
   };
 }

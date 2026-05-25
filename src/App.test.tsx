@@ -60,6 +60,11 @@ describe('招聘运营助手', () => {
       integrationMappings: [],
       compliancePolicies: [],
       deploymentTasks: [],
+      importRuns: [],
+      reportActions: [],
+      promptTemplates: [],
+      modelRunLogs: [],
+      pluginRules: [],
     };
     localStorage.setItem('hr-assistant-data-mode', 'real-v1');
     localStorage.setItem('hr-assistant-data', JSON.stringify(realData));

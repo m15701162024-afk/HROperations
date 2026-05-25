@@ -24,4 +24,9 @@ export const emptyData = {
   integrationMappings: [],
   compliancePolicies: [],
   deploymentTasks: [],
+  importRuns: [],
+  reportActions: [],
+  promptTemplates: [],
+  modelRunLogs: [],
+  pluginRules: [],
 };

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 remote_name="${HR_OPERATIONS_REMOTE_NAME:-origin}"
-remote_url="${HR_OPERATIONS_REMOTE_URL:-git@github.com:m15701162024-afk/HROperations.git}"
+remote_url="${HR_OPERATIONS_REMOTE_URL:-ssh://git@ssh.github.com:443/m15701162024-afk/HROperations.git}"
 branch="$(git branch --show-current)"
 
 if [ -z "$branch" ]; then

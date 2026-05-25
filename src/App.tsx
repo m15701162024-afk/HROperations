@@ -29,6 +29,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { type ApiUser, createSystemBackup, loadRemoteData, loadSystemHealth, loginLocalApi, normalizeAppData, runIntegrationSync, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
 import type { AccountType, AppData, AssetItem, BeisenResult, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, SensitiveRule, UserProfile, WorkflowRule } from './types';
+import type { ImportRun, ModelRunLog, PluginRule, PromptTemplate, ReportAction } from './types';
 import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
 
 type Section =
@@ -37,8 +38,10 @@ type Section =
   | '内容运营'
   | '素材资产'
   | '账号与平台'
+  | '导入中心'
   | '数据分析'
   | '复盘报告'
+  | 'AI工作台'
   | '系统配置';
 
 const navItems: { key: Section; icon: React.ComponentType<{ size?: number }> }[] = [
@@ -47,8 +50,10 @@ const navItems: { key: Section; icon: React.ComponentType<{ size?: number }> }[]
   { key: '内容运营', icon: Megaphone },
   { key: '素材资产', icon: Database },
   { key: '账号与平台', icon: Users },
+  { key: '导入中心', icon: Database },
   { key: '数据分析', icon: BarChart3 },
   { key: '复盘报告', icon: BookOpen },
+  { key: 'AI工作台', icon: Bot },
   { key: '系统配置', icon: Settings },
 ];
 
@@ -59,8 +64,10 @@ const sectionPermissions: Record<Section, string> = {
   内容运营: '内容查看',
   素材资产: '素材查看',
   账号与平台: '账号查看',
+  导入中心: '数据导入',
   数据分析: '数据查看',
   复盘报告: '复盘查看',
+  AI工作台: 'AI配置',
   系统配置: '系统配置',
 };
 
@@ -272,7 +279,7 @@ function LoginScreen({ onLogin, error }: { onLogin: (username: string, password:
   );
 }
 
-function Dashboard({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; openSection: (section: Section) => void }) {
   const [goal, setGoal] = useState({ title: '', dimension: '平台', target: 0, current: 0, metric: '发布篇数' });
   const totals = useMemo(() => {
     const published = data.contents.filter((item) => item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘').length;
@@ -311,6 +318,12 @@ function Dashboard({ data, audit }: { data: AppData; audit: (action: string, tar
     ...assetWarnings.map((asset) => makeNotification('素材授权即将到期', `${asset.name} 有效期至 ${asset.expiresAt}`, '素材资产', '预警')),
     ...data.contents.filter((content) => content.riskLevel === '高').map((content) => makeNotification('高风险内容待审核', content.title, '内容运营', '待办')),
   ].slice(0, 8);
+  const markNoticeRead = (id: string) => {
+    audit('标记通知已读', id, { ...data, notifications: data.notifications.map((notice) => notice.id === id ? { ...notice, read: true } : notice) });
+  };
+  const markAllNoticesRead = () => {
+    audit('批量标记通知已读', `${data.notifications.filter((notice) => !notice.read).length} 条`, { ...data, notifications: data.notifications.map((notice) => ({ ...notice, read: true })) });
+  };
 
   return (
     <div className="page-grid">
@@ -338,12 +351,19 @@ function Dashboard({ data, audit }: { data: AppData; audit: (action: string, tar
           <h2>通知中心</h2>
           <Bell size={18} />
         </div>
+        <div className="toolbar-actions compact-actions">
+          <button className="ghost" onClick={markAllNoticesRead}>全部已读</button>
+        </div>
         {pendingNotices.length === 0 && <EmptyState title="暂无待办通知" body="高风险内容、素材授权到期、审核流待办会在这里汇总。" />}
         <div className="notice-list">
           {pendingNotices.map((notice) => (
             <div className="compact-row" key={notice.id}>
               <div><strong>{notice.title}</strong><span>{notice.body}</span></div>
-              <Badge tone={notice.level === '预警' ? 'danger' : notice.level === '待办' ? 'warn' : 'info'}>{notice.level}</Badge>
+              <div className="row-actions">
+                <Badge tone={notice.level === '预警' ? 'danger' : notice.level === '待办' ? 'warn' : 'info'}>{notice.level}</Badge>
+                {navItems.some((item) => item.key === notice.targetSection) && <button className="ghost" onClick={() => openSection(notice.targetSection as Section)}>处理</button>}
+                {data.notifications.some((item) => item.id === notice.id) && <button className="ghost" onClick={() => markNoticeRead(notice.id)}>已读</button>}
+              </div>
             </div>
           ))}
         </div>
@@ -639,6 +659,15 @@ function safeJsonObject(text: string) {
   return typeof parsed === 'object' && parsed !== null && !('raw' in parsed) ? parsed : {};
 }
 
+function nowText() {
+  return new Date().toLocaleString('zh-CN', { hour12: false });
+}
+
+function daysUntil(date: string) {
+  if (!date) return Number.POSITIVE_INFINITY;
+  return Math.ceil((new Date(date).getTime() - Date.now()) / 86400000);
+}
+
 function integrationExtra(integration: IntegrationConfig) {
   const parsed = integration.extraConfig ? safeParseJson(integration.extraConfig) : {};
   return typeof parsed === 'object' && parsed !== null ? parsed as { fields?: Record<string, string>; fieldMapping?: Record<string, string>; dedupeKey?: string } : {};
@@ -660,6 +689,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
   const [aiStatus, setAiStatus] = useState('');
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
   const [revisionDrafts, setRevisionDrafts] = useState<Record<string, string>>({});
+  const [calendarView, setCalendarView] = useState<'周视图' | '月视图'>('月视图');
 
   const selectedJob = data.jobs.find((job) => job.id === jobId) ?? data.jobs[0];
   const risk = scanRisks(draft);
@@ -672,6 +702,11 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
       acc[key] = [...(acc[key] ?? []), item];
       return acc;
     }, {});
+  const platformPlans = platforms.map((item) => {
+    const count = data.contents.filter((content) => content.platform === item).length;
+    const target = item === 'B站' || item === '抖音' ? 1 : item === '公众号' || item === '知乎' || item === '技术社区' ? 2 : 3;
+    return { platform: item, count, target };
+  });
 
   const handleGenerate = async () => {
     if (!selectedJob) return;
@@ -885,8 +920,20 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
           <h2>排期日历</h2>
           <ClipboardList size={18} />
         </div>
+        <div className="segmented">
+          <button className={calendarView === '周视图' ? 'active' : ''} onClick={() => setCalendarView('周视图')}>周视图</button>
+          <button className={calendarView === '月视图' ? 'active' : ''} onClick={() => setCalendarView('月视图')}>月视图</button>
+        </div>
+        <div className="template-grid frequency-grid">
+          {platformPlans.map((plan) => (
+            <div className="template-chip" key={plan.platform}>
+              {plan.platform}
+              <small>本期已排 {plan.count} 条 / 建议 {plan.target} 条{plan.count < plan.target ? '，需补排' : '，达标'}</small>
+            </div>
+          ))}
+        </div>
         {Object.keys(calendarItems).length === 0 && <EmptyState title="暂无内容排期" body="生成内容任务后，会按截止日期和发布时间进入排期日历。" />}
-        <div className="calendar-grid">
+        <div className={`calendar-grid ${calendarView === '周视图' ? 'week-mode' : ''}`}>
           {Object.entries(calendarItems).map(([date, items]) => (
             <article key={date} className="calendar-day">
               <strong>{date}</strong>
@@ -894,7 +941,9 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
                 <div key={item.id} className="calendar-item">
                   <span>{item.platform} · {item.type}</span>
                   <b>{item.title}</b>
+                  {daysUntil(item.dueDate) < 0 && item.status !== '已发布' && <Badge tone="danger">已逾期</Badge>}
                   <Badge tone={item.status === '已发布' ? 'good' : item.riskLevel === '高' ? 'danger' : 'info'}>{item.status}</Badge>
+                  <input type="date" value={item.dueDate} onChange={(event) => updateContentField(item.id, { dueDate: event.target.value })} />
                 </div>
               ))}
             </article>
@@ -1023,6 +1072,11 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
     const target = data.assets.find((item) => item.id === id);
     audit('删除素材', target?.name ?? id, { ...data, assets: data.assets.filter((item) => item.id !== id) });
   };
+  const updateAsset = (id: string, patch: Partial<AssetItem>) => {
+    const target = data.assets.find((item) => item.id === id);
+    if (!target) return;
+    audit('更新素材授权', target.name, { ...data, assets: data.assets.map((item) => item.id === id ? { ...item, ...patch } : item) });
+  };
 
   return (
     <div className="page-grid">
@@ -1062,6 +1116,28 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
               </a>
             )}
             <div><Badge tone={asset.riskLevel === '高' ? 'danger' : asset.riskLevel === '中' ? 'warn' : 'good'}>{asset.riskLevel}风险</Badge><Badge>{asset.authorization}</Badge></div>
+            {daysUntil(asset.expiresAt) <= 30 && <Badge tone="danger">授权即将到期</Badge>}
+            <div className="inline-form compact-edit">
+              <select value={asset.authorization} onChange={(event) => updateAsset(asset.id, { authorization: event.target.value })}>
+                <option>待审核</option>
+                <option>已授权</option>
+                <option>需补充授权</option>
+                <option>禁止使用</option>
+              </select>
+              <input type="date" value={asset.expiresAt} onChange={(event) => updateAsset(asset.id, { expiresAt: event.target.value })} />
+              <select value={asset.riskLevel} onChange={(event) => updateAsset(asset.id, { riskLevel: event.target.value as AssetItem['riskLevel'] })}>
+                <option>低</option>
+                <option>中</option>
+                <option>高</option>
+              </select>
+            </div>
+            <details className="version-box">
+              <summary>关联内容预览</summary>
+              {data.contents.filter((content) => content.content.includes(asset.name) || content.tags.includes(asset.category)).length === 0 && <p>暂无关联内容</p>}
+              {data.contents.filter((content) => content.content.includes(asset.name) || content.tags.includes(asset.category)).map((content) => (
+                <p key={content.id}>{content.title} · {content.platform} · {content.status}</p>
+              ))}
+            </details>
             <button className="ghost" onClick={() => removeAsset(asset.id)}>删除</button>
           </div>
         ))}
@@ -1340,6 +1416,17 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
       note: '',
     };
     if (!draft.name.trim() || !draft.contact.trim()) return;
+    const duplicated = data.landingLeads.some((lead) => lead.landingPageId === landingPage.id && lead.contact === draft.contact);
+    if (duplicated) {
+      audit('拦截重复落地页线索', `${landingPage.title}：${draft.contact}`, {
+        ...data,
+        notifications: [
+          makeNotification('重复线索已拦截', `${draft.contact} 已在 ${landingPage.title} 留资`, '账号与平台', '预警'),
+          ...data.notifications,
+        ],
+      });
+      return;
+    }
     const lead: LandingPageLead = {
       id: `lead-${Date.now()}`,
       landingPageId: landingPage.id,
@@ -1783,10 +1870,162 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   );
 }
 
+function csvPreviewRows(csv: string) {
+  const rows = csv.trim().split(/\r?\n/).filter(Boolean);
+  if (rows.length === 0) return { headers: [] as string[], rows: [] as string[][] };
+  const headers = rows[0].split(',').map((item) => item.trim());
+  return {
+    headers,
+    rows: rows.slice(1, 6).map((row) => row.split(',').map((item) => item.trim())),
+  };
+}
+
+function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+  const [source, setSource] = useState<ImportRun['source']>('岗位');
+  const [csv, setCsv] = useState('');
+  const [fileName, setFileName] = useState('手动粘贴.csv');
+  const preview = csvPreviewRows(csv);
+  const requiredHeaders: Record<ImportRun['source'], string[]> = {
+    岗位: ['title'],
+    内容指标: ['contentId'],
+    北森结果: ['jobId', 'candidateCode', 'stage'],
+    账号: ['platform', 'name'],
+    素材: ['name', 'category'],
+  };
+  const missing = requiredHeaders[source].filter((header) => !preview.headers.includes(header));
+  const templates: Record<ImportRun['source'], string> = {
+    岗位: 'title,family,city,level,type,jd,persona,sellingPoints,targetPlatforms,beisenUrl,websiteUrl\n',
+    内容指标: 'contentId,title,views,likes,comments,saves,shares,clicks\n',
+    北森结果: 'jobId,sourcePlatform,sourceContentId,candidateCode,stage\n',
+    账号: 'platform,name,type,owner,positioning\n',
+    素材: 'name,category,owner,scope,authorization,expiresAt\n',
+  };
+  const runImport = () => {
+    if (!csv.trim()) return;
+    let next: AppData = data;
+    let recordCount = 0;
+    const errors = missing.length > 0 ? [`缺少必要字段：${missing.join('、')}`] : [];
+    if (errors.length === 0) {
+      if (source === '岗位') {
+        const jobs = parseJobCsv(csv);
+        recordCount = jobs.length;
+        next = { ...next, jobs: [...jobs, ...next.jobs] };
+      }
+      if (source === '内容指标') {
+        next = { ...next, contents: applyMetricsCsv(next.contents, csv) };
+        recordCount = Math.max(0, csv.trim().split(/\r?\n/).length - 1);
+      }
+      if (source === '北森结果') {
+        const results = parseBeisenCsv(csv);
+        recordCount = results.length;
+        next = { ...next, beisenResults: [...results, ...next.beisenResults] };
+      }
+      if (source === '账号') {
+        const accounts = preview.rows.map((row) => {
+          const object = Object.fromEntries(preview.headers.map((header, index) => [header, row[index] ?? '']));
+          return {
+            id: `acc-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            platform: (object.platform || '小红书') as Platform,
+            name: object.name || '未命名账号',
+            type: (object.type || '招聘专用账号') as AccountType,
+            owner: object.owner || '',
+            positioning: object.positioning || '',
+            publishingRoles: ['招聘专员'],
+            reviewRule: '默认审核流程',
+            attribution: '招聘团队',
+            authStatus: '未授权' as const,
+            status: '启用' as const,
+          };
+        });
+        recordCount = accounts.length;
+        next = { ...next, accounts: [...accounts, ...next.accounts] };
+      }
+      if (source === '素材') {
+        const assets = preview.rows.map((row) => {
+          const object = Object.fromEntries(preview.headers.map((header, index) => [header, row[index] ?? '']));
+          return {
+            id: `asset-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            name: object.name || '未命名素材',
+            category: object.category || '未分类',
+            owner: object.owner || '',
+            scope: object.scope || '招聘内容可用',
+            platforms: ['小红书', '脉脉'] as Platform[],
+            riskLevel: '中' as const,
+            authorization: object.authorization || '待审核',
+            expiresAt: object.expiresAt || '',
+            usageCount: 0,
+          };
+        });
+        recordCount = assets.length;
+        next = { ...next, assets: [...assets, ...next.assets] };
+      }
+    }
+    const run: ImportRun = {
+      id: `import-${Date.now()}`,
+      source,
+      fileName,
+      mapping: preview.headers.join(' -> '),
+      status: errors.length === 0 ? '成功' : '失败',
+      recordCount,
+      errorRows: errors,
+      createdAt: nowText(),
+    };
+    audit('执行数据导入', `${source}：${run.status}`, { ...next, importRuns: [run, ...next.importRuns] });
+    if (errors.length === 0) setCsv('');
+  };
+
+  return (
+    <div className="page-grid">
+      <section className="toolbar">
+        <div>
+          <h1>导入中心</h1>
+          <p>统一处理岗位、平台指标、北森结果、账号和素材的模板、预览、校验与导入历史。</p>
+        </div>
+        <button onClick={() => downloadText(`${source}导入模板.csv`, templates[source], 'text/csv;charset=utf-8')}><FileText size={16} />下载模板</button>
+      </section>
+      <section className="panel wide">
+        <div className="inline-form">
+          <select value={source} onChange={(event) => setSource(event.target.value as ImportRun['source'])}>
+            <option>岗位</option>
+            <option>内容指标</option>
+            <option>北森结果</option>
+            <option>账号</option>
+            <option>素材</option>
+          </select>
+          <input value={fileName} onChange={(event) => setFileName(event.target.value)} placeholder="文件名" />
+          <button onClick={runImport}><Database size={16} />校验并导入</button>
+        </div>
+        <textarea className="small-textarea" value={csv} onChange={(event) => setCsv(event.target.value)} placeholder={templates[source]} />
+        {missing.length > 0 && <div className="platform-note danger-note"><AlertTriangle size={16} />缺少必要字段：{missing.join('、')}</div>}
+        <table>
+          <thead><tr>{preview.headers.map((header) => <th key={header}>{header}</th>)}</tr></thead>
+          <tbody>{preview.rows.map((row, index) => <tr key={index}>{preview.headers.map((header, cell) => <td key={header}>{row[cell]}</td>)}</tr>)}</tbody>
+        </table>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>导入历史</h2><ClipboardList size={18} /></div>
+        {data.importRuns.length === 0 && <EmptyState title="暂无导入历史" body="每次导入都会记录来源、映射、错误行和导入数量。" />}
+        <div className="entry-grid">
+          {data.importRuns.map((run) => (
+            <article key={run.id}>
+              <strong>{run.source}｜{run.fileName}</strong>
+              <span>{run.mapping || '未识别映射'} · {run.recordCount} 条 · {run.createdAt}</span>
+              <Badge tone={run.status === '成功' ? 'good' : 'danger'}>{run.status}</Badge>
+              {run.errorRows.map((error) => <span key={error}>{error}</span>)}
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
   const [aiRecommendations, setAiRecommendations] = useState<string[]>([]);
   const [aiStatus, setAiStatus] = useState('');
+  const [actionDraft, setActionDraft] = useState({ title: '', owner: '', dueDate: '', reportId: '' });
   const recommendations = aiRecommendations.length > 0 ? aiRecommendations : buildRecommendations(data);
+  const sortedContents = data.contents.slice().sort((a, b) => (b.metrics.clicks + b.metrics.likes + b.metrics.comments) - (a.metrics.clicks + a.metrics.likes + a.metrics.comments));
   const generatedReports = data.reports.length > 0
     ? data.reports
     : data.contents.length > 0
@@ -1825,6 +2064,24 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
     };
     audit('生成复盘报告', report.title, { ...data, reports: [report, ...data.reports] });
   };
+  const createReportAction = () => {
+    if (!actionDraft.title.trim()) return;
+    const item: ReportAction = {
+      id: `report-action-${Date.now()}`,
+      reportId: actionDraft.reportId || data.reports[0]?.id || 'manual',
+      title: actionDraft.title,
+      owner: actionDraft.owner || '未分配',
+      dueDate: actionDraft.dueDate,
+      status: '未开始',
+      createdAt: nowText(),
+    };
+    audit('创建复盘行动项', item.title, { ...data, reportActions: [item, ...data.reportActions] });
+    setActionDraft({ title: '', owner: '', dueDate: '', reportId: '' });
+  };
+  const updateReportAction = (id: string, status: ReportAction['status']) => {
+    const target = data.reportActions.find((item) => item.id === id);
+    audit('更新复盘行动项', `${target?.title ?? id}：${status}`, { ...data, reportActions: data.reportActions.map((item) => item.id === id ? { ...item, status } : item) });
+  };
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -1846,7 +2103,7 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
       </section>
       <section className="panel wide">
         <div className="report-header">
-          <span>2026 年 5 月招聘新媒体运营周报</span>
+          <span>2026 年 5 月招聘新媒体运营周报 / 月报</span>
           <Badge tone="good">自动生成</Badge>
         </div>
         <div className="report-grid">
@@ -1862,16 +2119,161 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
         </div>
       </section>
       <section className="panel wide">
-        <div className="panel-title"><h2>高表现内容特征</h2><Sparkles size={18} /></div>
+        <div className="panel-title"><h2>高低表现内容对比</h2><Sparkles size={18} /></div>
         <div className="template-grid">
           {data.contents.length === 0 && <EmptyState title="暂无高表现特征" body="导入真实内容效果后，系统会提炼标题、平台、账号和岗位族群特征。" />}
-          {data.contents.length > 0 && data.contents
-            .slice()
-            .sort((a, b) => b.metrics.clicks - a.metrics.clicks)
-            .slice(0, 4)
+          {sortedContents.slice(0, 4)
             .map((content) => (
-              <div className="template-chip" key={content.id}>{content.title}<small>{content.platform} · {content.metrics.clicks} 点击</small></div>
+              <div className="template-chip" key={content.id}>高表现｜{content.title}<small>{content.platform} · {content.metrics.clicks} 点击 · {content.metrics.likes + content.metrics.comments} 互动</small></div>
             ))}
+          {sortedContents.length > 1 && sortedContents.slice(-3).reverse()
+            .map((content) => (
+              <div className="template-chip" key={`low-${content.id}`}>低表现｜{content.title}<small>{content.platform} · {content.metrics.clicks} 点击 · 建议复盘标题和渠道匹配</small></div>
+            ))}
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>复盘行动跟踪</h2><ClipboardList size={18} /></div>
+        <div className="inline-form">
+          <input value={actionDraft.title} onChange={(event) => setActionDraft({ ...actionDraft, title: event.target.value })} placeholder="行动项，例如补齐小红书岗位种草模板" />
+          <input value={actionDraft.owner} onChange={(event) => setActionDraft({ ...actionDraft, owner: event.target.value })} placeholder="负责人" />
+          <input type="date" value={actionDraft.dueDate} onChange={(event) => setActionDraft({ ...actionDraft, dueDate: event.target.value })} />
+          <select value={actionDraft.reportId} onChange={(event) => setActionDraft({ ...actionDraft, reportId: event.target.value })}>
+            <option value="">关联最近报告</option>
+            {data.reports.map((report) => <option value={report.id} key={report.id}>{report.title}</option>)}
+          </select>
+          <button onClick={createReportAction}><Plus size={16} />新增行动项</button>
+        </div>
+        {data.reportActions.length === 0 && <EmptyState title="暂无复盘行动项" body="生成复盘后，可把建议拆成负责人、截止日期和处理状态。" />}
+        <div className="entry-grid">
+          {data.reportActions.map((item) => (
+            <article key={item.id}>
+              <strong>{item.title}</strong>
+              <span>{item.owner} · {item.dueDate || '未定日期'} · {item.createdAt}</span>
+              <select value={item.status} onChange={(event) => updateReportAction(item.id, event.target.value as ReportAction['status'])}>
+                <option>未开始</option>
+                <option>进行中</option>
+                <option>已完成</option>
+              </select>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AiWorkbench({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
+  const [template, setTemplate] = useState({ task: '内容生成' as PromptTemplate['task'], name: '', provider: '通用', prompt: '' });
+  const [runDraft, setRunDraft] = useState({ templateId: '', modelApiId: '', input: '' });
+  const [status, setStatus] = useState('');
+  const addTemplate = () => {
+    if (!template.name.trim() || !template.prompt.trim()) return;
+    const item: PromptTemplate = {
+      id: `prompt-${Date.now()}`,
+      ...template,
+      enabled: true,
+      updatedAt: nowText(),
+    };
+    audit('新增提示词模板', item.name, { ...data, promptTemplates: [item, ...data.promptTemplates] });
+    setTemplate({ task: '内容生成', name: '', provider: '通用', prompt: '' });
+  };
+  const toggleTemplate = (id: string) => {
+    const target = data.promptTemplates.find((item) => item.id === id);
+    audit('切换提示词模板状态', target?.name ?? id, { ...data, promptTemplates: data.promptTemplates.map((item) => item.id === id ? { ...item, enabled: !item.enabled, updatedAt: nowText() } : item) });
+  };
+  const runTemplate = async (retryLog?: ModelRunLog) => {
+    const selectedTemplate = retryLog
+      ? data.promptTemplates.find((item) => item.task === retryLog.task && item.enabled)
+      : data.promptTemplates.find((item) => item.id === runDraft.templateId) ?? data.promptTemplates.find((item) => item.enabled);
+    const selectedModel = data.modelApis.find((item) => item.id === (retryLog?.modelApiId || runDraft.modelApiId)) ?? findModelApi(data, selectedTemplate?.task ?? '内容生成');
+    if (!selectedTemplate || !selectedModel) {
+      setStatus('请先配置启用的提示词模板和大模型 API');
+      return;
+    }
+    setStatus('正在调用模型...');
+    const task = selectedTemplate.task === '标题推荐' ? '内容生成' : selectedTemplate.task;
+    const result = await runModelTask(selectedModel, task, {
+      prompt: selectedTemplate.prompt,
+      input: retryLog?.inputSummary || runDraft.input,
+    }, apiToken);
+    const log: ModelRunLog = {
+      id: `model-log-${Date.now()}`,
+      modelApiId: selectedModel.id,
+      task: selectedTemplate.task,
+      status: result.ok ? '成功' : '失败',
+      inputSummary: retryLog?.inputSummary || runDraft.input.slice(0, 200),
+      outputPreview: result.text?.slice(0, 400) ?? '',
+      message: result.message ?? (result.ok ? '调用成功' : '调用失败'),
+      ranAt: nowText(),
+    };
+    audit('运行大模型任务', `${selectedTemplate.name}：${log.status}`, { ...data, modelRunLogs: [log, ...data.modelRunLogs] });
+    setStatus(log.message);
+  };
+
+  return (
+    <div className="page-grid">
+      <section className="toolbar">
+        <div>
+          <h1>AI 工作台</h1>
+          <p>管理提示词模板、任务试跑、调用日志、失败重试和模型配置使用情况。</p>
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>提示词模板</h2><Bot size={18} /></div>
+        <div className="inline-form">
+          <select value={template.task} onChange={(event) => setTemplate({ ...template, task: event.target.value as PromptTemplate['task'] })}>
+            <option>内容生成</option>
+            <option>风险识别</option>
+            <option>复盘建议</option>
+            <option>标题推荐</option>
+          </select>
+          <input value={template.name} onChange={(event) => setTemplate({ ...template, name: event.target.value })} placeholder="模板名称" />
+          <input value={template.provider} onChange={(event) => setTemplate({ ...template, provider: event.target.value })} placeholder="适用模型/平台" />
+          <button onClick={addTemplate}><Plus size={16} />保存模板</button>
+        </div>
+        <textarea className="small-textarea" value={template.prompt} onChange={(event) => setTemplate({ ...template, prompt: event.target.value })} placeholder="输入系统提示词、变量说明和输出格式要求" />
+        <div className="entry-grid">
+          {data.promptTemplates.length === 0 && <EmptyState title="暂无提示词模板" body="可创建内容生成、风险识别、复盘建议和标题推荐模板。" />}
+          {data.promptTemplates.map((item) => (
+            <article key={item.id}>
+              <strong>{item.task}｜{item.name}</strong>
+              <span>{item.provider} · {item.updatedAt}</span>
+              <p>{item.prompt}</p>
+              <button className="ghost" onClick={() => toggleTemplate(item.id)}>{item.enabled ? '停用' : '启用'}</button>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>任务试跑</h2><Sparkles size={18} /></div>
+        <div className="inline-form">
+          <select value={runDraft.templateId} onChange={(event) => setRunDraft({ ...runDraft, templateId: event.target.value })}>
+            <option value="">选择模板</option>
+            {data.promptTemplates.filter((item) => item.enabled).map((item) => <option value={item.id} key={item.id}>{item.task}｜{item.name}</option>)}
+          </select>
+          <select value={runDraft.modelApiId} onChange={(event) => setRunDraft({ ...runDraft, modelApiId: event.target.value })}>
+            <option value="">选择模型配置</option>
+            {data.modelApis.map((item) => <option value={item.id} key={item.id}>{item.name}｜{item.model}</option>)}
+          </select>
+          <button onClick={() => void runTemplate()}><Bot size={16} />运行</button>
+        </div>
+        <textarea className="small-textarea" value={runDraft.input} onChange={(event) => setRunDraft({ ...runDraft, input: event.target.value })} placeholder="输入岗位、平台、内容草稿或复盘数据" />
+        {status && <div className="platform-note"><Bot size={16} />{status}</div>}
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>调用日志</h2><ClipboardList size={18} /></div>
+        {data.modelRunLogs.length === 0 && <EmptyState title="暂无模型调用日志" body="AI 工作台和内容/复盘模块调用后会记录成功、失败、输入摘要和输出预览。" />}
+        <div className="entry-grid">
+          {data.modelRunLogs.map((log) => (
+            <article key={log.id}>
+              <strong>{log.task} · {log.status}</strong>
+              <span>{data.modelApis.find((item) => item.id === log.modelApiId)?.name ?? log.modelApiId} · {log.ranAt}</span>
+              <span>{log.message}</span>
+              {log.outputPreview && <p>{log.outputPreview}</p>}
+              {log.status === '失败' && <button className="ghost" onClick={() => void runTemplate(log)}>重试</button>}
+            </article>
+          ))}
         </div>
       </section>
     </div>
@@ -1886,6 +2288,7 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
   const [mapping, setMapping] = useState({ name: '', integrationType: '北森' as IntegrationMapping['integrationType'], scenario: '北森线索同步' as IntegrationMapping['scenario'], method: 'POST' as IntegrationMapping['method'], endpointPath: '', resultPath: '', fieldMapping: '{"candidateName":"name","mobile":"contact","jobCode":"jobId"}' });
   const [policy, setPolicy] = useState({ title: '', scope: '隐私授权' as CompliancePolicy['scope'], owner: '', content: '' });
   const [task, setTask] = useState({ title: '', category: '平台接口' as DeploymentTask['category'], owner: '', dueDate: '', note: '' });
+  const [pluginRule, setPluginRule] = useState({ platform: '小红书' as Platform, name: '', urlPattern: '', selectors: '{"title":"h1","views":".view","likes":".like"}' });
   const [systemStatus, setSystemStatus] = useState('');
   const [modelApi, setModelApi] = useState({
     provider: 'OpenAI' as ModelApiConfig['provider'],
@@ -2009,6 +2412,26 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
     };
     update({ ...data, deploymentTasks: [item, ...data.deploymentTasks] });
     setTask({ title: '', category: '平台接口', owner: '', dueDate: '', note: '' });
+  };
+  const addPluginRule = () => {
+    if (!pluginRule.name.trim()) return;
+    const item: PluginRule = {
+      id: `plugin-rule-${Date.now()}`,
+      ...pluginRule,
+      enabled: true,
+      updatedAt: nowText(),
+    };
+    update({ ...data, pluginRules: [item, ...data.pluginRules] });
+    setPluginRule({ platform: '小红书', name: '', urlPattern: '', selectors: '{"title":"h1","views":".view","likes":".like"}' });
+  };
+  const togglePluginRule = (id: string) => {
+    update({ ...data, pluginRules: data.pluginRules.map((item) => item.id === id ? { ...item, enabled: !item.enabled, updatedAt: nowText() } : item) });
+  };
+  const updateDeploymentStatus = (id: string, status: DeploymentTask['status']) => {
+    update({ ...data, deploymentTasks: data.deploymentTasks.map((item) => item.id === id ? { ...item, status } : item) });
+  };
+  const updatePolicyStatus = (id: string, status: CompliancePolicy['status']) => {
+    update({ ...data, compliancePolicies: data.compliancePolicies.map((item) => item.id === id ? { ...item, status, updatedAt: nowText() } : item) });
   };
   const checkSystemHealth = async () => {
     try {
@@ -2256,6 +2679,30 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
         </div>
       </section>
       <section className="panel wide">
+        <div className="panel-title"><h2>平台插件采集规则</h2><Database size={18} /></div>
+        <p className="helper">用于浏览器插件或人工采集时识别平台页面字段。真实平台规则可由运营按 URL 和 CSS 选择器持续维护。</p>
+        <div className="inline-form">
+          <select value={pluginRule.platform} onChange={(event) => setPluginRule({ ...pluginRule, platform: event.target.value as Platform })}>
+            {platforms.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <input value={pluginRule.name} onChange={(event) => setPluginRule({ ...pluginRule, name: event.target.value })} placeholder="规则名称" />
+          <input value={pluginRule.urlPattern} onChange={(event) => setPluginRule({ ...pluginRule, urlPattern: event.target.value })} placeholder="URL 匹配规则，如 xiaohongshu.com/explore/*" />
+          <button onClick={addPluginRule}><Plus size={16} />保存规则</button>
+        </div>
+        <textarea className="small-textarea" value={pluginRule.selectors} onChange={(event) => setPluginRule({ ...pluginRule, selectors: event.target.value })} placeholder='字段选择器 JSON，如 {"title":"h1","views":".view"}' />
+        <div className="entry-grid">
+          {data.pluginRules.length === 0 && <EmptyState title="暂无插件采集规则" body="后续由使用人按各平台页面结构配置 URL、字段和选择器。" />}
+          {data.pluginRules.map((item) => (
+            <article key={item.id}>
+              <strong>{item.platform}｜{item.name}</strong>
+              <span>{item.urlPattern || '未配置 URL 规则'} · {item.updatedAt}</span>
+              <p>{item.selectors}</p>
+              <button className="ghost" onClick={() => togglePluginRule(item.id)}>{item.enabled ? '停用' : '启用'}</button>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="panel wide">
         <div className="panel-title"><h2>隐私合规与上线台账</h2><ShieldCheck size={18} /></div>
         <div className="inline-form">
           <input value={policy.title} onChange={(event) => setPolicy({ ...policy, title: event.target.value })} placeholder="制度/文案名称" />
@@ -2286,8 +2733,30 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
         </div>
         <input value={task.note} onChange={(event) => setTask({ ...task, note: event.target.value })} placeholder="上线依赖、账号权限、接口文档、验收说明" />
         <div className="entry-grid">
-          {data.compliancePolicies.map((item) => <article key={item.id}><strong>{item.title}</strong><span>{item.scope} · {item.owner || '未分配'} · {item.updatedAt}</span><p>{item.content}</p><Badge tone="good">{item.status}</Badge></article>)}
-          {data.deploymentTasks.map((item) => <article key={item.id}><strong>{item.title}</strong><span>{item.category} · {item.owner || '未分配'} · {item.dueDate || '未定日期'}</span><p>{item.note}</p><Badge tone={item.status === '已完成' ? 'good' : item.status === '进行中' ? 'info' : 'warn'}>{item.status}</Badge></article>)}
+          {data.compliancePolicies.map((item) => (
+            <article key={item.id}>
+              <strong>{item.title}</strong>
+              <span>{item.scope} · {item.owner || '未分配'} · {item.updatedAt}</span>
+              <p>{item.content}</p>
+              <select value={item.status} onChange={(event) => updatePolicyStatus(item.id, event.target.value as CompliancePolicy['status'])}>
+                <option>草稿</option>
+                <option>生效</option>
+                <option>待更新</option>
+              </select>
+            </article>
+          ))}
+          {data.deploymentTasks.map((item) => (
+            <article key={item.id}>
+              <strong>{item.title}</strong>
+              <span>{item.category} · {item.owner || '未分配'} · {item.dueDate || '未定日期'}</span>
+              <p>{item.note}</p>
+              <select value={item.status} onChange={(event) => updateDeploymentStatus(item.id, event.target.value as DeploymentTask['status'])}>
+                <option>未开始</option>
+                <option>进行中</option>
+                <option>已完成</option>
+              </select>
+            </article>
+          ))}
         </div>
       </section>
       <section className="panel wide">
@@ -2341,11 +2810,12 @@ function renderSection(
   update: (data: AppData) => void,
   audit: (action: string, target: string, nextData?: AppData) => void,
   resetData: () => void,
+  openSection: (section: Section) => void,
   apiToken?: string,
 ) {
   switch (section) {
     case '工作台':
-      return <Dashboard data={data} audit={audit} />;
+      return <Dashboard data={data} audit={audit} openSection={openSection} />;
     case '招聘需求':
       return <Jobs data={data} audit={audit} />;
     case '内容运营':
@@ -2354,10 +2824,14 @@ function renderSection(
       return <Assets data={data} audit={audit} apiToken={apiToken} />;
     case '账号与平台':
       return <Accounts data={data} audit={audit} apiToken={apiToken} />;
+    case '导入中心':
+      return <ImportCenter data={data} audit={audit} />;
     case '数据分析':
       return <Analytics data={data} audit={audit} />;
     case '复盘报告':
       return <Reports data={data} audit={audit} apiToken={apiToken} />;
+    case 'AI工作台':
+      return <AiWorkbench data={data} audit={audit} apiToken={apiToken} />;
     case '系统配置':
       return <SettingsPage data={data} update={update} resetData={resetData} apiToken={apiToken} />;
   }
@@ -2405,7 +2879,7 @@ export function App() {
         </div>
       </aside>
       <main>
-        {renderSection(activeSection, data, update, audit, resetData, apiToken)}
+        {renderSection(activeSection, data, update, audit, resetData, setSection, apiToken)}
       </main>
     </div>
   );

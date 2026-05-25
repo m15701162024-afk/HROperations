@@ -147,6 +147,10 @@ function renderLandingPage(page, jobs) {
       <input name="contact" placeholder="手机号 / 邮箱 / 微信" required />
       <select name="targetJobId">${options}<option value="">其他岗位</option></select>
       <textarea name="note" placeholder="补充说明"></textarea>
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:#526176">
+        <input type="checkbox" name="privacyAccepted" value="yes" required style="width:auto;margin-top:2px" />
+        我已了解并同意招聘团队用于岗位沟通、简历流转和招聘流程跟进而处理我的联系方式。
+      </label>
       <button type="submit">提交联系方式</button>
       <div class="ok" id="ok">提交成功，招聘团队会尽快联系你。</div>
     </form>
@@ -156,6 +160,7 @@ function renderLandingPage(page, jobs) {
     document.getElementById('leadForm').addEventListener('submit', async function(event){
       event.preventDefault();
       const data = Object.fromEntries(new FormData(event.target).entries());
+      if (data.privacyAccepted !== 'yes') return;
       if (window.HRAssistantTracker) {
         await window.HRAssistantTracker.submitLead(data);
       } else {

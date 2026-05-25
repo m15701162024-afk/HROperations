@@ -63,6 +63,11 @@ export const emptyData: AppData = {
   integrationMappings: [],
   compliancePolicies: [],
   deploymentTasks: [],
+  importRuns: [],
+  reportActions: [],
+  promptTemplates: [],
+  modelRunLogs: [],
+  pluginRules: [],
 };
 
 export const seedData: AppData = {
@@ -346,6 +351,11 @@ export const seedData: AppData = {
   integrationMappings: [],
   compliancePolicies: [],
   deploymentTasks: [],
+  importRuns: [],
+  reportActions: [],
+  promptTemplates: [],
+  modelRunLogs: [],
+  pluginRules: [],
 };
 
 export function generateContent(job: JobNeed, platform: Platform) {
