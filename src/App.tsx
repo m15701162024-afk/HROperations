@@ -2130,16 +2130,54 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   const filteredContentsByDate = data.contents.filter((item) => inDateRange(item.publishedAt ?? item.dueDate));
   const byPlatform = platforms.map((platform) => {
     const items = filteredContentsByDate.filter((item) => item.platform === platform);
+    const results = data.beisenResults.filter((item) => item.sourcePlatform === platform);
+    const interactions = items.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
+    const clicks = items.reduce((sum, item) => sum + item.metrics.clicks, 0);
     return {
       platform,
       views: items.reduce((sum, item) => sum + item.metrics.views, 0),
-      clicks: items.reduce((sum, item) => sum + item.metrics.clicks, 0),
+      interactions,
+      clicks,
       count: items.length,
+      applications: results.filter((item) => item.stage === '已投递').length,
+      effective: results.filter((item) => item.stage === '有效简历' || item.stage === '初筛通过' || item.stage === '已约面' || item.stage === '已面试' || item.stage === 'Offer' || item.stage === '已入职').length,
+      offers: results.filter((item) => item.stage === 'Offer' || item.stage === '已入职').length,
+      hires: results.filter((item) => item.stage === '已入职').length,
     };
-  }).filter((item) => item.count > 0);
+  });
+  const visiblePlatforms = byPlatform.filter((item) => item.count > 0 || item.applications > 0);
   const maxViews = Math.max(...byPlatform.map((p) => p.views), 1);
   const selectedContents = selectedPlatform === '全部' ? filteredContentsByDate : filteredContentsByDate.filter((item) => item.platform === selectedPlatform);
   const selectedResults = selectedPlatform === '全部' ? data.beisenResults : data.beisenResults.filter((item) => item.sourcePlatform === selectedPlatform);
+  const selectedViews = selectedContents.reduce((sum, item) => sum + item.metrics.views, 0);
+  const selectedInteractions = selectedContents.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
+  const selectedClicks = selectedContents.reduce((sum, item) => sum + item.metrics.clicks, 0);
+  const selectedApplications = selectedResults.filter((item) => item.stage === '已投递').length;
+  const selectedEffective = selectedResults.filter((item) => item.stage === '有效简历' || item.stage === '初筛通过' || item.stage === '已约面' || item.stage === '已面试' || item.stage === 'Offer' || item.stage === '已入职').length;
+  const selectedHires = selectedResults.filter((item) => item.stage === '已入职').length;
+  const formatRate = (value: number, base: number) => `${base > 0 ? ((value / base) * 100).toFixed(1) : '0.0'}%`;
+  const stageOrder: BeisenResult['stage'][] = ['已投递', '有效简历', '初筛通过', '已约面', '已面试', 'Offer', '已入职'];
+  const stageStats = stageOrder.map((stage) => ({
+    stage,
+    count: selectedResults.filter((item) => item.stage === stage).length,
+  }));
+  const familyStats = data.jobs.map((job) => {
+    const related = selectedContents.filter((item) => item.jobId === job.id);
+    const clicks = related.reduce((sum, item) => sum + item.metrics.clicks, 0);
+    const views = related.reduce((sum, item) => sum + item.metrics.views, 0);
+    return { id: job.id, family: job.family, title: job.title, clicks, views, count: related.length };
+  }).filter((item) => item.count > 0);
+  const typeStats = contentTypes.map((type) => {
+    const related = selectedContents.filter((item) => item.type === type);
+    return {
+      type,
+      count: related.length,
+      views: related.reduce((sum, item) => sum + item.metrics.views, 0),
+      clicks: related.reduce((sum, item) => sum + item.metrics.clicks, 0),
+    };
+  }).filter((item) => item.count > 0);
+  const maxSelectedViews = Math.max(...selectedContents.map((item) => item.metrics.views), 1);
+  const maxStageCount = Math.max(...stageStats.map((item) => item.count), 1);
   const importMetrics = () => {
     const nextContents = applyMetricsCsv(data.contents, metricsCsv);
     audit('导入平台指标', '内容数据', { ...data, contents: nextContents });
@@ -2184,21 +2222,88 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>平台下钻</h2><BarChart3 size={18} /></div>
-        <div className="inline-form">
-          <input type="date" value={dateRange.from} onChange={(event) => setDateRange({ ...dateRange, from: event.target.value })} />
-          <input type="date" value={dateRange.to} onChange={(event) => setDateRange({ ...dateRange, to: event.target.value })} />
+        <div className="analytics-filterbar">
+          <label>开始日期<input type="date" value={dateRange.from} onChange={(event) => setDateRange({ ...dateRange, from: event.target.value })} /></label>
+          <label>结束日期<input type="date" value={dateRange.to} onChange={(event) => setDateRange({ ...dateRange, to: event.target.value })} /></label>
           <button className="ghost" onClick={() => setDateRange({ from: '', to: '' })}>清空时间筛选</button>
         </div>
         <div className="module-tabs">
           <button className={selectedPlatform === '全部' ? 'active' : ''} onClick={() => setSelectedPlatform('全部')}>全部</button>
           {platforms.map((platform) => <button key={platform} className={selectedPlatform === platform ? 'active' : ''} onClick={() => setSelectedPlatform(platform)}>{platform}</button>)}
         </div>
-        <div className="stats-row compact-stats">
+        <div className="stats-row compact-stats analytics-stats">
           <StatCard label="内容数" value={selectedContents.length} note="当前筛选平台" icon={FileText} />
-          <StatCard label="曝光" value={selectedContents.reduce((sum, item) => sum + item.metrics.views, 0)} note="真实导入后计算" icon={Rocket} />
-          <StatCard label="点击" value={selectedContents.reduce((sum, item) => sum + item.metrics.clicks, 0)} note="招聘入口点击" icon={Link} />
+          <StatCard label="曝光" value={selectedViews.toLocaleString()} note={`互动率 ${formatRate(selectedInteractions, selectedViews)}`} icon={Rocket} />
+          <StatCard label="点击" value={selectedClicks.toLocaleString()} note={`点击率 ${formatRate(selectedClicks, selectedViews)}`} icon={Link} />
           <StatCard label="北森回流" value={selectedResults.length} note="投递/面试/入职" icon={Users} />
         </div>
+        <div className="analytics-kpi-strip">
+          <div><span>互动量</span><b>{selectedInteractions.toLocaleString()}</b><small>赞评藏转合计</small></div>
+          <div><span>投递转化</span><b>{formatRate(selectedApplications, selectedClicks)}</b><small>{selectedApplications} 投递 / {selectedClicks} 点击</small></div>
+          <div><span>有效简历率</span><b>{formatRate(selectedEffective, selectedApplications)}</b><small>{selectedEffective} 有效 / {selectedApplications} 投递</small></div>
+          <div><span>入职转化</span><b>{formatRate(selectedHires, selectedApplications)}</b><small>{selectedHires} 入职 / {selectedApplications} 投递</small></div>
+        </div>
+      </section>
+      <section className="panel wide analytics-board">
+        <div className="panel-title"><h2>平台效率矩阵</h2><PieChart size={18} /></div>
+        {visiblePlatforms.length === 0 && <EmptyState title="暂无真实平台指标" body="请先发布内容并导入平台后台数据；当前平台曝光、互动和点击均按 0 展示。" />}
+        <div className="platform-metric-grid">
+          {visiblePlatforms.map((item) => (
+            <button key={item.platform} className={`platform-metric-card ${selectedPlatform === item.platform ? 'active' : ''}`} onClick={() => setSelectedPlatform(item.platform)}>
+              <div>
+                <strong>{item.platform}</strong>
+                <Badge tone={item.hires > 0 ? 'good' : item.clicks > 0 ? 'info' : 'neutral'}>{item.count} 内容</Badge>
+              </div>
+              <div className="metric-mini-grid">
+                <span>曝光 <b>{item.views.toLocaleString()}</b></span>
+                <span>互动 <b>{item.interactions.toLocaleString()}</b></span>
+                <span>点击 <b>{item.clicks.toLocaleString()}</b></span>
+                <span>入职 <b>{item.hires}</b></span>
+              </div>
+              <Progress current={item.views} target={maxViews} />
+              <small>点击率 {formatRate(item.clicks, item.views)} · 有效率 {formatRate(item.effective, item.applications)} · Offer {item.offers}</small>
+            </button>
+          ))}
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>{selectedPlatform} 内容明细</h2><Search size={18} /></div>
+        {selectedContents.length === 0 && <EmptyState title="暂无内容明细" body="当前平台或日期范围没有真实内容数据。" />}
+        {selectedContents.length > 0 && (
+          <table className="analytics-table">
+            <thead>
+              <tr>
+                <th>内容</th>
+                <th>平台/账号</th>
+                <th>曝光</th>
+                <th>互动</th>
+                <th>点击</th>
+                <th>点击率</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              {selectedContents
+                .slice()
+                .sort((a, b) => b.metrics.views - a.metrics.views)
+                .map((item) => {
+                  const account = data.accounts.find((accountItem) => accountItem.id === item.accountId);
+                  const interactions = item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares;
+                  return (
+                    <tr key={item.id}>
+                      <td><strong>{item.title}</strong><span>{item.type} · {item.dueDate}</span></td>
+                      <td>{item.platform}<span>{account?.name ?? '未绑定账号'}</span></td>
+                      <td>{item.metrics.views.toLocaleString()}<Progress current={item.metrics.views} target={maxSelectedViews} /></td>
+                      <td>{interactions.toLocaleString()}</td>
+                      <td>{item.metrics.clicks.toLocaleString()}</td>
+                      <td>{formatRate(item.metrics.clicks, item.metrics.views)}</td>
+                      <td><Badge tone={item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘' ? 'good' : 'warn'}>{item.status}</Badge></td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        )}
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>平台指标导入</h2><Database size={18} /></div>
@@ -2243,34 +2348,43 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       <section className="panel wide">
         <div className="panel-title"><h2>平台效果对比</h2><BarChart3 size={18} /></div>
         <div className="bar-list">
-          {byPlatform.length === 0 && <EmptyState title="暂无真实平台指标" body="请先发布内容并导入平台后台数据；当前平台曝光、互动和点击均按 0 展示。" />}
-          {byPlatform.map((item) => (
+          {visiblePlatforms.length === 0 && <EmptyState title="暂无真实平台指标" body="请先发布内容并导入平台后台数据；当前平台曝光、互动和点击均按 0 展示。" />}
+          {visiblePlatforms.map((item) => (
             <div key={item.platform} className="bar-row">
               <strong>{item.platform}</strong>
               <Progress current={item.views} target={maxViews} />
-              <span>{item.views.toLocaleString()} 曝光 · {item.clicks} 点击</span>
+              <span>{item.views.toLocaleString()} 曝光 · {item.interactions} 互动 · {item.clicks} 点击</span>
             </div>
           ))}
         </div>
       </section>
       <section className="panel">
         <div className="panel-title"><h2>岗位族群效果</h2><GitBranch size={18} /></div>
-        {data.jobs.length === 0 && <EmptyState title="暂无岗位族群数据" body="录入真实岗位后，这里会按岗位族群汇总点击。" />}
-        {data.jobs.map((job) => {
-          const related = data.contents.filter((item) => item.jobId === job.id);
-          const clicks = related.reduce((sum, item) => sum + item.metrics.clicks, 0);
-          return <div className="compact-row" key={job.id}><div><strong>{job.family}</strong><span>{job.title}</span></div><Badge tone="info">{clicks} 点击</Badge></div>;
-        })}
+        {familyStats.length === 0 && <EmptyState title="暂无岗位族群数据" body="录入真实岗位并关联内容后，这里会按岗位族群汇总曝光和点击。" />}
+        {familyStats.map((job) => <div className="compact-row" key={job.id}><div><strong>{job.family}</strong><span>{job.title} · {job.count} 条内容 · {job.views.toLocaleString()} 曝光</span></div><Badge tone="info">{job.clicks} 点击</Badge></div>)}
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>多触点归因</h2><Link size={18} /></div>
         {data.beisenResults.length === 0 && <EmptyState title="暂无北森回流归因" body="导入北森结果后，会按平台、内容和岗位关联投递/入职结果。" />}
-        <div className="entry-grid">
-          {platforms.map((platform) => {
-            const count = data.beisenResults.filter((item) => item.sourcePlatform === platform).length;
-            return count > 0 ? <article key={platform}><strong>{platform}</strong><span>北森回流 {count} 条</span><Badge tone="good">真实回流</Badge></article> : null;
-          })}
+        <div className="attribution-grid">
+          {stageStats.map((item) => (
+            <div key={item.stage} className="stage-card">
+              <span>{item.stage}</span>
+              <b>{item.count}</b>
+              <Progress current={item.count} target={maxStageCount} />
+            </div>
+          ))}
         </div>
+      </section>
+      <section className="panel">
+        <div className="panel-title"><h2>内容类型贡献</h2><BookOpen size={18} /></div>
+        {typeStats.length === 0 && <EmptyState title="暂无内容类型数据" body="发布或导入真实内容后，可按内容类型查看贡献。" />}
+        {typeStats.map((item) => (
+          <div className="compact-row" key={item.type}>
+            <div><strong>{item.type}</strong><span>{item.count} 条内容 · {item.views.toLocaleString()} 曝光</span></div>
+            <Badge tone="info">{item.clicks} 点击</Badge>
+          </div>
+        ))}
       </section>
       <section className="panel">
         <div className="panel-title"><h2>漏斗代理指标</h2><Target size={18} /></div>
