@@ -1403,6 +1403,11 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     type: '招聘专用账号' as AccountType,
     owner: '',
     positioning: '',
+    publishingRoles: '招聘专员',
+    reviewRule: '默认审核流程',
+    attribution: '招聘团队',
+    authStatus: '未授权' as PlatformAccount['authStatus'],
+    status: '启用' as PlatformAccount['status'],
   });
   const platformDetail = {
     accounts: data.accounts.filter((item) => item.platform === selectedPlatform),
@@ -1411,28 +1416,50 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     results: data.beisenResults.filter((item) => item.sourcePlatform === selectedPlatform),
   };
 
-  const createAccount = () => {
-    if (!account.name.trim()) return;
-    if (editingAccountId) {
-      const target = data.accounts.find((item) => item.id === editingAccountId);
-      if (!target) return;
-      const next = { ...target, ...account };
-      audit('编辑平台账号', next.name, { ...data, accounts: data.accounts.map((item) => item.id === editingAccountId ? next : item) });
-      setEditingAccountId('');
-      setAccount({ platform: '小红书', name: '', type: '招聘专用账号', owner: '', positioning: '' });
-      return;
-    }
-    const item: PlatformAccount = {
-      id: `acc-${Date.now()}`,
-      ...account,
-      publishingRoles: ['招聘专员'],
+  const buildAccountPayload = () => ({
+    platform: account.platform,
+    name: account.name,
+    type: account.type,
+    owner: account.owner,
+    positioning: account.positioning,
+    publishingRoles: account.publishingRoles.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean),
+    reviewRule: account.reviewRule,
+    attribution: account.attribution,
+    authStatus: account.authStatus,
+    status: account.status,
+  });
+  const resetAccountForm = () => {
+    setAccount({
+      platform: '小红书',
+      name: '',
+      type: '招聘专用账号',
+      owner: '',
+      positioning: '',
+      publishingRoles: '招聘专员',
       reviewRule: '默认审核流程',
       attribution: '招聘团队',
       authStatus: '未授权',
       status: '启用',
+    });
+  };
+  const createAccount = () => {
+    if (!account.name.trim()) return;
+    const payload = buildAccountPayload();
+    if (editingAccountId) {
+      const target = data.accounts.find((item) => item.id === editingAccountId);
+      if (!target) return;
+      const next = { ...target, ...payload };
+      audit('编辑平台账号', next.name, { ...data, accounts: data.accounts.map((item) => item.id === editingAccountId ? next : item) });
+      setEditingAccountId('');
+      resetAccountForm();
+      return;
+    }
+    const item: PlatformAccount = {
+      id: `acc-${Date.now()}`,
+      ...payload,
     };
     audit('新增平台账号', item.name, { ...data, accounts: [item, ...data.accounts] });
-    setAccount({ platform: '小红书', name: '', type: '招聘专用账号', owner: '', positioning: '' });
+    resetAccountForm();
   };
 
   const createEntry = () => {
@@ -1764,7 +1791,23 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
   };
   const startEditAccount = (item: PlatformAccount) => {
     setEditingAccountId(item.id);
-    setAccount({ platform: item.platform, name: item.name, type: item.type, owner: item.owner, positioning: item.positioning });
+    setAccount({
+      platform: item.platform,
+      name: item.name,
+      type: item.type,
+      owner: item.owner,
+      positioning: item.positioning,
+      publishingRoles: item.publishingRoles.join('、'),
+      reviewRule: item.reviewRule,
+      attribution: item.attribution,
+      authStatus: item.authStatus,
+      status: item.status,
+    });
+  };
+  const patchAccount = (id: string, patch: Partial<PlatformAccount>, action = '更新平台账号') => {
+    const target = data.accounts.find((item) => item.id === id);
+    if (!target) return;
+    audit(action, target.name, { ...data, accounts: data.accounts.map((item) => item.id === id ? { ...item, ...patch } : item) });
   };
   const startEditEntry = (item: RecruitmentEntry) => {
     setEditingEntryId(item.id);
@@ -1835,9 +1878,23 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
           </select>
           <input value={account.owner} onChange={(event) => setAccount({ ...account, owner: event.target.value })} placeholder="负责人" />
           <button onClick={createAccount}><Plus size={16} />{editingAccountId ? '保存编辑' : '保存账号'}</button>
-          {editingAccountId && <button className="secondary" onClick={() => { setEditingAccountId(''); setAccount({ platform: '小红书', name: '', type: '招聘专用账号', owner: '', positioning: '' }); }}>取消</button>}
+          {editingAccountId && <button className="secondary" onClick={() => { setEditingAccountId(''); resetAccountForm(); }}>取消</button>}
         </div>
         <input value={account.positioning} onChange={(event) => setAccount({ ...account, positioning: event.target.value })} placeholder="账号定位，例如：岗位种草、校招答疑、技术观点" />
+        <div className="inline-form compact-edit">
+          <input value={account.publishingRoles} onChange={(event) => setAccount({ ...account, publishingRoles: event.target.value })} placeholder="发布权限角色，用顿号分隔" />
+          <input value={account.reviewRule} onChange={(event) => setAccount({ ...account, reviewRule: event.target.value })} placeholder="审核规则，例如：技术负责人+品牌合规" />
+          <input value={account.attribution} onChange={(event) => setAccount({ ...account, attribution: event.target.value })} placeholder="数据归属，例如：招聘团队/校招项目" />
+          <select value={account.authStatus} onChange={(event) => setAccount({ ...account, authStatus: event.target.value as PlatformAccount['authStatus'] })}>
+            <option>未授权</option>
+            <option>已授权</option>
+            <option>授权过期</option>
+          </select>
+          <select value={account.status} onChange={(event) => setAccount({ ...account, status: event.target.value as PlatformAccount['status'] })}>
+            <option>启用</option>
+            <option>停用</option>
+          </select>
+        </div>
       </section>}
       {activePanel === '账号入口' && <section className="panel wide">
         <table>
@@ -1849,13 +1906,14 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
               <th>发布权限</th>
               <th>授权</th>
               <th>归属</th>
+              <th>状态</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
             {data.accounts.length === 0 && (
               <tr>
-                <td colSpan={7}><EmptyState title="暂无真实平台账号" body="请录入实际运营账号，数据归属和发布权限会基于账号配置计算。" /></td>
+                <td colSpan={8}><EmptyState title="暂无真实平台账号" body="请录入实际运营账号，数据归属和发布权限会基于账号配置计算。" /></td>
               </tr>
             )}
             {data.accounts.map((account) => (
@@ -1866,9 +1924,12 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
                 <td>{account.publishingRoles.join(' / ')}</td>
                 <td><Badge tone={account.authStatus === '已授权' ? 'good' : account.authStatus === '授权过期' ? 'danger' : 'warn'}>{account.authStatus}</Badge></td>
                 <td>{account.attribution}</td>
+                <td><Badge tone={account.status === '启用' ? 'good' : 'neutral'}>{account.status}</Badge></td>
                 <td>
                   <div className="row-actions">
                     <button className="ghost" onClick={() => startEditAccount(account)}>编辑</button>
+                    <button className="ghost" onClick={() => patchAccount(account.id, { status: account.status === '启用' ? '停用' : '启用' }, '切换平台账号状态')}>{account.status === '启用' ? '停用' : '启用'}</button>
+                    <button className="ghost" onClick={() => patchAccount(account.id, { authStatus: account.authStatus === '已授权' ? '授权过期' : '已授权' }, '更新平台账号授权')}>{account.authStatus === '已授权' ? '设为过期' : '设为授权'}</button>
                     <button className="ghost" onClick={() => removeAccount(account.id)}>删除</button>
                   </div>
                 </td>
