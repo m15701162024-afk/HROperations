@@ -12,6 +12,7 @@ const dataFile = resolve(rootDir, 'data/hr-assistant-data.json');
 const authFile = resolve(rootDir, 'data/hr-assistant-auth.json');
 const uploadDir = resolve(rootDir, 'data/uploads');
 const backupDir = resolve(rootDir, 'data/backups');
+const exportDir = resolve(rootDir, 'data/exports');
 const distDir = resolve(rootDir, 'dist');
 const port = Number(process.env.HR_ASSISTANT_API_PORT ?? 5173);
 const SECRET_MASK = '********';
@@ -21,6 +22,7 @@ const requirePublicSecret = process.env.HR_ASSISTANT_REQUIRE_PUBLIC_SECRET === '
 
 const repository = createJsonRepository(dataFile);
 const authService = createAuthService(authFile);
+const analyticsCache = new Map();
 
 async function readBody(request, limitBytes = JSON_BODY_LIMIT) {
   const chunks = [];
@@ -311,6 +313,23 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (pathname.startsWith('/exports/') && request.method === 'GET') {
+    if (!requireSession(request, response)) return;
+    try {
+      const requestedName = decodeURIComponent(pathname.replace('/exports/', ''));
+      const safeName = basename(requestedName);
+      const filePath = resolve(exportDir, safeName);
+      if (!isSafeChildPath(exportDir, filePath)) {
+        send(response, 400, { ok: false, error: 'Invalid file path' });
+        return;
+      }
+      sendFile(response, 200, await readFile(filePath), contentTypeFor(filePath));
+    } catch {
+      send(response, 404, { ok: false, error: 'Export file not found' });
+    }
+    return;
+  }
+
   if (pathname.startsWith('/landing/') && request.method === 'GET') {
     try {
       const slug = decodeURIComponent(pathname.replace('/landing/', ''));
@@ -450,6 +469,7 @@ const server = createServer(async (request, response) => {
       const data = JSON.parse(body);
       const existing = await repository.readData();
       await repository.writeData(preserveSecrets(data, existing));
+      analyticsCache.clear();
       send(response, 200, { ok: true });
     } catch (error) {
       send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid request' });
@@ -458,11 +478,12 @@ const server = createServer(async (request, response) => {
   }
 
   if (pathname === '/api/analytics/summary' && request.method === 'GET') {
-    if (!requireSession(request, response)) return;
+    const session = requireSession(request, response);
+    if (!session) return;
     try {
       const query = Object.fromEntries(currentUrl.searchParams.entries());
-      const data = await repository.readData();
-      send(response, 200, buildAnalyticsDrill(data, { ...query, dimension: 'summary' }));
+      const data = filterDataForAnalytics(await repository.readData(), session);
+      send(response, 200, cachedAnalyticsDrill(data, { ...query, dimension: 'summary' }, session));
     } catch (error) {
       send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Analytics summary failed' });
     }
@@ -470,12 +491,13 @@ const server = createServer(async (request, response) => {
   }
 
   if (pathname.startsWith('/api/analytics/drill/') && request.method === 'POST') {
-    if (!requireSession(request, response)) return;
+    const session = requireSession(request, response);
+    if (!session) return;
     try {
       const dimension = pathname.replace('/api/analytics/drill/', '') || 'platform';
       const body = JSON.parse(await readBody(request));
-      const data = await repository.readData();
-      send(response, 200, buildAnalyticsDrill(data, { ...body, dimension }));
+      const data = filterDataForAnalytics(await repository.readData(), session);
+      send(response, 200, cachedAnalyticsDrill(data, { ...body, dimension }, session));
     } catch (error) {
       send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Analytics drill failed' });
     }
@@ -483,9 +505,10 @@ const server = createServer(async (request, response) => {
   }
 
   if (pathname === '/api/analytics/quality-issues' && request.method === 'GET') {
-    if (!requireSession(request, response)) return;
+    const session = requireSession(request, response);
+    if (!session) return;
     try {
-      const data = await repository.readData();
+      const data = filterDataForAnalytics(await repository.readData(), session);
       send(response, 200, { qualityIssues: detectMetricQualityIssues(data, Object.fromEntries(currentUrl.searchParams.entries())) });
     } catch (error) {
       send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Quality issues query failed' });
@@ -494,20 +517,49 @@ const server = createServer(async (request, response) => {
   }
 
   if (pathname === '/api/analytics/export' && request.method === 'POST') {
-    if (!requireSession(request, response)) return;
+    const session = requireSession(request, response);
+    if (!session) return;
     try {
       const body = JSON.parse(await readBody(request));
-      const data = await repository.readData();
-      const result = buildAnalyticsDrill(data, body.query ?? {});
+      const data = filterDataForAnalytics(await repository.readData(), session);
+      const result = cachedAnalyticsDrill(data, body.query ?? {}, session);
+      const taskId = `export-${Date.now()}`;
+      const format = body.format === 'json' ? 'json' : 'csv';
+      const fileName = `${taskId}.${format}`;
+      await mkdir(exportDir, { recursive: true });
+      const rows = result.details.map((item) => ({
+        id: item.id,
+        title: item.title,
+        dimension: item.dimension,
+        views: item.snapshot.views,
+        interactions: item.snapshot.interactions,
+        clicks: item.snapshot.clicks,
+        applications: item.snapshot.applications,
+        effectiveResumes: item.snapshot.effectiveResumes,
+        hires: item.snapshot.hires,
+      }));
+      const bodyText = format === 'json' ? JSON.stringify(result, null, 2) : toCsv(rows);
+      await writeFile(resolve(exportDir, fileName), bodyText, 'utf-8');
       send(response, 200, {
-        taskId: `export-${Date.now()}`,
+        taskId,
         status: '已完成',
-        downloadUrl: '',
-        format: body.format ?? 'json',
+        downloadUrl: `/exports/${encodeURIComponent(fileName)}`,
+        format,
         result,
       });
     } catch (error) {
       send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Analytics export failed' });
+    }
+    return;
+  }
+
+  if (pathname === '/api/analytics/quality-issues/resolve' && request.method === 'POST') {
+    if (!requireSession(request, response)) return;
+    try {
+      const body = JSON.parse(await readBody(request));
+      send(response, 200, { ok: true, issueId: body.issueId, resolvedAt: new Date().toLocaleString('zh-CN', { hour12: false }) });
+    } catch (error) {
+      send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Resolve quality issue failed' });
     }
     return;
   }
@@ -575,6 +627,7 @@ const server = createServer(async (request, response) => {
           createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
         }, ...data.auditLogs],
       });
+      analyticsCache.clear();
       send(response, 200, { ok: true, recordCount: records.length });
     } catch (error) {
       send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid request' });
@@ -657,6 +710,51 @@ function normalizeMetricRecord(record, mapping) {
     shares: valueOf('shares', '分享'),
     clicks: valueOf('clicks', '点击'),
   };
+}
+
+function toCsv(rows) {
+  if (!rows.length) return '';
+  const headers = Object.keys(rows[0]);
+  const escape = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+  return [headers.join(','), ...rows.map((row) => headers.map((header) => escape(row[header])).join(','))].join('\n');
+}
+
+function hasGlobalAnalyticsAccess(session) {
+  return ['系统管理员', '管理员', '招聘运营', '招聘负责人'].includes(session.role);
+}
+
+function filterDataForAnalytics(data, session) {
+  if (hasGlobalAnalyticsAccess(session)) return data;
+  const userKeys = new Set([session.id, session.name, session.username].filter(Boolean));
+  const contents = (data.contents ?? []).filter((content) => userKeys.has(content.owner) || userKeys.has(content.reviewer));
+  const contentIds = new Set(contents.map((content) => content.id));
+  const jobIds = new Set(contents.map((content) => content.jobId).filter(Boolean));
+  const accountIds = new Set(contents.map((content) => content.accountId).filter(Boolean));
+  const accounts = (data.accounts ?? []).filter((account) => accountIds.has(account.id) || userKeys.has(account.owner));
+  accounts.forEach((account) => accountIds.add(account.id));
+  const jobs = (data.jobs ?? []).filter((job) => jobIds.has(job.id));
+  const beisenResults = (data.beisenResults ?? []).filter((result) => (result.sourceContentId && contentIds.has(result.sourceContentId)) || jobIds.has(result.jobId));
+  const costs = (data.costs ?? []).filter((cost) => cost.targetId === 'all' || contentIds.has(cost.targetId) || jobIds.has(cost.targetId) || accountIds.has(cost.targetId));
+  return {
+    ...data,
+    jobs,
+    accounts,
+    contents,
+    beisenResults,
+    costs,
+    entries: (data.entries ?? []).filter((entry) => accounts.some((account) => account.platform === entry.platform)),
+  };
+}
+
+function cachedAnalyticsDrill(data, query, session) {
+  const cacheKey = `${session.role}:${session.id}:${JSON.stringify(query)}`;
+  const cached = analyticsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { ...cached.result, cache: { hit: true, expiresAt: new Date(cached.expiresAt).toISOString() } };
+  }
+  const result = buildAnalyticsDrill(data, query);
+  analyticsCache.set(cacheKey, { result, expiresAt: Date.now() + 5 * 60 * 1000 });
+  return { ...result, cache: { hit: false, expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString() } };
 }
 
 const analyticsPlatforms = ['小红书', '脉脉', 'B站', '公众号', '抖音', '知乎', '技术社区'];
@@ -764,6 +862,14 @@ function detectMetricQualityIssues(data, query) {
     const hasJob = result.jobId && (data.jobs ?? []).some((job) => job.id === result.jobId);
     if (!hasContent && !hasJob) push({ issueType: '无法归因', severity: result.sourcePlatform === '未知' ? '高' : '中', targetType: 'source', targetId: result.id, message: `${result.candidateCode} 无法归因到内容或岗位。` });
   });
+  const seenResults = new Set();
+  (data.beisenResults ?? []).forEach((result) => {
+    const key = `${result.candidateCode}:${result.jobId}:${result.stage}`;
+    if (seenResults.has(key)) {
+      push({ issueType: '重复数据', severity: '中', targetType: 'source', targetId: result.id, message: `${result.candidateCode} 在 ${result.jobId || '未知岗位'} 的 ${result.stage} 阶段重复导入。` });
+    }
+    seenResults.add(key);
+  });
   (data.integrationSyncRuns ?? []).filter((run) => run.status === '失败').forEach((run) => push({ issueType: '同步失败', severity: '高', targetType: 'sync', targetId: run.id, syncBatchId: run.id, message: `${run.syncType} 失败：${run.message}` }));
   return issues;
 }
@@ -789,7 +895,11 @@ function buildAnalyticsDrill(data, query = {}) {
       ['offers', 'Offer', summary.offers],
       ['hires', '入职', summary.hires],
     ].map(([id, label, value]) => ({ id, label, dimension: 'funnel', snapshot: { ...emptyAnalyticsSnapshot, [id]: value }, meta: { value } }))
-    : analyticsPlatforms.map((platform) => ({ id: platform, label: platform, dimension: 'platform', snapshot: summarizeAnalytics(data, { ...normalizedQuery, platform }), meta: { contentCount: (data.contents ?? []).filter((content) => content.platform === platform).length, accountCount: (data.accounts ?? []).filter((account) => account.platform === platform).length } }));
+    : normalizedQuery.dimension === 'account'
+      ? (data.accounts ?? []).filter((account) => !normalizedQuery.platform || normalizedQuery.platform === '全部' || account.platform === normalizedQuery.platform).map((account) => ({ id: account.id, label: `${account.platform}｜${account.name}`, dimension: 'account', snapshot: summarizeAnalytics(data, { ...normalizedQuery, accountId: account.id, platform: account.platform }), meta: { platform: account.platform, owner: account.owner, authStatus: account.authStatus, status: account.status } }))
+      : normalizedQuery.dimension === 'job'
+        ? (data.jobs ?? []).map((job) => ({ id: job.id, label: job.title, dimension: 'job', snapshot: summarizeAnalytics(data, { ...normalizedQuery, jobId: job.id }), meta: { family: job.family, city: job.city, level: job.level, platformCoverage: (job.targetPlatforms ?? []).join('、') } }))
+        : analyticsPlatforms.map((platform) => ({ id: platform, label: platform, dimension: 'platform', snapshot: summarizeAnalytics(data, { ...normalizedQuery, platform }), meta: { contentCount: (data.contents ?? []).filter((content) => content.platform === platform).length, accountCount: (data.accounts ?? []).filter((account) => account.platform === platform).length } }));
   const allDetails = (data.contents ?? []).filter((content) => analyticsContentMatches(content, normalizedQuery));
   const details = allDetails.slice((normalizedQuery.page - 1) * normalizedQuery.pageSize, normalizedQuery.page * normalizedQuery.pageSize).map((content) => ({ id: content.id, title: content.title, dimension: 'content', snapshot: summarizeAnalytics(data, { ...normalizedQuery, contentId: content.id }), meta: { platform: content.platform, status: content.status, contentType: content.type } }));
   return { query: normalizedQuery, summary, breakdowns, details, insights: buildAnalyticsInsights(summary), qualityIssues: detectMetricQualityIssues(data, normalizedQuery), pagination: { page: normalizedQuery.page, pageSize: normalizedQuery.pageSize, total: allDetails.length }, generatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) };

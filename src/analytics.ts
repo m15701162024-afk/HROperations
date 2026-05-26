@@ -244,6 +244,14 @@ export function detectMetricQualityIssues(data: AppData, query: DrillQuery): Met
       issue({ issueType: '无法归因', severity: '中', targetType: 'source', targetId: result.id, message: `${result.candidateCode} 无法归因到内容或岗位，仅能按平台统计。` });
     }
   });
+  const seenResults = new Set<string>();
+  data.beisenResults.forEach((result) => {
+    const key = `${result.candidateCode}:${result.jobId}:${result.stage}`;
+    if (seenResults.has(key)) {
+      issue({ issueType: '重复数据', severity: '中', targetType: 'source', targetId: result.id, message: `${result.candidateCode} 在 ${result.jobId || '未知岗位'} 的 ${result.stage} 阶段重复导入。` });
+    }
+    seenResults.add(key);
+  });
 
   data.integrationSyncRuns.filter((run) => run.status === '失败').forEach((run) => {
     issue({ issueType: '同步失败', severity: '高', targetType: 'sync', targetId: run.id, syncBatchId: run.id, message: `${run.syncType} 失败：${run.message}` });

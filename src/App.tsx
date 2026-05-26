@@ -2258,6 +2258,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   const [drill, setDrill] = useState<{ type: '平台' | '内容' | '岗位' | '账号' | '漏斗'; id: string } | null>(null);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [cost, setCost] = useState({ targetType: '内容' as CostRecord['targetType'], targetId: '', laborCost: 0, mediaCost: 0, productionCost: 0 });
+  const [resolvedQualityIds, setResolvedQualityIds] = useState<string[]>([]);
   const analyticsQuery = useMemo(() => ({
     dimension: drill?.type === '账号' ? 'account' as const : drill?.type === '岗位' ? 'job' as const : drill?.type === '漏斗' ? 'funnel' as const : 'platform' as const,
     platform: selectedPlatform,
@@ -2271,6 +2272,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   }), [dateRange.from, dateRange.to, drill, selectedPlatform]);
   const analyticsResult = useMemo(() => buildAnalyticsDrill(data, analyticsQuery), [data, analyticsQuery]);
   const platformDrillResult = useMemo(() => buildAnalyticsDrill(data, { ...analyticsQuery, dimension: 'platform', accountId: undefined, contentId: undefined, jobId: undefined }), [data, analyticsQuery]);
+  const visibleQualityIssues = analyticsResult.qualityIssues.filter((issue) => !resolvedQualityIds.includes(issue.id));
   const inDateRange = (date?: string) => {
     if (!date) return true;
     if (dateRange.from && date < dateRange.from) return false;
@@ -2363,6 +2365,23 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
     setCost({ targetType: '内容', targetId: '', laborCost: 0, mediaCost: 0, productionCost: 0 });
   };
   const roi = calculateRoi(data);
+  const exportAnalyticsResult = (format: 'csv' | 'json') => {
+    if (format === 'json') {
+      exportJson('数据下钻结果.json', analyticsResult);
+      return;
+    }
+    downloadText('数据下钻明细.csv', toCsv(analyticsResult.details.map((item) => ({
+      id: item.id,
+      title: item.title,
+      dimension: item.dimension,
+      views: item.snapshot.views,
+      interactions: item.snapshot.interactions,
+      clicks: item.snapshot.clicks,
+      applications: item.snapshot.applications,
+      effectiveResumes: item.snapshot.effectiveResumes,
+      hires: item.snapshot.hires,
+    }))), 'text/csv;charset=utf-8');
+  };
 
   return (
     <div className="page-grid">
@@ -2371,7 +2390,11 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           <h1>数据分析</h1>
           <p>按平台、账号、岗位族群、内容类型分析曝光、互动、点击和跳转漏斗。</p>
         </div>
-        <button onClick={importMetrics}><RefreshCw size={16} />导入指标</button>
+        <div className="toolbar-actions">
+          <button onClick={importMetrics}><RefreshCw size={16} />导入指标</button>
+          <button className="secondary" onClick={() => exportAnalyticsResult('csv')}><FileText size={16} />导出CSV</button>
+          <button className="ghost" onClick={() => exportAnalyticsResult('json')}><Database size={16} />导出JSON</button>
+        </div>
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>使用路径</h2><Target size={18} /></div>
@@ -2494,16 +2517,19 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
         <div className="template-grid">
           <div className="template-chip">当前查询<small>{analyticsResult.query.dimension} · {analyticsResult.query.platform || '全部平台'} · {analyticsResult.generatedAt}</small></div>
           <div className="template-chip">分页明细<small>{analyticsResult.pagination?.total ?? 0} 条 · 每页 {analyticsResult.pagination?.pageSize ?? 20}</small></div>
-          <div className="template-chip">质量问题<small>{analyticsResult.qualityIssues.length} 条待处理</small></div>
+          <div className="template-chip">质量问题<small>{visibleQualityIssues.length} 条待处理 · 已处理 {resolvedQualityIds.length} 条</small></div>
           <div className="template-chip">数据来源<small>平台指标 / 北森回流 / 成本录入 / 账号配置</small></div>
         </div>
-        {analyticsResult.qualityIssues.length === 0 && <EmptyState title="暂无数据质量问题" body="当前筛选范围内未发现缺字段、无法归因、指标异常或同步失败。" />}
+        {visibleQualityIssues.length === 0 && <EmptyState title="暂无数据质量问题" body="当前筛选范围内未发现缺字段、无法归因、指标异常或同步失败。" />}
         <div className="entry-grid">
-          {analyticsResult.qualityIssues.slice(0, 6).map((issue) => (
+          {visibleQualityIssues.slice(0, 6).map((issue) => (
             <article key={issue.id}>
               <strong>{issue.issueType}｜{issue.targetId}</strong>
               <span>{issue.message}</span>
-              <Badge tone={issue.severity === '高' ? 'danger' : issue.severity === '中' ? 'warn' : 'info'}>{issue.severity}</Badge>
+              <div className="row-actions">
+                <Badge tone={issue.severity === '高' ? 'danger' : issue.severity === '中' ? 'warn' : 'info'}>{issue.severity}</Badge>
+                <button className="ghost" onClick={() => setResolvedQualityIds((current) => [...new Set([...current, issue.id])])}>标记已处理</button>
+              </div>
             </article>
           ))}
         </div>

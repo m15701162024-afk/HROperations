@@ -131,4 +131,16 @@ describe('analytics drill service', () => {
 
     expect(issues.some((issue) => issue.issueType === '无法归因')).toBe(true);
   });
+
+  it('detects duplicate imported attribution rows', () => {
+    const issues = detectMetricQualityIssues({
+      ...baseData,
+      beisenResults: [
+        { id: 'dup-1', jobId: 'job-1', sourcePlatform: '小红书', sourceContentId: 'ct-1', candidateCode: 'C001', stage: '已投递', importedAt: '2026-05-21' },
+        { id: 'dup-2', jobId: 'job-1', sourcePlatform: '小红书', sourceContentId: 'ct-1', candidateCode: 'C001', stage: '已投递', importedAt: '2026-05-21' },
+      ],
+    }, { dimension: 'summary', platform: '全部' });
+
+    expect(issues.some((issue) => issue.issueType === '重复数据')).toBe(true);
+  });
 });
