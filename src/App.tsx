@@ -28,8 +28,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type ApiUser, createSystemBackup, loadRemoteData, loadSystemHealth, loginLocalApi, normalizeAppData, runIntegrationSync, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
-import type { AccountType, AppData, AppSection, AssetItem, BeisenResult, CalendarMilestone, CandidateLead, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, LeadFollowUp, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, TaskItem, TopicItem, UserProfile, WorkflowRule } from './types';
-import type { ImportRun, ModelRunLog, PluginRule, PromptTemplate, ReportAction } from './types';
+import type { AccountType, AppData, AppSection, AssetItem, BeisenResult, CalendarMilestone, CandidateLead, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, LeadFollowUp, ModelApiConfig, NotificationItem, OperationSettings, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, TaskItem, TopicItem, UserProfile, WorkflowRule } from './types';
+import type { ImportRun, ModelRunLog, PluginRule, PromptTemplate, ReportAction, ReviewMention } from './types';
 import { applyMetricsCsv, buildDataExplanations, buildPlatformStrategy, buildRecommendations, buildReportMarkdown, calculateAccountHealth, calculateRoi, deriveTasks, detectCalendarConflicts, downloadText, exportJson, findDuplicateLead, generateTopicsFromJob, parseBeisenCsv, parseJobCsv, parseLeadCsv, readJsonFile, scoreContentQuality, toCsv } from './utils';
 
 type Section = AppSection;
@@ -931,13 +931,24 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
       comment,
       createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
     };
+    const mentionedNames = [...comment.matchAll(/@([\u4e00-\u9fa5A-Za-z0-9_-]+)/g)].map((match) => match[1]);
+    const mentions: ReviewMention[] = mentionedNames.map((name) => ({
+      id: `mention-${Date.now()}-${name}`,
+      contentId: id,
+      userId: name,
+      commentId: review.id,
+      read: false,
+      createdAt: nowText(),
+    }));
     const nextStatus: ContentStatus = decision === '驳回' ? '驳回修改' : target.status;
     audit(decision === '驳回' ? '驳回内容' : '提交审核意见', target.title, {
       ...data,
       contents: data.contents.map((item) => (item.id === id ? { ...item, status: nextStatus } : item)),
       reviewComments: [review, ...data.reviewComments],
+      reviewMentions: [...mentions, ...data.reviewMentions],
       notifications: [
         makeNotification('内容审核意见已记录', `${target.title}：${decision}`, '内容运营', decision === '驳回' ? '待办' : '提醒'),
+        ...mentions.map((mention) => makeNotification('审核评论提到了你', `${target.title} @${mention.userId}`, '内容运营', '待办')),
         ...data.notifications,
       ],
     });
@@ -974,6 +985,17 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
 
   const publishContent = (id: string) => {
     const target = data.contents.find((item) => item.id === id);
+    const latestScore = data.contentQualityScores.find((score) => score.contentId === id);
+    if (latestScore && latestScore.total < data.operationSettings.contentQualityBlockScore) {
+      audit('内容质量分阻断发布', `${target?.title ?? id}：${latestScore.total}分`, {
+        ...data,
+        notifications: [
+          makeNotification('内容质量分过低', `${target?.title ?? id} 当前 ${latestScore.total} 分，低于阈值 ${data.operationSettings.contentQualityBlockScore}`, '内容运营', '预警'),
+          ...data.notifications,
+        ],
+      });
+      return;
+    }
     const checks = publishChecks[id] ?? [];
     if (checks.length < 3) {
       audit('发布检查未通过', target?.title ?? id, {
@@ -2678,6 +2700,9 @@ function LeadPool({ data, audit }: { data: AppData; audit: (action: string, targ
   const [selectedLeadId, setSelectedLeadId] = useState('');
   const [csv, setCsv] = useState('');
   const [follow, setFollow] = useState({ actor: '招聘专员', method: '私信' as LeadFollowUp['method'], result: '未回复' as LeadFollowUp['result'], content: '', nextFollowAt: '' });
+  const [filters, setFilters] = useState({ keyword: '', platform: '全部' as Platform | '未知' | '全部', stage: '全部' as CandidateLead['stage'] | '全部', owner: '', jobId: '全部' });
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [batchOwner, setBatchOwner] = useState('');
   const addLead = () => {
     if (!lead.name.trim() && !lead.contact.trim()) return;
     const item: CandidateLead = { id: `lead-${Date.now()}`, ...lead, sourceAccountId: lead.sourceAccountId || undefined, sourceContentId: lead.sourceContentId || undefined, targetJobId: lead.targetJobId || undefined, stage: '待联系', beisenStatus: '待转入', duplicateOf: undefined, createdAt: nowText(), updatedAt: nowText() };
@@ -2706,6 +2731,44 @@ function LeadPool({ data, audit }: { data: AppData; audit: (action: string, targ
     if (!item) return;
     const result: BeisenResult = { id: `beisen-lead-${Date.now()}`, jobId: item.targetJobId ?? '', sourcePlatform: item.sourcePlatform, sourceContentId: item.sourceContentId, candidateCode: `lead-${item.id}`, stage: '已投递', importedAt: nowText() };
     audit('线索转入北森', item.name || item.contact, { ...data, candidateLeads: data.candidateLeads.map((leadItem) => leadItem.id === id ? { ...leadItem, stage: '已转北森', beisenStatus: '已转入', updatedAt: nowText() } : leadItem), beisenResults: [result, ...data.beisenResults] });
+  };
+  const filteredLeads = data.candidateLeads.filter((item) => (
+    (!filters.keyword || `${item.name}${item.contact}${item.note}`.includes(filters.keyword))
+    && (filters.platform === '全部' || item.sourcePlatform === filters.platform)
+    && (filters.stage === '全部' || item.stage === filters.stage)
+    && (!filters.owner || item.owner.includes(filters.owner))
+    && (filters.jobId === '全部' || item.targetJobId === filters.jobId)
+  ));
+  const toggleLeadSelect = (id: string) => {
+    setSelectedLeadIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  };
+  const batchAssignOwner = () => {
+    if (!batchOwner.trim() || selectedLeadIds.length === 0) return;
+    audit('批量分配线索', `${selectedLeadIds.length} 条线索 -> ${batchOwner}`, {
+      ...data,
+      candidateLeads: data.candidateLeads.map((item) => selectedLeadIds.includes(item.id) ? { ...item, owner: batchOwner, updatedAt: nowText() } : item),
+    });
+    setBatchOwner('');
+  };
+  const batchTransferToBeisen = () => {
+    const selected = data.candidateLeads.filter((item) => selectedLeadIds.includes(item.id) && item.beisenStatus !== '已转入');
+    const results: BeisenResult[] = selected.map((item) => ({ id: `beisen-lead-${item.id}-${Date.now()}`, jobId: item.targetJobId ?? '', sourcePlatform: item.sourcePlatform, sourceContentId: item.sourceContentId, candidateCode: `lead-${item.id}`, stage: '已投递', importedAt: nowText() }));
+    audit('批量线索转北森', `${selected.length} 条`, {
+      ...data,
+      candidateLeads: data.candidateLeads.map((item) => selectedLeadIds.includes(item.id) ? { ...item, stage: '已转北森', beisenStatus: '已转入', updatedAt: nowText() } : item),
+      beisenResults: [...results, ...data.beisenResults],
+    });
+    setSelectedLeadIds([]);
+  };
+  const mergeDuplicateLeads = () => {
+    const groups = data.candidateLeads.reduce<Record<string, CandidateLead[]>>((acc, item) => {
+      if (!item.contact.trim()) return acc;
+      acc[item.contact] = [...(acc[item.contact] ?? []), item];
+      return acc;
+    }, {});
+    const duplicateIds = Object.values(groups).flatMap((group) => group.slice(1).map((item) => item.id));
+    if (duplicateIds.length === 0) return;
+    audit('合并重复线索', `${duplicateIds.length} 条重复线索`, { ...data, candidateLeads: data.candidateLeads.filter((item) => !duplicateIds.includes(item.id)) });
   };
   const selectedLead = data.candidateLeads.find((item) => item.id === selectedLeadId);
   return (
@@ -2738,12 +2801,27 @@ function LeadPool({ data, audit }: { data: AppData; audit: (action: string, targ
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>线索列表</h2><Users size={18} /></div>
+        <div className="inline-form">
+          <input value={filters.keyword} onChange={(event) => setFilters({ ...filters, keyword: event.target.value })} placeholder="搜索姓名/联系方式/备注" />
+          <select value={filters.platform} onChange={(event) => setFilters({ ...filters, platform: event.target.value as Platform | '未知' | '全部' })}><option>全部</option><option>未知</option>{platforms.map((item) => <option key={item}>{item}</option>)}</select>
+          <select value={filters.stage} onChange={(event) => setFilters({ ...filters, stage: event.target.value as CandidateLead['stage'] | '全部' })}><option>全部</option><option>待联系</option><option>已联系</option><option>已转北森</option><option>无效</option><option>暂不合适</option></select>
+          <select value={filters.jobId} onChange={(event) => setFilters({ ...filters, jobId: event.target.value })}><option value="全部">全部岗位</option>{data.jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select>
+        </div>
+        <div className="inline-form">
+          <input value={filters.owner} onChange={(event) => setFilters({ ...filters, owner: event.target.value })} placeholder="跟进人筛选" />
+          <input value={batchOwner} onChange={(event) => setBatchOwner(event.target.value)} placeholder="批量分配给" />
+          <button className="secondary" onClick={batchAssignOwner}>批量分配</button>
+          <button className="ghost" onClick={batchTransferToBeisen}>批量转北森</button>
+          <button className="ghost" onClick={mergeDuplicateLeads}>合并重复</button>
+        </div>
+        <Badge tone="info">已选 {selectedLeadIds.length} / 当前 {filteredLeads.length}</Badge>
         {data.candidateLeads.length === 0 && <EmptyState title="暂无真实线索" body="可手动录入、CSV 导入或从落地页线索转入。" />}
         <table>
-          <thead><tr><th>线索</th><th>来源</th><th>意向岗位</th><th>阶段</th><th>北森</th><th>操作</th></tr></thead>
+          <thead><tr><th>选择</th><th>线索</th><th>来源</th><th>意向岗位</th><th>阶段</th><th>北森</th><th>操作</th></tr></thead>
           <tbody>
-            {data.candidateLeads.map((item) => (
+            {filteredLeads.map((item) => (
               <tr key={item.id}>
+                <td><input type="checkbox" checked={selectedLeadIds.includes(item.id)} onChange={() => toggleLeadSelect(item.id)} /></td>
                 <td><strong>{item.name || '未命名'}</strong><span>{item.contact}{item.duplicateOf ? ' · 疑似重复' : ''}</span></td>
                 <td>{item.sourcePlatform}<span>{data.accounts.find((account) => account.id === item.sourceAccountId)?.name ?? '未绑定账号'}</span></td>
                 <td>{data.jobs.find((job) => job.id === item.targetJobId)?.title ?? '未关联'}</td>
@@ -2989,8 +3067,20 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
   const [actionDraft, setActionDraft] = useState({ title: '', owner: '', dueDate: '', reportId: '' });
   const [selectedReportId, setSelectedReportId] = useState('');
   const [reportEdit, setReportEdit] = useState({ title: '', body: '', action: '', severity: '建议' as ReportInsight['severity'] });
+  const [reportParams, setReportParams] = useState({ period: '周报' as '周报' | '月报' | '自定义', platform: '全部' as Platform | '全部', family: '全部', from: '', to: '' });
   const recommendations = aiRecommendations.length > 0 ? aiRecommendations : buildRecommendations(data);
-  const sortedContents = data.contents.slice().sort((a, b) => (b.metrics.clicks + b.metrics.likes + b.metrics.comments) - (a.metrics.clicks + a.metrics.likes + a.metrics.comments));
+  const inReportRange = (date?: string) => {
+    if (!date) return true;
+    if (reportParams.from && date < reportParams.from) return false;
+    if (reportParams.to && date > reportParams.to) return false;
+    return true;
+  };
+  const scopedContents = data.contents.filter((item) => (
+    inReportRange(item.publishedAt ?? item.dueDate)
+    && (reportParams.platform === '全部' || item.platform === reportParams.platform)
+    && (reportParams.family === '全部' || data.jobs.find((job) => job.id === item.jobId)?.family === reportParams.family)
+  ));
+  const sortedContents = scopedContents.slice().sort((a, b) => (b.metrics.clicks + b.metrics.likes + b.metrics.comments) - (a.metrics.clicks + a.metrics.likes + a.metrics.comments));
   const generatedReports = data.reports.length > 0
     ? data.reports
     : data.contents.length > 0
@@ -3018,16 +3108,26 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
     } else {
       setAiStatus('未配置复盘建议模型，使用本地规则');
     }
-    const contentCount = data.contents.length;
-    const clickCount = data.contents.reduce((sum, item) => sum + item.metrics.clicks, 0);
+    const contentCount = scopedContents.length;
+    const clickCount = scopedContents.reduce((sum, item) => sum + item.metrics.clicks, 0);
+    const views = scopedContents.reduce((sum, item) => sum + item.metrics.views, 0);
+    const interactions = scopedContents.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
+    const platformLine = platforms.map((platform) => {
+      const items = scopedContents.filter((content) => content.platform === platform);
+      return items.length ? `${platform} ${items.length} 条/${items.reduce((sum, item) => sum + item.metrics.clicks, 0)} 点击` : '';
+    }).filter(Boolean).join('；');
     const report = {
       id: `rp-${Date.now()}`,
-      title: `自动复盘：${contentCount} 条内容 / ${clickCount} 次点击`,
-      body: reportRecommendations.join(' '),
-      action: '请根据建议调整下周期内容排期，并补齐缺失的真实平台指标和北森结果。',
+      title: `${reportParams.period}复盘：${contentCount} 条内容 / ${clickCount} 次点击`,
+      body: `范围：${reportParams.platform} · ${reportParams.family}。曝光 ${views}，互动 ${interactions}，点击 ${clickCount}。${platformLine ? `平台拆解：${platformLine}。` : ''}${reportRecommendations.join(' ')}`,
+      action: '请将高表现内容转为模板，低表现内容进入标题/CTA/平台匹配复盘，并补齐缺失的北森结果。',
       severity: '建议' as const,
     };
-    audit('生成复盘报告', report.title, { ...data, reports: [report, ...data.reports] });
+    const actions: ReportAction[] = [
+      { id: `report-action-${Date.now()}-1`, reportId: report.id, title: '沉淀高表现内容模板', owner: '新媒体运营', dueDate: reportParams.to || '', status: '未开始', createdAt: nowText() },
+      { id: `report-action-${Date.now()}-2`, reportId: report.id, title: '补齐低表现内容的点击和北森回流数据', owner: '招聘专员', dueDate: reportParams.to || '', status: '未开始', createdAt: nowText() },
+    ];
+    audit('生成复盘报告', report.title, { ...data, reports: [report, ...data.reports], reportActions: [...actions, ...data.reportActions] });
   };
   const createReportAction = () => {
     if (!actionDraft.title.trim()) return;
@@ -3075,6 +3175,13 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>AI 运营策略建议</h2><Bot size={18} /></div>
+        <div className="inline-form">
+          <select value={reportParams.period} onChange={(event) => setReportParams({ ...reportParams, period: event.target.value as '周报' | '月报' | '自定义' })}><option>周报</option><option>月报</option><option>自定义</option></select>
+          <select value={reportParams.platform} onChange={(event) => setReportParams({ ...reportParams, platform: event.target.value as Platform | '全部' })}><option>全部</option>{platforms.map((platform) => <option key={platform}>{platform}</option>)}</select>
+          <select value={reportParams.family} onChange={(event) => setReportParams({ ...reportParams, family: event.target.value })}><option>全部</option>{[...new Set(data.jobs.map((job) => job.family))].map((family) => <option key={family}>{family}</option>)}</select>
+          <input type="date" value={reportParams.from} onChange={(event) => setReportParams({ ...reportParams, from: event.target.value })} />
+          <input type="date" value={reportParams.to} onChange={(event) => setReportParams({ ...reportParams, to: event.target.value })} />
+        </div>
         {aiStatus && <div className="platform-note"><Bot size={16} />{aiStatus}</div>}
         <div className="template-grid">
           {recommendations.map((item) => <div className="template-chip" key={item}>策略建议<small>{item}</small></div>)}
@@ -3575,6 +3682,18 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
     const restored = await readJsonFile<AppData>(file);
     update({ ...emptyData, ...restored });
   };
+  const updateOperationSetting = (patch: Partial<OperationSettings>) => {
+    update({ ...data, operationSettings: { ...data.operationSettings, ...patch } });
+  };
+  const updateWeeklyTarget = (platform: Platform, value: number) => {
+    update({
+      ...data,
+      operationSettings: {
+        ...data.operationSettings,
+        weeklyPlatformTargets: { ...data.operationSettings.weeklyPlatformTargets, [platform]: value },
+      },
+    });
+  };
   const remainingItems = [
     '生产存储：已完成本地 JSON 加固、原子写入、备份接口和健康检查，可通过上线台账规划数据库/对象存储替换',
     '北森 OpenAPI：已提供配置、测试、同步、字段映射和结果回流框架，拿到真实接口字段后可直接配置映射',
@@ -3638,6 +3757,25 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
             <div className="row-actions"><Badge tone="good">自定义</Badge><button className="ghost" onClick={() => removeRole(item.id)}>删除</button></div>
           </div>
         ))}
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>运营阈值配置</h2><Settings size={18} /></div>
+        <div className="inline-form">
+          <label>内容质量阻断分<input type="number" value={data.operationSettings.contentQualityBlockScore} onChange={(event) => updateOperationSetting({ contentQualityBlockScore: Number(event.target.value) })} /></label>
+          <label>账号停更提醒天数<input type="number" value={data.operationSettings.accountInactiveWarningDays} onChange={(event) => updateOperationSetting({ accountInactiveWarningDays: Number(event.target.value) })} /></label>
+          <label>账号停更高危天数<input type="number" value={data.operationSettings.accountInactiveDangerDays} onChange={(event) => updateOperationSetting({ accountInactiveDangerDays: Number(event.target.value) })} /></label>
+          <label>同账号日发布上限<input type="number" value={data.operationSettings.dailyAccountPublishLimit} onChange={(event) => updateOperationSetting({ dailyAccountPublishLimit: Number(event.target.value) })} /></label>
+          <label>数据回收延迟天数<input type="number" value={data.operationSettings.dataCollectionDelayDays} onChange={(event) => updateOperationSetting({ dataCollectionDelayDays: Number(event.target.value) })} /></label>
+          <label>审核 SLA 小时<input type="number" value={data.operationSettings.reviewSlaHours} onChange={(event) => updateOperationSetting({ reviewSlaHours: Number(event.target.value) })} /></label>
+        </div>
+        <div className="template-grid">
+          {platforms.map((platform) => (
+            <label className="template-chip" key={platform}>
+              {platform} 周发布目标
+              <input type="number" value={data.operationSettings.weeklyPlatformTargets[platform] ?? 0} onChange={(event) => updateWeeklyTarget(platform, Number(event.target.value))} />
+            </label>
+          ))}
+        </div>
       </section>
       <section className="panel">
         <div className="panel-title"><h2>用户与团队</h2><Users size={18} /></div>

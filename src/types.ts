@@ -495,6 +495,16 @@ export interface ReviewMention {
   createdAt: string;
 }
 
+export interface OperationSettings {
+  contentQualityBlockScore: number;
+  accountInactiveWarningDays: number;
+  accountInactiveDangerDays: number;
+  dailyAccountPublishLimit: number;
+  dataCollectionDelayDays: number;
+  weeklyPlatformTargets: Partial<Record<Platform, number>>;
+  reviewSlaHours: number;
+}
+
 export interface AppData {
   jobs: JobNeed[];
   accounts: PlatformAccount[];
@@ -536,4 +546,5 @@ export interface AppData {
   calendarMilestones: CalendarMilestone[];
   dataExplanations: DataExplanation[];
   reviewMentions: ReviewMention[];
+  operationSettings: OperationSettings;
 }

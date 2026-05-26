@@ -75,6 +75,15 @@ describe('招聘运营助手', () => {
       calendarMilestones: [],
       dataExplanations: [],
       reviewMentions: [],
+      operationSettings: {
+        contentQualityBlockScore: 70,
+        accountInactiveWarningDays: 14,
+        accountInactiveDangerDays: 30,
+        dailyAccountPublishLimit: 2,
+        dataCollectionDelayDays: 2,
+        reviewSlaHours: 24,
+        weeklyPlatformTargets: {},
+      },
     };
     localStorage.setItem('hr-assistant-data-mode', 'real-v1');
     localStorage.setItem('hr-assistant-data', JSON.stringify(realData));

@@ -161,6 +161,7 @@ export function findDuplicateLead(leads: CandidateLead[], lead: CandidateLead) {
 export function deriveTasks(data: AppData): TaskItem[] {
   const today = new Date().toISOString().slice(0, 10);
   const completed = new Set(data.taskCompletions);
+  const settings = data.operationSettings;
   const tasks: TaskItem[] = [];
   const push = (task: Omit<TaskItem, 'status' | 'createdAt'>) => {
     if (!completed.has(task.id)) {
@@ -180,8 +181,11 @@ export function deriveTasks(data: AppData): TaskItem[] {
     }
     const publishedDate = content.publishedAt ? new Date(content.publishedAt) : undefined;
     const metricsEmpty = Object.values(content.metrics).every((value) => value === 0);
-    if (publishedDate && metricsEmpty && Date.now() - publishedDate.getTime() > 2 * 86400000) {
+    if (publishedDate && metricsEmpty && Date.now() - publishedDate.getTime() > settings.dataCollectionDelayDays * 86400000) {
       push({ id: `task-metrics-${content.id}`, type: '数据待回收', title: `数据待回收：${content.title}`, body: '内容已发布超过 2 天但暂无平台指标', owner: content.owner, priority: '中', targetSection: '数据分析', targetId: content.id, dueDate: today });
+    }
+    if ((content.status === '待专业审核' || content.status === '待品牌合规审核') && content.dueDate < today) {
+      push({ id: `task-sla-${content.id}`, type: '审核超时', title: `审核超时：${content.title}`, body: `已超过审核 SLA ${settings.reviewSlaHours} 小时，请尽快闭环`, owner: content.reviewer || content.owner, priority: '高', targetSection: '内容运营', targetId: content.id, dueDate: content.dueDate });
     }
   });
 
@@ -204,9 +208,14 @@ export function deriveTasks(data: AppData): TaskItem[] {
       .sort()
       .at(-1);
     const inactiveDays = latest ? Math.floor((Date.now() - new Date(latest).getTime()) / 86400000) : 999;
-    if (inactiveDays >= 14) {
-      push({ id: `task-account-${account.id}`, type: '账号停更', title: `账号停更提醒：${account.name}`, body: `${account.platform} 已 ${inactiveDays} 天无发布`, owner: account.owner, priority: inactiveDays >= 30 ? '高' : '中', targetSection: '账号与平台', targetId: account.id, dueDate: today });
+    if (inactiveDays >= settings.accountInactiveWarningDays) {
+      push({ id: `task-account-${account.id}`, type: '账号停更', title: `账号停更提醒：${account.name}`, body: `${account.platform} 已 ${inactiveDays} 天无发布`, owner: account.owner, priority: inactiveDays >= settings.accountInactiveDangerDays ? '高' : '中', targetSection: '账号与平台', targetId: account.id, dueDate: today });
     }
+  });
+
+  data.reviewMentions.filter((mention) => !mention.read).forEach((mention) => {
+    const content = data.contents.find((item) => item.id === mention.contentId);
+    push({ id: `task-mention-${mention.id}`, type: '待审核', title: `有人 @ 你处理内容：${content?.title ?? mention.contentId}`, body: '请查看审核评论并闭环处理', owner: mention.userId, priority: '中', targetSection: '内容运营', targetId: mention.contentId, dueDate: today });
   });
 
   return [...data.tasks.filter((task) => task.status !== '已完成' && task.status !== '已忽略'), ...tasks]
@@ -288,9 +297,9 @@ export function calculateAccountHealth(accountId: string, data: AppData): Accoun
 export function detectCalendarConflicts(content: ContentTask, data: AppData) {
   const conflicts: { type: '账号过载' | '频次不足' | '高风险未审' | '入口未配置' | '素材未授权'; message: string; level: '提醒' | '预警' | '阻断' }[] = [];
   const sameDay = data.contents.filter((item) => item.id !== content.id && item.accountId === content.accountId && item.dueDate === content.dueDate);
-  if (sameDay.length >= 2) conflicts.push({ type: '账号过载', message: '同账号同日发布内容超过 2 条', level: '预警' });
+  if (sameDay.length >= data.operationSettings.dailyAccountPublishLimit) conflicts.push({ type: '账号过载', message: `同账号同日发布内容超过 ${data.operationSettings.dailyAccountPublishLimit} 条`, level: '预警' });
   const weekCount = data.contents.filter((item) => item.platform === content.platform && sameWeek(item.dueDate, content.dueDate)).length;
-  if (weekCount < 2) conflicts.push({ type: '频次不足', message: `${content.platform} 本周排期低于建议频次`, level: '提醒' });
+  if (weekCount < (data.operationSettings.weeklyPlatformTargets[content.platform] ?? 2)) conflicts.push({ type: '频次不足', message: `${content.platform} 本周排期低于建议频次`, level: '提醒' });
   if (content.riskLevel === '高' && !['待发布', '已发布', '数据回收中', '已复盘'].includes(content.status)) conflicts.push({ type: '高风险未审', message: '高风险内容尚未完成审核', level: '阻断' });
   if (!data.entries.some((entry) => entry.platform === content.platform && entry.status === '启用')) conflicts.push({ type: '入口未配置', message: `${content.platform} 未配置启用的招聘入口`, level: '预警' });
   const riskyAsset = data.assets.find((asset) => asset.platforms.includes(content.platform) && (asset.authorization.includes('待') || asset.authorization.includes('禁止') || asset.authorization.includes('需补充')));

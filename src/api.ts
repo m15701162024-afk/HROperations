@@ -240,5 +240,6 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     calendarMilestones: data.calendarMilestones ?? [],
     dataExplanations: data.dataExplanations ?? [],
     reviewMentions: data.reviewMentions ?? [],
+    operationSettings: data.operationSettings ?? emptyData.operationSettings,
   };
 }

@@ -78,6 +78,23 @@ export const emptyData: AppData = {
   calendarMilestones: [],
   dataExplanations: [],
   reviewMentions: [],
+  operationSettings: {
+    contentQualityBlockScore: 70,
+    accountInactiveWarningDays: 14,
+    accountInactiveDangerDays: 30,
+    dailyAccountPublishLimit: 2,
+    dataCollectionDelayDays: 2,
+    reviewSlaHours: 24,
+    weeklyPlatformTargets: {
+      小红书: 3,
+      脉脉: 3,
+      B站: 1,
+      公众号: 2,
+      抖音: 1,
+      知乎: 2,
+      技术社区: 2,
+    },
+  },
 };
 
 export const seedData: AppData = {
@@ -376,6 +393,7 @@ export const seedData: AppData = {
   calendarMilestones: [],
   dataExplanations: [],
   reviewMentions: [],
+  operationSettings: emptyData.operationSettings,
 };
 
 export function generateContent(job: JobNeed, platform: Platform) {
