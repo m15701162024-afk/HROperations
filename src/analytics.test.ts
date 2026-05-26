@@ -143,4 +143,59 @@ describe('analytics drill service', () => {
 
     expect(issues.some((issue) => issue.issueType === '重复数据')).toBe(true);
   });
+
+  it('keeps fully unattributed beisen rows out of metrics while surfacing quality issues', () => {
+    const data = {
+      ...baseData,
+      beisenResults: [
+        ...baseData.beisenResults,
+        { id: 'bad-2', jobId: '', sourcePlatform: '未知' as const, candidateCode: 'C999', stage: '已入职' as const, importedAt: '2026-05-21' },
+      ],
+    };
+    const result = buildAnalyticsDrill(data, { dimension: 'summary', platform: '全部' });
+
+    expect(result.summary.applications).toBe(3);
+    expect(result.summary.hires).toBe(1);
+    expect(result.qualityIssues.some((issue) => issue.issueType === '无法归因')).toBe(true);
+  });
+
+  it('does not count rows that point to missing jobs and missing content', () => {
+    const result = buildAnalyticsDrill({
+      ...baseData,
+      beisenResults: [
+        ...baseData.beisenResults,
+        { id: 'bad-job', jobId: 'missing-job', sourcePlatform: '未知' as const, candidateCode: 'C998', stage: '已入职' as const, importedAt: '2026-05-21' },
+      ],
+    }, { dimension: 'summary', platform: '全部' });
+
+    expect(result.summary.applications).toBe(3);
+    expect(result.summary.hires).toBe(1);
+  });
+
+  it('returns acceptance metadata for account, content, job and funnel drilldowns', () => {
+    const account = buildAnalyticsDrill(baseData, { dimension: 'account', platform: '小红书' }).breakdowns[0];
+    expect(account.meta?.positioning).toBe('岗位种草');
+    expect(account.meta?.publishCount).toBe(1);
+    expect(account.meta?.healthScore).toBeTypeOf('number');
+
+    const content = buildAnalyticsDrill(baseData, { dimension: 'content', contentId: 'ct-1' }).details[0];
+    expect(content.meta?.riskLevel).toBe('低');
+    expect(content.meta?.beisenStageDistribution).toMatchObject({ 已投递: 1, 有效简历: 1, 已入职: 1 });
+
+    const job = buildAnalyticsDrill(baseData, { dimension: 'job', jobId: 'job-1' }).breakdowns[0];
+    expect(job.meta?.contentCount).toBe(1);
+    expect(job.meta?.platformContributions).toBe('小红书:1000曝光/3投递');
+
+    const funnel = buildAnalyticsDrill({ ...baseData, contents: [{ ...baseData.contents[0], metrics: { ...baseData.contents[0].metrics, clicks: 0 } }], beisenResults: [] }, { dimension: 'funnel', platform: '小红书' });
+    expect(funnel.breakdowns.find((item) => item.id === 'clicks')?.meta?.abnormal).toBe(true);
+  });
+
+  it('marks published-before-schedule content as medium risk date issue', () => {
+    const issues = detectMetricQualityIssues({
+      ...baseData,
+      contents: [{ ...baseData.contents[0], dueDate: '2026-05-22', publishedAt: '2026-05-20' }],
+    }, { dimension: 'summary', platform: '全部' });
+
+    expect(issues.find((issue) => issue.issueType === '日期异常')?.severity).toBe('中');
+  });
 });

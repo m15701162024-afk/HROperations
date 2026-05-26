@@ -47,6 +47,8 @@ export type MetricKey =
   | 'cost'
   | 'roi';
 
+export type DrillMetaValue = string | number | boolean | undefined | null | DrillMetaValue[] | { [key: string]: DrillMetaValue };
+
 export interface DrillQuery {
   dimension: DrillDimension;
   platform?: Platform | '全部';
@@ -85,7 +87,7 @@ export interface DrillBreakdown {
   label: string;
   dimension: DrillDimension;
   snapshot: MetricSnapshot;
-  meta?: Record<string, string | number | boolean | undefined>;
+  meta?: Record<string, DrillMetaValue>;
 }
 
 export interface DrillDetail {
@@ -93,7 +95,7 @@ export interface DrillDetail {
   title: string;
   dimension: DrillDimension;
   snapshot: MetricSnapshot;
-  meta?: Record<string, string | number | boolean | undefined>;
+  meta?: Record<string, DrillMetaValue>;
 }
 
 export interface DrillInsight {

@@ -483,11 +483,11 @@ const server = createServer(async (request, response) => {
     const session = requireSession(request, response);
     if (!session) return;
     try {
-      const query = Object.fromEntries(currentUrl.searchParams.entries());
+      const query = normalizeAnalyticsQuery(Object.fromEntries(currentUrl.searchParams.entries()), 'summary');
       const data = filterDataForAnalytics(await repository.readData(), session);
-      send(response, 200, await cachedAnalyticsDrill(data, { ...query, dimension: 'summary' }, session));
+      send(response, 200, await cachedAnalyticsDrill(data, query, session));
     } catch (error) {
-      send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Analytics summary failed' });
+      send(response, error instanceof AnalyticsValidationError ? 400 : 500, { ok: false, error: error instanceof Error ? error.message : 'Analytics summary failed' });
     }
     return;
   }
@@ -498,8 +498,9 @@ const server = createServer(async (request, response) => {
     try {
       const dimension = pathname.replace('/api/analytics/drill/', '') || 'platform';
       const body = JSON.parse(await readBody(request));
+      const query = normalizeAnalyticsQuery(body, dimension);
       const data = filterDataForAnalytics(await repository.readData(), session);
-      send(response, 200, await cachedAnalyticsDrill(data, { ...body, dimension }, session));
+      send(response, 200, await cachedAnalyticsDrill(data, query, session));
     } catch (error) {
       send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Analytics drill failed' });
     }
@@ -511,9 +512,9 @@ const server = createServer(async (request, response) => {
     if (!session) return;
     try {
       const data = filterDataForAnalytics(await repository.readData(), session);
-      send(response, 200, { qualityIssues: detectMetricQualityIssues(data, Object.fromEntries(currentUrl.searchParams.entries())) });
+      send(response, 200, { qualityIssues: detectMetricQualityIssues(data, normalizeAnalyticsQuery(Object.fromEntries(currentUrl.searchParams.entries()), 'summary')) });
     } catch (error) {
-      send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Quality issues query failed' });
+      send(response, error instanceof AnalyticsValidationError ? 400 : 500, { ok: false, error: error instanceof Error ? error.message : 'Quality issues query failed' });
     }
     return;
   }
@@ -523,8 +524,9 @@ const server = createServer(async (request, response) => {
     if (!session) return;
     try {
       const body = JSON.parse(await readBody(request));
+      const query = normalizeAnalyticsQuery(body.query ?? {}, body.query?.dimension ?? 'platform');
       const data = filterDataForAnalytics(await repository.readData(), session);
-      const result = await cachedAnalyticsDrill(data, { ...(body.query ?? {}), page: 1, pageSize: 100000 }, session);
+      const result = await cachedAnalyticsDrill(data, { ...query, page: 1, pageSize: 100000 }, session);
       const taskId = `export-${Date.now()}`;
       const format = body.format === 'json' ? 'json' : 'csv';
       const fileName = `${taskId}.${format}`;
@@ -789,6 +791,32 @@ function hasGlobalAnalyticsAccess(session) {
   return ['系统管理员', '管理员', '招聘运营', '招聘负责人'].includes(session.role);
 }
 
+class AnalyticsValidationError extends Error {}
+
+function normalizeAnalyticsQuery(input = {}, fallbackDimension = 'platform') {
+  const allowedDimensions = new Set(['summary', 'platform', 'account', 'content', 'job', 'contentType', 'funnel']);
+  const dimension = String(input.dimension ?? fallbackDimension ?? 'platform');
+  if (!allowedDimensions.has(dimension)) throw new AnalyticsValidationError(`不支持的下钻维度：${dimension}`);
+  const page = Number(input.page ?? 1);
+  const pageSize = Number(input.pageSize ?? 20);
+  if (!Number.isInteger(page) || page < 1) throw new AnalyticsValidationError('page 必须为大于 0 的整数');
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100000) throw new AnalyticsValidationError('pageSize 必须为 1 到 100000 的整数');
+  const dateFrom = input.dateFrom ? String(input.dateFrom) : undefined;
+  const dateTo = input.dateTo ? String(input.dateTo) : undefined;
+  if (dateFrom && !/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) throw new AnalyticsValidationError('dateFrom 必须为 YYYY-MM-DD');
+  if (dateTo && !/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) throw new AnalyticsValidationError('dateTo 必须为 YYYY-MM-DD');
+  if (dateFrom && dateTo && dateFrom > dateTo) throw new AnalyticsValidationError('dateFrom 不能晚于 dateTo');
+  return {
+    ...input,
+    dimension,
+    platform: input.platform ?? '全部',
+    page,
+    pageSize,
+    dateFrom,
+    dateTo,
+  };
+}
+
 function filterDataForAnalytics(data, session) {
   if (hasGlobalAnalyticsAccess(session)) return data;
   const userKeys = new Set([session.id, session.name, session.username].filter(Boolean));
@@ -906,9 +934,20 @@ function analyticsBestStageResults(results) {
   return [...byCandidate.values()];
 }
 
-function analyticsResultMatches(result, contents, query) {
-  const relatedContent = result.sourceContentId ? contents.find((content) => content.id === result.sourceContentId) : undefined;
+function analyticsResultMatches(result, data, query) {
+  const relatedContent = result.sourceContentId ? (data.contents ?? []).find((content) => content.id === result.sourceContentId) : undefined;
+  const hasValidJob = Boolean(result.jobId && (data.jobs ?? []).some((job) => job.id === result.jobId));
+  if (!relatedContent && !hasValidJob && result.sourcePlatform === '未知') return false;
   return (!query.platform || query.platform === '全部' || result.sourcePlatform === query.platform)
+    && (!query.contentId || result.sourceContentId === query.contentId)
+    && (!query.jobId || result.jobId === query.jobId)
+    && (!query.accountId || relatedContent?.accountId === query.accountId)
+    && analyticsDateInRange(result.importedAt?.slice(0, 10), query);
+}
+
+function analyticsResultInQualityScope(result, data, query) {
+  const relatedContent = result.sourceContentId ? (data.contents ?? []).find((content) => content.id === result.sourceContentId) : undefined;
+  return (!query.platform || query.platform === '全部' || result.sourcePlatform === query.platform || relatedContent?.platform === query.platform)
     && (!query.contentId || result.sourceContentId === query.contentId)
     && (!query.jobId || result.jobId === query.jobId)
     && (!query.accountId || relatedContent?.accountId === query.accountId)
@@ -917,7 +956,7 @@ function analyticsResultMatches(result, contents, query) {
 
 function summarizeAnalytics(data, query) {
   const contents = (data.contents ?? []).filter((content) => analyticsContentMatches(content, query));
-  const results = analyticsBestStageResults((data.beisenResults ?? []).filter((result) => analyticsResultMatches(result, data.contents ?? [], query)));
+  const results = analyticsBestStageResults((data.beisenResults ?? []).filter((result) => analyticsResultMatches(result, data, query)));
   const views = contents.reduce((sum, content) => sum + Number(content.metrics?.views || 0), 0);
   const interactions = contents.reduce((sum, content) => sum + Number(content.metrics?.likes || 0) + Number(content.metrics?.comments || 0) + Number(content.metrics?.saves || 0) + Number(content.metrics?.shares || 0), 0);
   const clicks = contents.reduce((sum, content) => sum + Number(content.metrics?.clicks || 0), 0);
@@ -954,8 +993,9 @@ function detectMetricQualityIssues(data, query) {
     if (!content.jobId || !(data.jobs ?? []).some((job) => job.id === content.jobId)) push({ issueType: '缺少字段', severity: '高', targetType: 'content', targetId: content.id, message: `${content.title} 未关联有效岗位。` });
     if (!content.accountId || !(data.accounts ?? []).some((account) => account.id === content.accountId)) push({ issueType: '缺少字段', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 未绑定有效账号。` });
     if (Number(content.metrics?.views || 0) === 0 && (Number(content.metrics?.clicks || 0) > 0 || Number(content.metrics?.likes || 0) > 0)) push({ issueType: '指标异常', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 曝光为 0 但存在点击或互动。` });
+    if (content.publishedAt && content.dueDate && content.publishedAt < content.dueDate && content.status === '已发布') push({ issueType: '日期异常', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 发布时间早于排期日期，请确认。` });
   });
-  (data.beisenResults ?? []).filter((result) => analyticsResultMatches(result, data.contents ?? [], query)).forEach((result) => {
+  (data.beisenResults ?? []).filter((result) => analyticsResultInQualityScope(result, data, query)).forEach((result) => {
     const hasContent = result.sourceContentId && (data.contents ?? []).some((content) => content.id === result.sourceContentId);
     const hasJob = result.jobId && (data.jobs ?? []).some((job) => job.id === result.jobId);
     if (!hasContent && !hasJob) push({ issueType: '无法归因', severity: result.sourcePlatform === '未知' ? '高' : '中', targetType: 'source', targetId: result.id, message: `${result.candidateCode} 无法归因到内容或岗位。` });
@@ -980,7 +1020,7 @@ function buildAnalyticsInsights(summary) {
 }
 
 function buildAnalyticsDrill(data, query = {}) {
-  const normalizedQuery = { dimension: query.dimension ?? 'summary', platform: query.platform ?? '全部', page: Number(query.page ?? 1), pageSize: Number(query.pageSize ?? 20), ...query };
+  const normalizedQuery = normalizeAnalyticsQuery(query, query.dimension ?? 'summary');
   const summary = summarizeAnalytics(data, normalizedQuery);
   const breakdowns = normalizedQuery.dimension === 'funnel'
     ? [
@@ -992,14 +1032,37 @@ function buildAnalyticsDrill(data, query = {}) {
       ['interviews', '面试', summary.interviews],
       ['offers', 'Offer', summary.offers],
       ['hires', '入职', summary.hires],
-    ].map(([id, label, value]) => ({ id, label, dimension: 'funnel', snapshot: { ...emptyAnalyticsSnapshot, [id]: value }, meta: { value } }))
+    ].map(([id, label, value], index, steps) => {
+      const previousValue = index === 0 ? value : steps[index - 1][2];
+      const conversionRate = index === 0 ? 1 : analyticsRate(value, previousValue);
+      const isExposureToClickBreak = id === 'clicks' && previousValue >= 100 && value === 0;
+      return { id, label, dimension: 'funnel', snapshot: { ...emptyAnalyticsSnapshot, [id]: value }, meta: { value, previousValue, conversionRate, abnormal: isExposureToClickBreak || (index > 0 && previousValue > 0 && conversionRate < 0.01), suggestion: isExposureToClickBreak ? 'CTA、招聘入口、内容落点可能存在问题。' : undefined } };
+    })
     : normalizedQuery.dimension === 'account'
-      ? (data.accounts ?? []).filter((account) => !normalizedQuery.platform || normalizedQuery.platform === '全部' || account.platform === normalizedQuery.platform).map((account) => ({ id: account.id, label: `${account.platform}｜${account.name}`, dimension: 'account', snapshot: summarizeAnalytics(data, { ...normalizedQuery, accountId: account.id, platform: account.platform }), meta: { platform: account.platform, owner: account.owner, authStatus: account.authStatus, status: account.status } }))
+      ? (data.accounts ?? []).filter((account) => !normalizedQuery.platform || normalizedQuery.platform === '全部' || account.platform === normalizedQuery.platform).map((account) => {
+        const accountContents = (data.contents ?? []).filter((content) => content.accountId === account.id && analyticsDateInRange(content.publishedAt ?? content.dueDate, normalizedQuery));
+        const latestPublish = accountContents.map((content) => content.publishedAt ?? content.dueDate).filter(Boolean).sort().at(-1);
+        const inactiveDays = latestPublish ? Math.max(0, Math.floor((Date.now() - new Date(latestPublish).getTime()) / 86400000)) : undefined;
+        const snapshot = summarizeAnalytics(data, { ...normalizedQuery, accountId: account.id, platform: account.platform });
+        const publishCount = accountContents.length;
+        const healthScore = Math.max(0, Math.min(100, 100 - (account.authStatus === '已授权' ? 0 : 30) - (inactiveDays && inactiveDays > 14 ? 20 : 0) - (snapshot.clickRate === 0 && snapshot.views > 0 ? 15 : 0)));
+        return { id: account.id, label: `${account.platform}｜${account.name}`, dimension: 'account', snapshot, meta: { platform: account.platform, owner: account.owner, positioning: account.positioning, authStatus: account.authStatus, status: account.status, publishingRoles: (account.publishingRoles ?? []).join('、'), publishCount, latestPublish, inactiveDays, averageViews: publishCount > 0 ? Math.round(snapshot.views / publishCount) : 0, interactionRate: snapshot.interactionRate, clickRate: snapshot.clickRate, healthScore, suggestion: healthScore < 70 ? '建议检查授权状态、发布频次和招聘入口 CTA。' : '账号健康度正常，可继续复用高点击内容结构。' } };
+      })
       : normalizedQuery.dimension === 'job'
-        ? (data.jobs ?? []).map((job) => ({ id: job.id, label: job.title, dimension: 'job', snapshot: summarizeAnalytics(data, { ...normalizedQuery, jobId: job.id }), meta: { family: job.family, city: job.city, level: job.level, platformCoverage: (job.targetPlatforms ?? []).join('、') } }))
+        ? (data.jobs ?? []).map((job) => {
+          const jobContents = (data.contents ?? []).filter((content) => content.jobId === job.id && analyticsContentMatches(content, { ...normalizedQuery, jobId: job.id }));
+          const platformContributions = analyticsPlatforms.map((platform) => ({ platform, snapshot: summarizeAnalytics(data, { ...normalizedQuery, jobId: job.id, platform }) })).filter((item) => item.snapshot.views > 0 || item.snapshot.applications > 0).map((item) => `${item.platform}:${item.snapshot.views}曝光/${item.snapshot.applications}投递`);
+          const stageDistribution = analyticsBestStageResults((data.beisenResults ?? []).filter((result) => result.jobId === job.id && analyticsResultMatches(result, data, normalizedQuery))).reduce((acc, result) => ({ ...acc, [result.stage]: (acc[result.stage] ?? 0) + 1 }), {});
+          return { id: job.id, label: job.title, dimension: 'job', snapshot: summarizeAnalytics(data, { ...normalizedQuery, jobId: job.id }), meta: { family: job.family, city: job.city, level: job.level, status: job.status, platformCoverage: (job.targetPlatforms ?? []).join('、'), contentCount: jobContents.length, contentTypeCoverage: [...new Set(jobContents.map((content) => content.type))].join('、'), platformContributions: platformContributions.join('；'), stageDistribution } };
+        })
         : analyticsPlatforms.map((platform) => ({ id: platform, label: platform, dimension: 'platform', snapshot: summarizeAnalytics(data, { ...normalizedQuery, platform }), meta: { contentCount: (data.contents ?? []).filter((content) => content.platform === platform).length, accountCount: (data.accounts ?? []).filter((account) => account.platform === platform).length } }));
   const allDetails = (data.contents ?? []).filter((content) => analyticsContentMatches(content, normalizedQuery));
-  const details = allDetails.slice((normalizedQuery.page - 1) * normalizedQuery.pageSize, normalizedQuery.page * normalizedQuery.pageSize).map((content) => ({ id: content.id, title: content.title, dimension: 'content', snapshot: summarizeAnalytics(data, { ...normalizedQuery, contentId: content.id }), meta: { platform: content.platform, status: content.status, contentType: content.type } }));
+  const details = allDetails.slice((normalizedQuery.page - 1) * normalizedQuery.pageSize, normalizedQuery.page * normalizedQuery.pageSize).map((content) => {
+    const job = (data.jobs ?? []).find((item) => item.id === content.jobId);
+    const account = (data.accounts ?? []).find((item) => item.id === content.accountId);
+    const beisenStageDistribution = analyticsBestStageResults((data.beisenResults ?? []).filter((result) => result.sourceContentId === content.id && analyticsResultMatches(result, data, normalizedQuery))).reduce((acc, result) => ({ ...acc, [result.stage]: (acc[result.stage] ?? 0) + 1 }), {});
+    return { id: content.id, title: content.title, dimension: 'content', snapshot: summarizeAnalytics(data, { ...normalizedQuery, contentId: content.id }), meta: { platform: content.platform, account: account?.name ?? '未绑定账号', job: job?.title ?? '未关联岗位', contentType: content.type, status: content.status, riskLevel: content.riskLevel, risks: (content.risks ?? []).join('、'), dueDate: content.dueDate, publishedAt: content.publishedAt, beisenStageDistribution, versionCount: (data.contentVersions ?? []).filter((version) => version.contentId === content.id).length, reviewCommentCount: (data.reviewComments ?? []).filter((comment) => comment.contentId === content.id).length, reviewSuggestion: content.riskLevel === '高' ? '请先完成风险修改和审核，再放大投放。' : Number(content.metrics?.clicks || 0) === 0 && Number(content.metrics?.views || 0) > 0 ? '建议优化 CTA、招聘入口和岗位落点。' : '可进入复盘沉淀有效表达。' } };
+  });
   return { query: normalizedQuery, summary, breakdowns, details, insights: buildAnalyticsInsights(summary), qualityIssues: detectMetricQualityIssues(data, normalizedQuery), pagination: { page: normalizedQuery.page, pageSize: normalizedQuery.pageSize, total: allDetails.length }, generatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) };
 }
 

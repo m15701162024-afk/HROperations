@@ -64,8 +64,11 @@ function bestStageResults(results: BeisenResult[]) {
   return [...byCandidate.values()];
 }
 
-function resultMatches(result: BeisenResult, contents: ContentTask[], query: DrillQuery) {
-  const relatedContent = result.sourceContentId ? contents.find((content) => content.id === result.sourceContentId) : undefined;
+function resultMatches(result: BeisenResult, data: Pick<AppData, 'contents' | 'jobs'>, query: DrillQuery) {
+  const relatedContent = result.sourceContentId ? data.contents.find((content) => content.id === result.sourceContentId) : undefined;
+  const hasValidContent = Boolean(relatedContent);
+  const hasValidJob = Boolean(result.jobId && data.jobs.some((job) => job.id === result.jobId));
+  if (!hasValidContent && !hasValidJob && result.sourcePlatform === '未知') return false;
   return (
     (!query.platform || query.platform === '全部' || result.sourcePlatform === query.platform)
     && (!query.contentId || result.sourceContentId === query.contentId)
@@ -75,9 +78,20 @@ function resultMatches(result: BeisenResult, contents: ContentTask[], query: Dri
   );
 }
 
+function resultInQualityScope(result: BeisenResult, data: Pick<AppData, 'contents'>, query: DrillQuery) {
+  const relatedContent = result.sourceContentId ? data.contents.find((content) => content.id === result.sourceContentId) : undefined;
+  return (
+    (!query.platform || query.platform === '全部' || result.sourcePlatform === query.platform || relatedContent?.platform === query.platform)
+    && (!query.contentId || result.sourceContentId === query.contentId)
+    && (!query.jobId || result.jobId === query.jobId)
+    && (!query.accountId || relatedContent?.accountId === query.accountId)
+    && dateInRange(result.importedAt?.slice(0, 10), query)
+  );
+}
+
 export function summarizeMetrics(data: AppData, query: DrillQuery): MetricSnapshot {
   const contents = data.contents.filter((content) => contentMatches(content, query));
-  const results = bestStageResults(data.beisenResults.filter((result) => resultMatches(result, data.contents, query)));
+  const results = bestStageResults(data.beisenResults.filter((result) => resultMatches(result, data, query)));
   const views = contents.reduce((sum, content) => sum + Number(content.metrics.views || 0), 0);
   const interactions = contents.reduce((sum, content) => (
     sum + Number(content.metrics.likes || 0) + Number(content.metrics.comments || 0) + Number(content.metrics.saves || 0) + Number(content.metrics.shares || 0)
@@ -132,33 +146,66 @@ export function buildPlatformBreakdowns(data: AppData, query: DrillQuery): Drill
 export function buildAccountBreakdowns(data: AppData, query: DrillQuery): DrillBreakdown[] {
   return data.accounts
     .filter((account) => !query.platform || query.platform === '全部' || account.platform === query.platform)
-    .map((account) => ({
-      id: account.id,
-      label: `${account.platform}｜${account.name}`,
-      dimension: 'account' as const,
-      snapshot: summarizeMetrics(data, { ...query, accountId: account.id, platform: account.platform }),
-      meta: {
-        platform: account.platform,
-        owner: account.owner,
-        authStatus: account.authStatus,
-        status: account.status,
-      },
-    }));
+    .map((account) => {
+      const accountContents = data.contents.filter((content) => content.accountId === account.id && dateInRange(content.publishedAt ?? content.dueDate, query));
+      const latestPublish = accountContents.map((content) => content.publishedAt ?? content.dueDate).filter(Boolean).sort().at(-1);
+      const inactiveDays = latestPublish ? Math.max(0, Math.floor((Date.now() - new Date(latestPublish).getTime()) / 86400000)) : undefined;
+      const snapshot = summarizeMetrics(data, { ...query, accountId: account.id, platform: account.platform });
+      const publishCount = accountContents.length;
+      const avgViews = publishCount > 0 ? Math.round(snapshot.views / publishCount) : 0;
+      const healthScore = Math.max(0, Math.min(100, 100 - (account.authStatus === '已授权' ? 0 : 30) - (inactiveDays && inactiveDays > 14 ? 20 : 0) - (snapshot.clickRate === 0 && snapshot.views > 0 ? 15 : 0)));
+      return {
+        id: account.id,
+        label: `${account.platform}｜${account.name}`,
+        dimension: 'account' as const,
+        snapshot,
+        meta: {
+          platform: account.platform,
+          owner: account.owner,
+          positioning: account.positioning,
+          authStatus: account.authStatus,
+          status: account.status,
+          publishingRoles: account.publishingRoles.join('、'),
+          publishCount,
+          latestPublish,
+          inactiveDays,
+          averageViews: avgViews,
+          interactionRate: snapshot.interactionRate,
+          clickRate: snapshot.clickRate,
+          healthScore,
+          suggestion: healthScore < 70 ? '建议检查授权状态、发布频次和招聘入口 CTA。' : '账号健康度正常，可继续复用高点击内容结构。',
+        },
+      };
+    });
 }
 
 export function buildJobBreakdowns(data: AppData, query: DrillQuery): DrillBreakdown[] {
-  return data.jobs.map((job) => ({
-    id: job.id,
-    label: job.title,
-    dimension: 'job' as const,
-    snapshot: summarizeMetrics(data, { ...query, jobId: job.id }),
-    meta: {
-      family: job.family,
-      city: job.city,
-      level: job.level,
-      platformCoverage: job.targetPlatforms.join('、'),
-    },
-  })).filter((item) => item.snapshot.views > 0 || item.snapshot.applications > 0 || !query.platform || query.platform === '全部');
+  return data.jobs.map((job) => {
+    const jobContents = data.contents.filter((content) => content.jobId === job.id && contentMatches(content, { ...query, jobId: job.id }));
+    const platformContributions = platforms
+      .map((platform) => ({ platform, snapshot: summarizeMetrics(data, { ...query, jobId: job.id, platform }) }))
+      .filter((item) => item.snapshot.views > 0 || item.snapshot.applications > 0)
+      .map((item) => `${item.platform}:${item.snapshot.views}曝光/${item.snapshot.applications}投递`);
+    const stageDistribution = bestStageResults(data.beisenResults.filter((result) => result.jobId === job.id && resultMatches(result, data, query)))
+      .reduce<Record<string, number>>((acc, result) => ({ ...acc, [result.stage]: (acc[result.stage] ?? 0) + 1 }), {});
+    return {
+      id: job.id,
+      label: job.title,
+      dimension: 'job' as const,
+      snapshot: summarizeMetrics(data, { ...query, jobId: job.id }),
+      meta: {
+        family: job.family,
+        city: job.city,
+        level: job.level,
+        status: job.status,
+        platformCoverage: job.targetPlatforms.join('、'),
+        contentCount: jobContents.length,
+        contentTypeCoverage: [...new Set(jobContents.map((content) => content.type))].join('、'),
+        platformContributions: platformContributions.join('；'),
+        stageDistribution,
+      },
+    };
+  }).filter((item) => item.snapshot.views > 0 || item.snapshot.applications > 0 || !query.platform || query.platform === '全部');
 }
 
 export function buildContentDetails(data: AppData, query: DrillQuery): DrillDetail[] {
@@ -180,7 +227,14 @@ export function buildContentDetails(data: AppData, query: DrillQuery): DrillDeta
           contentType: content.type,
           status: content.status,
           riskLevel: content.riskLevel,
+          risks: content.risks.join('、'),
           dueDate: content.dueDate,
+          publishedAt: content.publishedAt,
+          beisenStageDistribution: bestStageResults(data.beisenResults.filter((result) => result.sourceContentId === content.id && resultMatches(result, data, query)))
+            .reduce<Record<string, number>>((acc, result) => ({ ...acc, [result.stage]: (acc[result.stage] ?? 0) + 1 }), {}),
+          versionCount: data.contentVersions.filter((version) => version.contentId === content.id).length,
+          reviewCommentCount: data.reviewComments.filter((comment) => comment.contentId === content.id).length,
+          reviewSuggestion: content.riskLevel === '高' ? '请先完成风险修改和审核，再放大投放。' : content.metrics.clicks === 0 && content.metrics.views > 0 ? '建议优化 CTA、招聘入口和岗位落点。' : '可进入复盘沉淀有效表达。',
         },
       };
     });
@@ -200,17 +254,24 @@ export function buildFunnelBreakdowns(summary: MetricSnapshot): DrillBreakdown[]
     ['offers', 'Offer', summary.offers],
     ['hires', '入职', summary.hires],
   ] as const;
-  return steps.map(([id, label, value], index) => ({
-    id,
-    label,
-    dimension: 'funnel',
-    snapshot: { ...emptySnapshot, [id]: value },
-    meta: {
-      value,
-      previousValue: index === 0 ? value : steps[index - 1][2],
-      conversionRate: index === 0 ? 1 : rate(value, steps[index - 1][2]),
-    },
-  }));
+  return steps.map(([id, label, value], index) => {
+    const previousValue = index === 0 ? value : steps[index - 1][2];
+    const conversionRate = index === 0 ? 1 : rate(value, previousValue);
+    const isExposureToClickBreak = id === 'clicks' && previousValue >= 100 && value === 0;
+    return {
+      id,
+      label,
+      dimension: 'funnel',
+      snapshot: { ...emptySnapshot, [id]: value },
+      meta: {
+        value,
+        previousValue,
+        conversionRate,
+        abnormal: isExposureToClickBreak || (index > 0 && previousValue > 0 && conversionRate < 0.01),
+        suggestion: isExposureToClickBreak ? 'CTA、招聘入口、内容落点可能存在问题。' : undefined,
+      },
+    };
+  });
 }
 
 export function detectMetricQualityIssues(data: AppData, query: DrillQuery): MetricQualityIssue[] {
@@ -231,11 +292,11 @@ export function detectMetricQualityIssues(data: AppData, query: DrillQuery): Met
       issue({ issueType: '指标异常', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 曝光为 0 但存在互动或点击。` });
     }
     if (content.publishedAt && content.dueDate && content.publishedAt < content.dueDate && content.status === '已发布') {
-      issue({ issueType: '日期异常', severity: '低', targetType: 'content', targetId: content.id, message: `${content.title} 发布时间早于排期日期，请确认。` });
+      issue({ issueType: '日期异常', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 发布时间早于排期日期，请确认。` });
     }
   });
 
-  data.beisenResults.filter((result) => resultMatches(result, data.contents, query)).forEach((result) => {
+  data.beisenResults.filter((result) => resultInQualityScope(result, data, query)).forEach((result) => {
     const hasContent = result.sourceContentId && data.contents.some((content) => content.id === result.sourceContentId);
     const hasJob = result.jobId && data.jobs.some((job) => job.id === result.jobId);
     if (!hasContent && !hasJob && result.sourcePlatform === '未知') {
