@@ -8,7 +8,7 @@ export function createAuthService(authFile) {
   async function readAuth() {
     try {
       const raw = await readFile(authFile, 'utf-8');
-      return JSON.parse(raw);
+      return await normalizeAuth(JSON.parse(raw));
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
       const initialPassword = process.env.HR_ASSISTANT_ADMIN_PASSWORD;
@@ -22,6 +22,7 @@ export function createAuthService(authFile) {
             username: 'admin',
             name: '本地管理员',
             role: '系统管理员',
+            status: '启用',
             password: hashPassword(initialPassword),
           },
         ],
@@ -30,6 +31,40 @@ export function createAuthService(authFile) {
       await writeFile(authFile, JSON.stringify(initial, null, 2), 'utf-8');
       return initial;
     }
+  }
+
+  async function normalizeAuth(auth) {
+    const next = {
+      ...auth,
+      users: Array.isArray(auth?.users) ? auth.users : [],
+    };
+    let changed = false;
+    const initialPassword = process.env.HR_ASSISTANT_ADMIN_PASSWORD;
+    next.users = next.users.map((user) => {
+      const normalized = {
+        ...user,
+        status: user.status ?? '启用',
+      };
+      if (!isPasswordHash(normalized.password) && normalized.username === 'admin' && initialPassword) {
+        normalized.password = hashPassword(initialPassword);
+        changed = true;
+      }
+      if (normalized.status !== user.status) changed = true;
+      return normalized;
+    });
+    if (!next.users.some((user) => user.username === 'admin') && initialPassword) {
+      next.users.unshift({
+        id: 'local-admin',
+        username: 'admin',
+        name: '本地管理员',
+        role: '系统管理员',
+        status: '启用',
+        password: hashPassword(initialPassword),
+      });
+      changed = true;
+    }
+    if (changed) await writeAuth(next);
+    return next;
   }
 
   async function login(username, password) {
@@ -112,7 +147,12 @@ function hashPassword(password, salt = randomBytes(16).toString('hex')) {
 }
 
 function verifyPassword(password, stored) {
+  if (!isPasswordHash(stored)) return false;
   const [salt, hash] = stored.split(':');
   const candidate = pbkdf2Sync(password, salt, 120000, 32, 'sha256');
   return timingSafeEqual(Buffer.from(hash, 'hex'), candidate);
+}
+
+function isPasswordHash(value) {
+  return typeof value === 'string' && /^[a-f0-9]{32}:[a-f0-9]{64}$/i.test(value);
 }

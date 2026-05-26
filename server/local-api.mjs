@@ -524,7 +524,7 @@ const server = createServer(async (request, response) => {
     try {
       const body = JSON.parse(await readBody(request));
       const data = filterDataForAnalytics(await repository.readData(), session);
-      const result = await cachedAnalyticsDrill(data, body.query ?? {}, session);
+      const result = await cachedAnalyticsDrill(data, { ...(body.query ?? {}), page: 1, pageSize: 100000 }, session);
       const taskId = `export-${Date.now()}`;
       const format = body.format === 'json' ? 'json' : 'csv';
       const fileName = `${taskId}.${format}`;
@@ -551,6 +551,23 @@ const server = createServer(async (request, response) => {
       });
     } catch (error) {
       send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Analytics export failed' });
+    }
+    return;
+  }
+
+  if (pathname.startsWith('/api/analytics/export/') && request.method === 'GET') {
+    if (!requireSession(request, response)) return;
+    try {
+      const taskId = pathname.replace('/api/analytics/export/', '');
+      const files = await readdir(exportDir).catch(() => []);
+      const fileName = files.find((item) => item.startsWith(taskId));
+      send(response, 200, {
+        taskId,
+        status: fileName ? '已完成' : '不存在',
+        downloadUrl: fileName ? `/exports/${encodeURIComponent(fileName)}` : '',
+      });
+    } catch (error) {
+      send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Export status failed' });
     }
     return;
   }

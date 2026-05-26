@@ -10,4 +10,7 @@ data/*.json
 data/*.json.bak
 data/uploads/
 data/backups/
+data/.acceptance-backup/
+data/analytics-cache/
+data/exports/
 HROperations/

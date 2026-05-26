@@ -2259,6 +2259,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [cost, setCost] = useState({ targetType: '内容' as CostRecord['targetType'], targetId: '', laborCost: 0, mediaCost: 0, productionCost: 0 });
   const [resolvedQualityIds, setResolvedQualityIds] = useState<string[]>([]);
+  const [detailPage, setDetailPage] = useState(1);
+  const [detailPageSize, setDetailPageSize] = useState(20);
   const analyticsQuery = useMemo(() => ({
     dimension: drill?.type === '账号' ? 'account' as const : drill?.type === '岗位' ? 'job' as const : drill?.type === '漏斗' ? 'funnel' as const : 'platform' as const,
     platform: selectedPlatform,
@@ -2267,9 +2269,9 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
     jobId: drill?.type === '岗位' ? drill.id : undefined,
     dateFrom: dateRange.from,
     dateTo: dateRange.to,
-    page: 1,
-    pageSize: 20,
-  }), [dateRange.from, dateRange.to, drill, selectedPlatform]);
+    page: detailPage,
+    pageSize: detailPageSize,
+  }), [dateRange.from, dateRange.to, detailPage, detailPageSize, drill, selectedPlatform]);
   const analyticsResult = useMemo(() => buildAnalyticsDrill(data, analyticsQuery), [data, analyticsQuery]);
   const platformDrillResult = useMemo(() => buildAnalyticsDrill(data, { ...analyticsQuery, dimension: 'platform', accountId: undefined, contentId: undefined, jobId: undefined }), [data, analyticsQuery]);
   const visibleQualityIssues = analyticsResult.qualityIssues.filter((issue) => !resolvedQualityIds.includes(issue.id));
@@ -2294,6 +2296,15 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   const visiblePlatforms = byPlatform.filter((item) => item.count > 0 || item.applications > 0);
   const maxViews = Math.max(...byPlatform.map((p) => p.views), 1);
   const selectedContents = selectedPlatform === '全部' ? filteredContentsByDate : filteredContentsByDate.filter((item) => item.platform === selectedPlatform);
+  const pagedContentIds = new Set(analyticsResult.details.map((item) => item.id));
+  const pagedSelectedContents = selectedContents.filter((item) => pagedContentIds.has(item.id));
+  const detailTotalPages = Math.max(1, Math.ceil((analyticsResult.pagination?.total ?? selectedContents.length) / detailPageSize));
+  useEffect(() => {
+    setDetailPage(1);
+  }, [dateRange.from, dateRange.to, drill, selectedPlatform]);
+  useEffect(() => {
+    if (detailPage > detailTotalPages) setDetailPage(detailTotalPages);
+  }, [detailPage, detailTotalPages]);
   const selectedResults = selectedPlatform === '全部' ? data.beisenResults : data.beisenResults.filter((item) => item.sourcePlatform === selectedPlatform);
   const selectedViews = analyticsResult.summary.views;
   const selectedInteractions = analyticsResult.summary.interactions;
@@ -2413,7 +2424,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
         </div>
         <div className="module-tabs">
           <button className={selectedPlatform === '全部' ? 'active' : ''} onClick={() => setSelectedPlatform('全部')}>全部</button>
-          {platforms.map((platform) => <button key={platform} className={selectedPlatform === platform ? 'active' : ''} onClick={() => setSelectedPlatform(platform)}>{platform}</button>)}
+          {platforms.map((platform) => <button key={platform} className={selectedPlatform === platform ? 'active' : ''} onClick={() => { setSelectedPlatform(platform); setDetailPage(1); }}>{platform}</button>)}
         </div>
         <div className="stats-row compact-stats analytics-stats">
           <StatCard label="内容数" value={selectedContents.length} note="当前筛选平台" icon={FileText} />
@@ -2557,6 +2568,18 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>{selectedPlatform} 内容明细</h2><Search size={18} /></div>
+        <div className="analytics-filterbar">
+          <span>共 {analyticsResult.pagination?.total ?? selectedContents.length} 条 · 第 {detailPage}/{detailTotalPages} 页</span>
+          <label>每页
+            <select value={detailPageSize} onChange={(event) => { setDetailPageSize(Number(event.target.value)); setDetailPage(1); }}>
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+            </select>
+          </label>
+          <button className="ghost" disabled={detailPage <= 1} onClick={() => setDetailPage((page) => Math.max(1, page - 1))}>上一页</button>
+          <button className="ghost" disabled={detailPage >= detailTotalPages} onClick={() => setDetailPage((page) => Math.min(detailTotalPages, page + 1))}>下一页</button>
+        </div>
         {selectedContents.length === 0 && <EmptyState title="暂无内容明细" body="当前平台或日期范围没有真实内容数据。" />}
         {selectedContents.length > 0 && (
           <table className="analytics-table">
@@ -2573,7 +2596,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
               </tr>
             </thead>
             <tbody>
-              {selectedContents
+              {pagedSelectedContents
                 .slice()
                 .sort((a, b) => b.metrics.views - a.metrics.views)
                 .map((item) => {
