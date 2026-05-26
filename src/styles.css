@@ -1118,6 +1118,27 @@ textarea {
   border-radius: 8px;
 }
 
+.analytics-view-switcher {
+  display: grid;
+  grid-template-columns: minmax(240px, 360px) 1fr;
+  gap: 14px;
+  align-items: center;
+}
+
+.analytics-view-switcher > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.analytics-view-switcher strong {
+  color: var(--ink);
+}
+
+.analytics-view-switcher span {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .analytics-filterbar label {
   min-width: 180px;
   margin: 0;

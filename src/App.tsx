@@ -2356,6 +2356,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   const [resolvedQualityIds, setResolvedQualityIds] = useState<string[]>([]);
   const [detailPage, setDetailPage] = useState(1);
   const [detailPageSize, setDetailPageSize] = useState(20);
+  const [analyticsView, setAnalyticsView] = useState<'总览' | '漏斗归因' | '平台账号' | '内容岗位' | '质量解释' | '导入配置'>('总览');
   const analyticsQuery = useMemo(() => ({
     dimension: drill?.type === '账号' ? 'account' as const : drill?.type === '岗位' ? 'job' as const : drill?.type === '漏斗' ? 'funnel' as const : 'platform' as const,
     platform: selectedPlatform,
@@ -2545,6 +2546,14 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       hires: item.snapshot.hires,
     }))), 'text/csv;charset=utf-8');
   };
+  const analyticsViewDescriptions: Record<typeof analyticsView, string> = {
+    总览: '先看核心指标、趋势结论和本周优先动作。',
+    漏斗归因: '定位曝光、点击、投递、有效、入职各环节断点。',
+    平台账号: '比较平台和账号贡献，判断资源应该投向哪里。',
+    内容岗位: '查看高低表现内容、岗位族群和内容类型贡献。',
+    质量解释: '处理数据质量、异常归因和系统解释。',
+    导入配置: '导入平台指标、北森回流和成本数据。',
+  };
 
   return (
     <div className="page-grid">
@@ -2559,6 +2568,18 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           <button className="ghost" onClick={() => exportAnalyticsResult('json')}><Database size={16} />导出JSON</button>
         </div>
       </section>
+      <section className="panel wide analytics-view-switcher">
+        <div>
+          <strong>数据主题</strong>
+          <span>{analyticsViewDescriptions[analyticsView]}</span>
+        </div>
+        <div className="module-tabs">
+          {(['总览', '漏斗归因', '平台账号', '内容岗位', '质量解释', '导入配置'] as const).map((view) => (
+            <button key={view} className={analyticsView === view ? 'active' : ''} onClick={() => setAnalyticsView(view)}>{view}</button>
+          ))}
+        </div>
+      </section>
+      {analyticsView === '总览' && <>
       <section className="panel wide">
         <div className="panel-title"><h2>使用路径</h2><Target size={18} /></div>
         <div className="usage-steps">
@@ -2617,6 +2638,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           ))}
         </div>
       </section>
+      </>}
+      {analyticsView === '内容岗位' && <>
       <section className="panel wide">
         <div className="panel-title"><h2>内容表现 Top / Bottom</h2><BarChart3 size={18} /></div>
         <div className="performance-compare-grid">
@@ -2644,6 +2667,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           </article>
         </div>
       </section>
+      </>}
+      {analyticsView === '平台账号' && <>
       <section className="panel wide analytics-board">
         <div className="panel-title"><h2>平台效率矩阵</h2><PieChart size={18} /></div>
         {visiblePlatforms.length === 0 && <EmptyState title="暂无真实平台指标" body="请先发布内容并导入平台后台数据；当前平台曝光、互动和点击均按 0 展示。" />}
@@ -2667,6 +2692,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           ))}
         </div>
       </section>
+      </>}
+      {(analyticsView === '漏斗归因' || analyticsView === '内容岗位') && <>
       <section className="panel wide">
         <div className="panel-title"><h2>下钻维度</h2><Filter size={18} /></div>
         <div className="drill-grid">
@@ -2723,6 +2750,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           <p>{platformConclusion}</p>
         </div>}
       </section>
+      </>}
+      {analyticsView === '质量解释' && <>
       <section className="panel wide">
         <div className="panel-title"><h2>数据质量与来源追踪</h2><ShieldCheck size={18} /></div>
         <div className="template-grid">
@@ -2766,6 +2795,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           </article>
         </div>
       </section>
+      </>}
+      {analyticsView === '内容岗位' && <>
       <section className="panel wide">
         <div className="panel-title"><h2>{selectedPlatform} 内容明细</h2><Search size={18} /></div>
         <div className="analytics-filterbar">
@@ -2819,6 +2850,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           </table>
         )}
       </section>
+      </>}
+      {analyticsView === '导入配置' && <>
       <section className="panel wide">
         <div className="panel-title"><h2>平台指标导入</h2><Database size={18} /></div>
         <p className="helper">支持字段：contentId/title、views、likes、comments、saves、shares、clicks，也支持中文表头。未导入时看板指标为 0。</p>
@@ -2845,6 +2878,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
         </div>
         <button className="full" onClick={createCost}><Plus size={16} />保存成本</button>
       </section>
+      </>}
+      {analyticsView === '总览' && <>
       <section className="panel">
         <div className="panel-title"><h2>真实 ROI</h2><PieChart size={18} /></div>
         <div className="funnel">
@@ -2859,6 +2894,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           <Badge tone="info">单入职 {roi.costPerHire}</Badge>
         </div>
       </section>
+      </>}
+      {analyticsView === '平台账号' && <>
       <section className="panel wide">
         <div className="panel-title"><h2>平台效果对比</h2><BarChart3 size={18} /></div>
         <div className="bar-list">
@@ -2872,11 +2909,15 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           ))}
         </div>
       </section>
+      </>}
+      {analyticsView === '内容岗位' && <>
       <section className="panel">
         <div className="panel-title"><h2>岗位族群效果</h2><GitBranch size={18} /></div>
         {familyStats.length === 0 && <EmptyState title="暂无岗位族群数据" body="录入真实岗位并关联内容后，这里会按岗位族群汇总曝光和点击。" />}
         {familyStats.map((job) => <div className="compact-row" key={job.id}><div><strong>{job.family}</strong><span>{job.title} · {job.count} 条内容 · {job.views.toLocaleString()} 曝光</span></div><div className="row-actions"><Badge tone="info">{job.clicks} 点击</Badge><button className="ghost" onClick={() => setDrill({ type: '岗位', id: job.id })}>下钻</button></div></div>)}
       </section>
+      </>}
+      {analyticsView === '漏斗归因' && <>
       <section className="panel wide">
         <div className="panel-title"><h2>多触点归因</h2><Link size={18} /></div>
         {data.beisenResults.length === 0 && <EmptyState title="暂无北森回流归因" body="导入北森结果后，会按平台、内容和岗位关联投递/入职结果。" />}
@@ -2890,6 +2931,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           ))}
         </div>
       </section>
+      </>}
+      {analyticsView === '内容岗位' && <>
       <section className="panel">
         <div className="panel-title"><h2>内容类型贡献</h2><BookOpen size={18} /></div>
         {typeStats.length === 0 && <EmptyState title="暂无内容类型数据" body="发布或导入真实内容后，可按内容类型查看贡献。" />}
@@ -2900,6 +2943,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           </div>
         ))}
       </section>
+      </>}
+      {analyticsView === '平台账号' && <>
       <section className="panel wide">
         <div className="panel-title"><h2>账号效果下钻</h2><Users size={18} /></div>
         {selectedAccountStats.length === 0 && <EmptyState title="暂无账号效果数据" body="配置账号并绑定内容后，可按账号查看发布频次和效果。" />}
@@ -2919,6 +2964,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           ))}
         </div>
       </section>
+      </>}
+      {analyticsView === '漏斗归因' && <>
       <section className="panel">
         <div className="panel-title"><h2>漏斗代理指标</h2><Target size={18} /></div>
         <div className="funnel">
@@ -2928,6 +2975,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           <div>入口点击 <b>{data.contents.reduce((sum, item) => sum + item.metrics.clicks, 0)}</b></div>
         </div>
       </section>
+      </>}
     </div>
   );
 }
