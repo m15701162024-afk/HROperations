@@ -1,4 +1,5 @@
-import type { AppData, BeisenResult, ContentTask, JobNeed, Platform } from './types';
+import { platformPositioning, platforms } from './data';
+import type { AccountHealthSnapshot, AppData, BeisenResult, CandidateLead, ContentQualityScore, ContentTask, DataExplanation, JobNeed, Platform, TaskItem, TopicItem } from './types';
 
 export function downloadText(filename: string, text: string, type = 'text/plain;charset=utf-8') {
   const blob = new Blob([text], { type });
@@ -114,6 +115,258 @@ export function parseBeisenCsv(raw: string): BeisenResult[] {
       importedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
     };
   });
+}
+
+export function parseLeadCsv(raw: string, existing: CandidateLead[] = []): CandidateLead[] {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = splitCsvLine(lines[0]).map((header) => header.trim());
+  return lines.slice(1).map((line, index) => {
+    const values = splitCsvLine(line);
+    const row = Object.fromEntries(headers.map((header, i) => [header, values[i] ?? '']));
+    const lead: CandidateLead = {
+      id: `lead-${Date.now()}-${index}`,
+      name: row.name || row.姓名 || row.nickname || row.昵称 || `导入线索 ${index + 1}`,
+      contact: row.contact || row.联系方式 || row.mobile || row.phone || row.手机号 || '',
+      sourcePlatform: normalizePlatform(row.sourcePlatform || row.来源平台),
+      sourceAccountId: row.sourceAccountId || row.来源账号 || undefined,
+      sourceContentId: row.sourceContentId || row.来源内容 || undefined,
+      targetJobId: row.targetJobId || row.意向岗位 || undefined,
+      owner: row.owner || row.跟进人 || '招聘专员',
+      stage: normalizeLeadStage(row.stage || row.阶段),
+      beisenStatus: '待转入',
+      note: row.note || row.备注 || '',
+      createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    };
+    const duplicated = findDuplicateLead([...existing, ...lines.slice(1, index).map((_, prevIndex) => ({
+      id: `tmp-${prevIndex}`,
+      contact: splitCsvLine(lines[prevIndex + 1])[headers.indexOf('contact')] ?? '',
+    } as CandidateLead))], lead);
+    return duplicated ? { ...lead, duplicateOf: duplicated.id } : lead;
+  });
+}
+
+function normalizeLeadStage(value: string | undefined): CandidateLead['stage'] {
+  const stages: CandidateLead['stage'][] = ['待联系', '已联系', '已转北森', '无效', '暂不合适'];
+  return stages.find((stage) => stage === value) ?? '待联系';
+}
+
+export function findDuplicateLead(leads: CandidateLead[], lead: CandidateLead) {
+  const contact = lead.contact.trim();
+  if (!contact) return undefined;
+  return leads.find((item) => item.id !== lead.id && item.contact.trim() === contact);
+}
+
+export function deriveTasks(data: AppData): TaskItem[] {
+  const today = new Date().toISOString().slice(0, 10);
+  const completed = new Set(data.taskCompletions);
+  const tasks: TaskItem[] = [];
+  const push = (task: Omit<TaskItem, 'status' | 'createdAt'>) => {
+    if (!completed.has(task.id)) {
+      tasks.push({ ...task, status: '待处理', createdAt: today });
+    }
+  };
+
+  data.contents.forEach((content) => {
+    if ((content.dueDate === today || content.publishedAt === today) && !['已发布', '数据回收中', '已复盘', '已归档'].includes(content.status)) {
+      push({ id: `task-publish-${content.id}`, type: '待发布', title: `今日待发布：${content.title}`, body: `${content.platform} 内容排期在今天`, owner: content.owner, priority: '高', targetSection: '排期日历', targetId: content.id, dueDate: content.dueDate });
+    }
+    if (content.status === '待专业审核' || content.status === '待品牌合规审核') {
+      push({ id: `task-review-${content.id}`, type: '待审核', title: `待审核：${content.title}`, body: `${content.status}，审核人 ${content.reviewer || '未指定'}`, owner: content.reviewer || content.owner, priority: content.riskLevel === '高' ? '高' : '中', targetSection: '内容运营', targetId: content.id, dueDate: content.dueDate });
+    }
+    if (content.riskLevel === '高' && content.status !== '已复盘' && content.status !== '已归档') {
+      push({ id: `task-risk-${content.id}`, type: '高风险待处理', title: `高风险内容：${content.title}`, body: content.risks.join('、') || '需要合规复核', owner: content.reviewer || content.owner, priority: '高', targetSection: '内容运营', targetId: content.id, dueDate: content.dueDate });
+    }
+    const publishedDate = content.publishedAt ? new Date(content.publishedAt) : undefined;
+    const metricsEmpty = Object.values(content.metrics).every((value) => value === 0);
+    if (publishedDate && metricsEmpty && Date.now() - publishedDate.getTime() > 2 * 86400000) {
+      push({ id: `task-metrics-${content.id}`, type: '数据待回收', title: `数据待回收：${content.title}`, body: '内容已发布超过 2 天但暂无平台指标', owner: content.owner, priority: '中', targetSection: '数据分析', targetId: content.id, dueDate: today });
+    }
+  });
+
+  data.assets.forEach((asset) => {
+    if (asset.expiresAt && Math.ceil((new Date(asset.expiresAt).getTime() - Date.now()) / 86400000) <= 30) {
+      push({ id: `task-asset-${asset.id}`, type: '素材授权到期', title: `素材授权即将到期：${asset.name}`, body: `有效期至 ${asset.expiresAt}`, owner: asset.owner, priority: '中', targetSection: '素材资产', targetId: asset.id, dueDate: asset.expiresAt });
+    }
+  });
+
+  data.candidateLeads.forEach((lead) => {
+    if ((lead.stage === '待联系' || lead.stage === '已联系') && lead.beisenStatus !== '已转入') {
+      push({ id: `task-lead-${lead.id}`, type: '线索待跟进', title: `线索待跟进：${lead.name}`, body: `${lead.sourcePlatform} · ${lead.contact || '无联系方式'}`, owner: lead.owner, priority: lead.stage === '待联系' ? '高' : '中', targetSection: '线索池', targetId: lead.id, dueDate: today });
+    }
+  });
+
+  data.accounts.filter((account) => account.status === '启用').forEach((account) => {
+    const latest = data.contents
+      .filter((content) => content.accountId === account.id && (content.publishedAt || content.dueDate))
+      .map((content) => content.publishedAt || content.dueDate)
+      .sort()
+      .at(-1);
+    const inactiveDays = latest ? Math.floor((Date.now() - new Date(latest).getTime()) / 86400000) : 999;
+    if (inactiveDays >= 14) {
+      push({ id: `task-account-${account.id}`, type: '账号停更', title: `账号停更提醒：${account.name}`, body: `${account.platform} 已 ${inactiveDays} 天无发布`, owner: account.owner, priority: inactiveDays >= 30 ? '高' : '中', targetSection: '账号与平台', targetId: account.id, dueDate: today });
+    }
+  });
+
+  return [...data.tasks.filter((task) => task.status !== '已完成' && task.status !== '已忽略'), ...tasks]
+    .filter((task, index, list) => list.findIndex((item) => item.id === task.id) === index);
+}
+
+export function scoreContentQuality(content: ContentTask, job?: JobNeed): ContentQualityScore {
+  const text = `${content.title}\n${content.content}`;
+  const includesAny = (words: string[]) => words.some((word) => text.includes(word));
+  const titleScore = Math.min(20, 8 + (content.title.length >= 12 ? 5 : 0) + (content.title.includes('？') || content.title.includes('?') ? 3 : 0) + (job && content.title.includes(job.family) ? 4 : 0));
+  const personaKeywords = ['薪酬', '稳定', '挑战', '团队', '成长', '前景', '管理', '强度'];
+  const personaScore = Math.min(20, personaKeywords.filter((word) => text.includes(word)).length * 3 + (job?.persona ? 5 : 0));
+  const sellingPointScore = Math.min(20, (job?.sellingPoints ?? []).filter((point) => text.includes(point)).length * 5 + (job && text.includes(job.title) ? 5 : 0));
+  const platformFitScore = Math.min(15, 6 + (content.tags.length >= 2 ? 3 : 0) + (content.platform === '小红书' && includesAny(['氛围', '成长', '体验']) ? 3 : 0) + (content.platform === '脉脉' && includesAny(['行业', '技术', '中高端']) ? 3 : 0) + (content.platform === 'B站' && includesAny(['视频', '访谈', '分享']) ? 3 : 0));
+  const ctaScore = includesAny(['投递', '私信', '链接', '查看岗位', '简历', '沟通']) ? 10 : 3;
+  const complianceScore = content.riskLevel === '高' ? 4 : content.riskLevel === '中' ? 10 : 15;
+  const total = titleScore + personaScore + sellingPointScore + platformFitScore + ctaScore + complianceScore;
+  const suggestions = [
+    titleScore < 14 ? '标题可以补充目标人群、具体场景或岗位亮点。' : '',
+    personaScore < 14 ? '建议补充候选人关心的薪酬、稳定性、挑战、团队氛围或成长空间。' : '',
+    sellingPointScore < 14 ? '建议把岗位卖点更明确地写入正文。' : '',
+    platformFitScore < 10 ? `建议调整为更适合${content.platform}的表达方式。` : '',
+    ctaScore < 8 ? '建议增加明确行动入口，例如投递、私信或查看岗位链接。' : '',
+    complianceScore < 10 ? '高风险表达需要合规审核并替换敏感口径。' : '',
+  ].filter(Boolean);
+  return {
+    id: `score-${Date.now()}`,
+    contentId: content.id,
+    total,
+    titleScore,
+    personaScore,
+    sellingPointScore,
+    platformFitScore,
+    ctaScore,
+    complianceScore,
+    suggestions,
+    createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    evaluator: '规则',
+  };
+}
+
+export function calculateAccountHealth(accountId: string, data: AppData): AccountHealthSnapshot {
+  const account = data.accounts.find((item) => item.id === accountId);
+  const contents = data.contents.filter((item) => item.accountId === accountId);
+  const published = contents.filter((item) => item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘');
+  const views = published.reduce((sum, item) => sum + item.metrics.views, 0);
+  const interactions = published.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
+  const clicks = published.reduce((sum, item) => sum + item.metrics.clicks, 0);
+  const latest = published.map((item) => item.publishedAt || item.dueDate).sort().at(-1);
+  const inactiveDays = latest ? Math.max(0, Math.floor((Date.now() - new Date(latest).getTime()) / 86400000)) : 999;
+  const highRiskRatio = contents.length ? contents.filter((item) => item.riskLevel === '高').length / contents.length : 0;
+  const positioningWords = (account?.positioning ?? '').split(/[、,，/]/).filter(Boolean);
+  const positioningMatchScore = contents.length ? Math.round((contents.filter((content) => positioningWords.some((word) => content.title.includes(word) || content.content.includes(word))).length / contents.length) * 100) : 0;
+  const level: AccountHealthSnapshot['level'] = inactiveDays >= 30 || highRiskRatio > 0.35 ? '风险' : inactiveDays >= 14 || positioningMatchScore < 30 ? '需关注' : '健康';
+  const suggestions = [
+    inactiveDays >= 14 ? `账号已 ${inactiveDays} 天未发布，建议补充排期。` : '',
+    highRiskRatio > 0.25 ? '高风险内容占比偏高，建议加强审核规则。' : '',
+    positioningMatchScore < 40 ? '内容与账号定位匹配度偏低，建议收敛选题。' : '',
+    clicks === 0 && views > 0 ? '有曝光但无点击，建议强化 CTA 和招聘入口。' : '',
+  ].filter(Boolean);
+  return {
+    id: `health-${accountId}-${Date.now()}`,
+    accountId,
+    periodStart: '',
+    periodEnd: new Date().toISOString().slice(0, 10),
+    publishCount: published.length,
+    averageViews: published.length ? Math.round(views / published.length) : 0,
+    averageInteractionRate: views ? Number((interactions / views).toFixed(4)) : 0,
+    averageClickRate: views ? Number((clicks / views).toFixed(4)) : 0,
+    highRiskRatio,
+    inactiveDays,
+    positioningMatchScore,
+    level,
+    suggestions,
+    createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+  };
+}
+
+export function detectCalendarConflicts(content: ContentTask, data: AppData) {
+  const conflicts: { type: '账号过载' | '频次不足' | '高风险未审' | '入口未配置' | '素材未授权'; message: string; level: '提醒' | '预警' | '阻断' }[] = [];
+  const sameDay = data.contents.filter((item) => item.id !== content.id && item.accountId === content.accountId && item.dueDate === content.dueDate);
+  if (sameDay.length >= 2) conflicts.push({ type: '账号过载', message: '同账号同日发布内容超过 2 条', level: '预警' });
+  const weekCount = data.contents.filter((item) => item.platform === content.platform && sameWeek(item.dueDate, content.dueDate)).length;
+  if (weekCount < 2) conflicts.push({ type: '频次不足', message: `${content.platform} 本周排期低于建议频次`, level: '提醒' });
+  if (content.riskLevel === '高' && !['待发布', '已发布', '数据回收中', '已复盘'].includes(content.status)) conflicts.push({ type: '高风险未审', message: '高风险内容尚未完成审核', level: '阻断' });
+  if (!data.entries.some((entry) => entry.platform === content.platform && entry.status === '启用')) conflicts.push({ type: '入口未配置', message: `${content.platform} 未配置启用的招聘入口`, level: '预警' });
+  const riskyAsset = data.assets.find((asset) => asset.platforms.includes(content.platform) && (asset.authorization.includes('待') || asset.authorization.includes('禁止') || asset.authorization.includes('需补充')));
+  if (riskyAsset && content.content.includes(riskyAsset.name)) conflicts.push({ type: '素材未授权', message: `关联素材 ${riskyAsset.name} 未完成授权`, level: '阻断' });
+  return conflicts;
+}
+
+function sameWeek(a: string, b: string) {
+  if (!a || !b) return false;
+  const da = new Date(a);
+  const db = new Date(b);
+  const weekStart = (date: Date) => {
+    const next = new Date(date);
+    next.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+    return next.toISOString().slice(0, 10);
+  };
+  return weekStart(da) === weekStart(db);
+}
+
+export function generateTopicsFromJob(job: JobNeed): TopicItem[] {
+  const templates = [
+    { type: '岗位种草', title: `${job.title} 值得关注的 3 个理由` },
+    { type: '技术观点', title: `${job.family}候选人最关心的技术挑战是什么` },
+    { type: '面试干货', title: `准备投递 ${job.title} 前可以了解什么` },
+  ];
+  return templates.map((item, index) => ({
+    id: `topic-${job.id}-${Date.now()}-${index}`,
+    title: item.title,
+    type: item.type,
+    platform: job.targetPlatforms[index % job.targetPlatforms.length] ?? '全部',
+    targetJobId: job.id,
+    owner: '招聘运营',
+    status: '待认领',
+    inspiration: `${job.persona}；岗位卖点：${job.sellingPoints.join('、')}`,
+    tags: [job.family, job.level, job.city],
+    source: 'AI',
+    createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+  }));
+}
+
+export function buildDataExplanations(data: AppData): DataExplanation[] {
+  const explanations = platforms.flatMap((platform) => {
+    const contents = data.contents.filter((item) => item.platform === platform);
+    const views = contents.reduce((sum, item) => sum + item.metrics.views, 0);
+    const clicks = contents.reduce((sum, item) => sum + item.metrics.clicks, 0);
+    const applications = data.beisenResults.filter((item) => item.sourcePlatform === platform && item.stage === '已投递').length;
+    const list = [];
+    if (views > 1000 && clicks / views < 0.005) {
+      list.push({ scope: '平台' as const, targetId: platform, title: `${platform} 曝光高但点击低`, body: '可能是 CTA 不清晰、招聘入口不明显，或内容偏品牌曝光而非岗位转化。', severity: '风险' as const, evidence: [`曝光 ${views}`, `点击 ${clicks}`, `点击率 ${((clicks / views) * 100).toFixed(2)}%`] });
+    }
+    if (clicks > 20 && applications / clicks < 0.05) {
+      list.push({ scope: '平台' as const, targetId: platform, title: `${platform} 点击后投递转化偏低`, body: '建议检查岗位落地页、薪酬口径、JD 清晰度和北森投递路径。', severity: '建议' as const, evidence: [`点击 ${clicks}`, `投递 ${applications}`] });
+    }
+    return list;
+  });
+  return explanations.map((item, index) => ({ ...item, id: `explain-${Date.now()}-${index}`, createdAt: new Date().toLocaleString('zh-CN', { hour12: false }) }));
+}
+
+export function buildPlatformStrategy(job: JobNeed | undefined, data: AppData) {
+  if (!job) return ['请选择岗位后生成平台策略建议。'];
+  const historical = platforms.map((platform) => {
+    const contents = data.contents.filter((item) => item.platform === platform && item.jobId === job.id);
+    return {
+      platform,
+      clicks: contents.reduce((sum, item) => sum + item.metrics.clicks, 0),
+      views: contents.reduce((sum, item) => sum + item.metrics.views, 0),
+    };
+  }).sort((a, b) => b.clicks - a.clicks);
+  const preferred = historical.find((item) => item.clicks > 0)?.platform ?? job.targetPlatforms[0] ?? '小红书';
+  return [
+    `首选平台：${preferred}，原因是${platformPositioning[preferred]}，且与该岗位候选人画像更接近。`,
+    `内容形式：${job.family.includes('技术') || job.type === '社招' ? '技术观点/岗位挑战拆解' : '岗位种草/团队氛围内容'}。`,
+    `发布频次：建议每周至少 2 条图文或 1 条长内容，连续 2 周观察点击和投递。`,
+    `账号建议：优先使用定位与 ${job.family} 相关、历史点击率较高的账号。`,
+  ];
 }
 
 function normalizePlatform(value: string | undefined): Platform | '未知' {

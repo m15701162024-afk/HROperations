@@ -65,6 +65,16 @@ describe('招聘运营助手', () => {
       promptTemplates: [],
       modelRunLogs: [],
       pluginRules: [],
+      tasks: [],
+      taskCompletions: [],
+      candidateLeads: [],
+      leadFollowUps: [],
+      contentQualityScores: [],
+      topics: [],
+      accountHealthSnapshots: [],
+      calendarMilestones: [],
+      dataExplanations: [],
+      reviewMentions: [],
     };
     localStorage.setItem('hr-assistant-data-mode', 'real-v1');
     localStorage.setItem('hr-assistant-data', JSON.stringify(realData));

@@ -1301,6 +1301,80 @@ textarea {
   margin-top: 2px;
 }
 
+.task-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.task-summary-grid div,
+.quality-box {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  background: #fbfcfa;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.task-summary-grid span,
+.task-row span,
+.task-row small,
+.quality-box span,
+.quality-box small {
+  color: var(--muted);
+}
+
+.task-summary-grid b {
+  font-size: 24px;
+}
+
+.task-list {
+  display: grid;
+  gap: 10px;
+}
+
+.task-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.task-row span,
+.task-row small,
+.quality-box small {
+  display: block;
+  margin-top: 4px;
+}
+
+.quality-box {
+  margin-top: 12px;
+}
+
+.quality-box > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.quality-box > div strong {
+  font-size: 28px;
+}
+
+.quality-box p {
+  margin: 0;
+}
+
+.milestone-item {
+  background: var(--teal-soft);
+}
+
 @media (max-width: 1080px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1363,7 +1437,9 @@ textarea {
   .form-grid,
   .lead-form,
   .stats-row,
-  .analytics-kpi-strip {
+  .analytics-kpi-strip,
+  .task-summary-grid,
+  .task-row {
     grid-template-columns: 1fr;
   }
 

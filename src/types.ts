@@ -1,5 +1,20 @@
 export type Platform = '小红书' | '脉脉' | 'B站' | '公众号' | '抖音' | '知乎' | '技术社区';
 
+export type AppSection =
+  | '工作台'
+  | '招聘需求'
+  | '选题库'
+  | '内容运营'
+  | '排期日历'
+  | '线索池'
+  | '素材资产'
+  | '账号与平台'
+  | '导入中心'
+  | '数据分析'
+  | '复盘报告'
+  | 'AI工作台'
+  | '系统配置';
+
 export type AccountType = '招聘专用账号' | 'HR个人IP账号' | '技术负责人账号' | '校招账号';
 
 export type ContentStatus =
@@ -173,6 +188,11 @@ export interface IntegrationSyncRun {
   recordCount: number;
   retryCount: number;
   detail?: string;
+  durationMs?: number;
+  requestId?: string;
+  errorCode?: string;
+  failedRows?: string[];
+  dataQualityScore?: number;
   ranAt: string;
 }
 
@@ -357,6 +377,124 @@ export interface PluginRule {
   updatedAt: string;
 }
 
+export interface TaskItem {
+  id: string;
+  type: '待发布' | '待审核' | '数据待回收' | '高风险待处理' | '素材授权到期' | '线索待跟进' | '审核超时' | '账号停更';
+  title: string;
+  body: string;
+  owner: string;
+  priority: '低' | '中' | '高';
+  status: '待处理' | '处理中' | '已完成' | '已忽略';
+  targetSection: AppSection;
+  targetId: string;
+  dueDate: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface CandidateLead {
+  id: string;
+  name: string;
+  contact: string;
+  sourcePlatform: Platform | '未知';
+  sourceAccountId?: string;
+  sourceContentId?: string;
+  targetJobId?: string;
+  owner: string;
+  stage: '待联系' | '已联系' | '已转北森' | '无效' | '暂不合适';
+  beisenStatus: '待转入' | '已转入' | '转入失败';
+  duplicateOf?: string;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LeadFollowUp {
+  id: string;
+  leadId: string;
+  actor: string;
+  method: '私信' | '电话' | '微信' | '邮件' | '评论' | '其他';
+  result: '未回复' | '有意向' | '已投递' | '不合适' | '待下次跟进';
+  content: string;
+  nextFollowAt?: string;
+  createdAt: string;
+}
+
+export interface ContentQualityScore {
+  id: string;
+  contentId: string;
+  total: number;
+  titleScore: number;
+  personaScore: number;
+  sellingPointScore: number;
+  platformFitScore: number;
+  ctaScore: number;
+  complianceScore: number;
+  suggestions: string[];
+  createdAt: string;
+  evaluator: '规则' | 'AI' | '人工';
+}
+
+export interface TopicItem {
+  id: string;
+  title: string;
+  type: string;
+  platform: Platform | '全部';
+  targetJobId?: string;
+  owner: string;
+  status: '待认领' | '已认领' | '写作中' | '已生成内容' | '已发布' | '已复盘' | '已归档';
+  inspiration: string;
+  tags: string[];
+  source: '人工' | 'AI' | '复盘沉淀';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountHealthSnapshot {
+  id: string;
+  accountId: string;
+  periodStart: string;
+  periodEnd: string;
+  publishCount: number;
+  averageViews: number;
+  averageInteractionRate: number;
+  averageClickRate: number;
+  highRiskRatio: number;
+  inactiveDays: number;
+  positioningMatchScore: number;
+  level: '健康' | '需关注' | '风险';
+  suggestions: string[];
+  createdAt: string;
+}
+
+export interface CalendarMilestone {
+  id: string;
+  title: string;
+  date: string;
+  type: '节假日' | '校招节点' | '招聘活动' | '业务节点' | '自定义';
+  note: string;
+}
+
+export interface DataExplanation {
+  id: string;
+  scope: '平台' | '账号' | '内容' | '岗位族群' | '全局';
+  targetId: string;
+  title: string;
+  body: string;
+  severity: '机会' | '风险' | '建议';
+  evidence: string[];
+  createdAt: string;
+}
+
+export interface ReviewMention {
+  id: string;
+  contentId: string;
+  userId: string;
+  commentId: string;
+  read: boolean;
+  createdAt: string;
+}
+
 export interface AppData {
   jobs: JobNeed[];
   accounts: PlatformAccount[];
@@ -388,4 +526,14 @@ export interface AppData {
   promptTemplates: PromptTemplate[];
   modelRunLogs: ModelRunLog[];
   pluginRules: PluginRule[];
+  tasks: TaskItem[];
+  taskCompletions: string[];
+  candidateLeads: CandidateLead[];
+  leadFollowUps: LeadFollowUp[];
+  contentQualityScores: ContentQualityScore[];
+  topics: TopicItem[];
+  accountHealthSnapshots: AccountHealthSnapshot[];
+  calendarMilestones: CalendarMilestone[];
+  dataExplanations: DataExplanation[];
+  reviewMentions: ReviewMention[];
 }

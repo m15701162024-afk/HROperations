@@ -230,5 +230,15 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     promptTemplates: data.promptTemplates ?? [],
     modelRunLogs: data.modelRunLogs ?? [],
     pluginRules: data.pluginRules ?? [],
+    tasks: data.tasks ?? [],
+    taskCompletions: data.taskCompletions ?? [],
+    candidateLeads: data.candidateLeads ?? [],
+    leadFollowUps: data.leadFollowUps ?? [],
+    contentQualityScores: data.contentQualityScores ?? [],
+    topics: data.topics ?? [],
+    accountHealthSnapshots: data.accountHealthSnapshots ?? [],
+    calendarMilestones: data.calendarMilestones ?? [],
+    dataExplanations: data.dataExplanations ?? [],
+    reviewMentions: data.reviewMentions ?? [],
   };
 }

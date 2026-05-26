@@ -28,26 +28,19 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type ApiUser, createSystemBackup, loadRemoteData, loadSystemHealth, loginLocalApi, normalizeAppData, runIntegrationSync, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
-import type { AccountType, AppData, AssetItem, BeisenResult, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, UserProfile, WorkflowRule } from './types';
+import type { AccountType, AppData, AppSection, AssetItem, BeisenResult, CalendarMilestone, CandidateLead, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, LeadFollowUp, ModelApiConfig, NotificationItem, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, TaskItem, TopicItem, UserProfile, WorkflowRule } from './types';
 import type { ImportRun, ModelRunLog, PluginRule, PromptTemplate, ReportAction } from './types';
-import { applyMetricsCsv, buildRecommendations, buildReportMarkdown, calculateRoi, downloadText, exportJson, parseBeisenCsv, parseJobCsv, readJsonFile, toCsv } from './utils';
+import { applyMetricsCsv, buildDataExplanations, buildPlatformStrategy, buildRecommendations, buildReportMarkdown, calculateAccountHealth, calculateRoi, deriveTasks, detectCalendarConflicts, downloadText, exportJson, findDuplicateLead, generateTopicsFromJob, parseBeisenCsv, parseJobCsv, parseLeadCsv, readJsonFile, scoreContentQuality, toCsv } from './utils';
 
-type Section =
-  | '工作台'
-  | '招聘需求'
-  | '内容运营'
-  | '素材资产'
-  | '账号与平台'
-  | '导入中心'
-  | '数据分析'
-  | '复盘报告'
-  | 'AI工作台'
-  | '系统配置';
+type Section = AppSection;
 
 const navItems: { key: Section; icon: React.ComponentType<{ size?: number }> }[] = [
   { key: '工作台', icon: Home },
   { key: '招聘需求', icon: ClipboardList },
+  { key: '选题库', icon: Sparkles },
   { key: '内容运营', icon: Megaphone },
+  { key: '排期日历', icon: Target },
+  { key: '线索池', icon: Users },
   { key: '素材资产', icon: Database },
   { key: '账号与平台', icon: Users },
   { key: '导入中心', icon: Database },
@@ -61,7 +54,10 @@ const contentTypes = ['岗位种草', '技术团队内容', '员工故事', '公
 const sectionPermissions: Record<Section, string> = {
   工作台: '工作台查看',
   招聘需求: '岗位查看',
+  选题库: '内容创建',
   内容运营: '内容查看',
+  排期日历: '内容查看',
+  线索池: '岗位查看',
   素材资产: '素材查看',
   账号与平台: '账号查看',
   导入中心: '数据导入',
@@ -282,6 +278,9 @@ function LoginScreen({ onLogin, error }: { onLogin: (username: string, password:
 function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; openSection: (section: Section) => void }) {
   const [goal, setGoal] = useState({ title: '', dimension: '平台', target: 0, current: 0, metric: '发布篇数' });
   const [drilldown, setDrilldown] = useState<'内容' | '曝光' | '互动' | '点击' | ''>('');
+  const [taskFilter, setTaskFilter] = useState<'全部' | TaskItem['type']>('全部');
+  const tasks = useMemo(() => deriveTasks(data), [data]);
+  const visibleTasks = tasks.filter((task) => taskFilter === '全部' || task.type === taskFilter);
   const totals = useMemo(() => {
     const published = data.contents.filter((item) => item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘').length;
     const views = data.contents.reduce((sum, item) => sum + item.metrics.views, 0);
@@ -325,6 +324,9 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
   const markAllNoticesRead = () => {
     audit('批量标记通知已读', `${data.notifications.filter((notice) => !notice.read).length} 条`, { ...data, notifications: data.notifications.map((notice) => ({ ...notice, read: true })) });
   };
+  const completeTask = (taskId: string) => {
+    audit('完成工作台任务', taskId, { ...data, taskCompletions: [...new Set([...data.taskCompletions, taskId])] });
+  };
 
   return (
     <div className="page-grid">
@@ -366,6 +368,41 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
           </div>
         </section>
       )}
+
+      <section className="panel wide">
+        <div className="panel-title">
+          <h2>今日任务中心</h2>
+          <ClipboardList size={18} />
+        </div>
+        <div className="module-tabs">
+          {(['全部', '待发布', '待审核', '数据待回收', '高风险待处理', '素材授权到期', '线索待跟进', '账号停更'] as const).map((item) => (
+            <button key={item} className={taskFilter === item ? 'active' : ''} onClick={() => setTaskFilter(item)}>{item}</button>
+          ))}
+        </div>
+        <div className="task-summary-grid">
+          <div><span>待处理</span><b>{tasks.length}</b></div>
+          <div><span>高优先级</span><b>{tasks.filter((task) => task.priority === '高').length}</b></div>
+          <div><span>线索待跟进</span><b>{tasks.filter((task) => task.type === '线索待跟进').length}</b></div>
+          <div><span>审核/发布</span><b>{tasks.filter((task) => task.type === '待审核' || task.type === '待发布').length}</b></div>
+        </div>
+        {visibleTasks.length === 0 && <EmptyState title="暂无待处理任务" body="当内容、线索、素材、账号出现待办时会自动进入这里。" />}
+        <div className="task-list">
+          {visibleTasks.map((task) => (
+            <div className="task-row" key={task.id}>
+              <div>
+                <strong>{task.title}</strong>
+                <span>{task.body}</span>
+                <small>{task.owner || '未分配'} · {task.dueDate || '无截止日期'}</small>
+              </div>
+              <div className="row-actions">
+                <Badge tone={task.priority === '高' ? 'danger' : task.priority === '中' ? 'warn' : 'info'}>{task.priority}</Badge>
+                <button className="ghost" onClick={() => openSection(task.targetSection)}>处理</button>
+                <button className="ghost" onClick={() => completeTask(task.id)}>完成</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <section className="panel wide">
         <div className="panel-title">
@@ -998,6 +1035,13 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
     };
     audit('复制内容任务', copy.title, { ...data, contents: [copy, ...data.contents] });
   };
+  const runQualityScore = (id: string) => {
+    const target = data.contents.find((item) => item.id === id);
+    if (!target) return;
+    const job = data.jobs.find((item) => item.id === target.jobId);
+    const score = scoreContentQuality(target, job);
+    audit('内容质量评分', `${target.title}：${score.total}分`, { ...data, contentQualityScores: [score, ...data.contentQualityScores] });
+  };
 
   return (
     <div className="page-grid">
@@ -1117,6 +1161,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
               .sort((a, b) => b.version - a.version);
             const comments = data.reviewComments.filter((comment) => comment.contentId === item.id);
             const revisionText = revisionDrafts[item.id] ?? item.content;
+            const qualityScore = data.contentQualityScores.find((score) => score.contentId === item.id);
             return (
             <article className="content-card" key={item.id}>
               <div>
@@ -1131,6 +1176,14 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
                   <span>负责人：{item.owner}</span>
                   <span>审核：{item.reviewer}</span>
                   <span>截止：{item.dueDate}</span>
+                </div>
+                <div className="quality-box">
+                  <div><strong>{qualityScore?.total ?? '未评分'}</strong><span>内容质量分</span></div>
+                  {qualityScore ? (
+                    <p>标题 {qualityScore.titleScore}/20 · 画像 {qualityScore.personaScore}/20 · 卖点 {qualityScore.sellingPointScore}/20 · 平台 {qualityScore.platformFitScore}/15 · CTA {qualityScore.ctaScore}/10 · 合规 {qualityScore.complianceScore}/15</p>
+                  ) : <p>发布前建议先进行内容质量评分。</p>}
+                  {qualityScore?.suggestions.map((suggestion) => <small key={suggestion}>{suggestion}</small>)}
+                  <button className="ghost" onClick={() => runQualityScore(item.id)}>重新评分</button>
                 </div>
                 <div className="inline-form compact-edit">
                   <input value={item.owner} onChange={(event) => updateContentField(item.id, { owner: event.target.value })} placeholder="负责人" />
@@ -1393,7 +1446,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
   const [landing, setLanding] = useState({ title: '', slug: '', pageType: '岗位集合页' as LandingPage['pageType'], destinationUrl: '' });
   const [editingAccountId, setEditingAccountId] = useState('');
   const [editingEntryId, setEditingEntryId] = useState('');
-  const [activePanel, setActivePanel] = useState<'平台总览' | '账号入口' | 'API集成' | '落地页'>('平台总览');
+  const [activePanel, setActivePanel] = useState<'平台总览' | '账号入口' | '账号健康度' | 'API集成' | '落地页'>('平台总览');
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('小红书');
   const [editingIntegrationId, setEditingIntegrationId] = useState('');
   const [landingLeadDrafts, setLandingLeadDrafts] = useState<Record<string, { name: string; contact: string; targetJobId: string; sourcePlatform: Platform | '未知'; note: string }>>({});
@@ -1828,7 +1881,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
       </section>
       <section className="panel wide">
         <div className="module-tabs">
-          {(['平台总览', '账号入口', 'API集成', '落地页'] as const).map((item) => (
+          {(['平台总览', '账号入口', '账号健康度', 'API集成', '落地页'] as const).map((item) => (
             <button key={item} className={activePanel === item ? 'active' : ''} onClick={() => setActivePanel(item)}>{item}</button>
           ))}
         </div>
@@ -1968,6 +2021,31 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
               </div>
             </article>
           ))}
+        </div>
+      </section>}
+      {activePanel === '账号健康度' && <section className="panel wide">
+        <div className="panel-title"><h2>账号健康度</h2><PieChart size={18} /></div>
+        <div className="entry-grid">
+          {data.accounts.length === 0 && <EmptyState title="暂无账号健康数据" body="配置真实平台账号并发布内容后，会计算健康等级。" />}
+          {data.accounts.map((account) => {
+            const health = calculateAccountHealth(account.id, data);
+            return (
+              <article key={account.id}>
+                <strong>{account.platform}｜{account.name}</strong>
+                <span>{account.positioning}</span>
+                <Badge tone={health.level === '健康' ? 'good' : health.level === '需关注' ? 'warn' : 'danger'}>{health.level}</Badge>
+                <div className="metric-mini-grid">
+                  <span>发布 <b>{health.publishCount}</b></span>
+                  <span>均曝 <b>{health.averageViews}</b></span>
+                  <span>互动率 <b>{(health.averageInteractionRate * 100).toFixed(1)}%</b></span>
+                  <span>点击率 <b>{(health.averageClickRate * 100).toFixed(1)}%</b></span>
+                  <span>停更 <b>{health.inactiveDays >= 999 ? '无发布' : `${health.inactiveDays}天`}</b></span>
+                  <span>定位 <b>{health.positioningMatchScore}%</b></span>
+                </div>
+                {health.suggestions.length === 0 ? <p>账号运营状态正常。</p> : health.suggestions.map((suggestion) => <p key={suggestion}>{suggestion}</p>)}
+              </article>
+            );
+          })}
         </div>
       </section>}
       {activePanel === 'API集成' && <section className="panel wide">
@@ -2178,6 +2256,9 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   }).filter((item) => item.count > 0);
   const maxSelectedViews = Math.max(...selectedContents.map((item) => item.metrics.views), 1);
   const maxStageCount = Math.max(...stageStats.map((item) => item.count), 1);
+  const explanations = buildDataExplanations(data);
+  const strategyJob = data.jobs[0];
+  const strategy = buildPlatformStrategy(strategyJob, data);
   const importMetrics = () => {
     const nextContents = applyMetricsCsv(data.contents, metricsCsv);
     audit('导入平台指标', '内容数据', { ...data, contents: nextContents });
@@ -2264,6 +2345,27 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
               <small>点击率 {formatRate(item.clicks, item.views)} · 有效率 {formatRate(item.effective, item.applications)} · Offer {item.offers}</small>
             </button>
           ))}
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>智能数据解释与平台策略</h2><Bot size={18} /></div>
+        <div className="entry-grid">
+          <article>
+            <strong>数据解释</strong>
+            {explanations.length === 0 && <span>当前暂无异常解释。导入真实曝光、点击、投递后会自动生成业务说明。</span>}
+            {explanations.map((item) => (
+              <div className="insight" key={item.id}>
+                <Badge tone={item.severity === '风险' ? 'danger' : item.severity === '机会' ? 'good' : 'info'}>{item.severity}</Badge>
+                <strong>{item.title}</strong>
+                <p>{item.body}</p>
+                <small>{item.evidence.join(' · ')}</small>
+              </div>
+            ))}
+          </article>
+          <article>
+            <strong>{strategyJob ? `${strategyJob.title} 平台策略` : '平台策略建议'}</strong>
+            {strategy.map((item) => <p key={item}>{item}</p>)}
+          </article>
         </div>
       </section>
       <section className="panel wide">
@@ -2394,6 +2496,277 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           <div>互动行为 <b>{data.contents.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0).toLocaleString()}</b></div>
           <div>入口点击 <b>{data.contents.reduce((sum, item) => sum + item.metrics.clicks, 0)}</b></div>
         </div>
+      </section>
+    </div>
+  );
+}
+
+function TopicLibrary({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+  const [topic, setTopic] = useState({ title: '', type: '岗位种草', platform: '全部' as TopicItem['platform'], targetJobId: '', owner: '招聘运营', inspiration: '', tags: '' });
+  const addTopic = () => {
+    if (!topic.title.trim()) return;
+    const item: TopicItem = {
+      id: `topic-${Date.now()}`,
+      title: topic.title,
+      type: topic.type,
+      platform: topic.platform,
+      targetJobId: topic.targetJobId || undefined,
+      owner: topic.owner,
+      status: '待认领',
+      inspiration: topic.inspiration,
+      tags: topic.tags.split(/[、,，/]/).map((tag) => tag.trim()).filter(Boolean),
+      source: '人工',
+      createdAt: nowText(),
+      updatedAt: nowText(),
+    };
+    audit('新增选题', item.title, { ...data, topics: [item, ...data.topics] });
+    setTopic({ title: '', type: '岗位种草', platform: '全部', targetJobId: '', owner: '招聘运营', inspiration: '', tags: '' });
+  };
+  const generateTopics = (jobId: string) => {
+    const job = data.jobs.find((item) => item.id === jobId);
+    if (!job) return;
+    const topics = generateTopicsFromJob(job);
+    audit('AI生成岗位选题', job.title, { ...data, topics: [...topics, ...data.topics] });
+  };
+  const updateTopic = (id: string, patch: Partial<TopicItem>) => {
+    const target = data.topics.find((item) => item.id === id);
+    if (!target) return;
+    audit('更新选题', target.title, { ...data, topics: data.topics.map((item) => item.id === id ? { ...item, ...patch, updatedAt: nowText() } : item) });
+  };
+  const convertTopicToContent = (item: TopicItem) => {
+    const job = data.jobs.find((current) => current.id === item.targetJobId) ?? data.jobs[0];
+    if (!job) return;
+    const risk = scanRisks(item.inspiration);
+    const content: ContentTask = {
+      id: `content-${Date.now()}`,
+      title: `${item.platform === '全部' ? job.targetPlatforms[0] ?? '小红书' : item.platform}｜${item.title}`,
+      jobId: job.id,
+      platform: item.platform === '全部' ? job.targetPlatforms[0] ?? '小红书' : item.platform,
+      accountId: data.accounts.find((account) => account.platform === (item.platform === '全部' ? job.targetPlatforms[0] : item.platform))?.id ?? '',
+      type: item.type,
+      status: '草稿',
+      owner: item.owner,
+      reviewer: '',
+      dueDate: new Date().toISOString().slice(0, 10),
+      content: item.inspiration || `围绕 ${job.title} 展开，回应候选人关注点并给出投递入口。`,
+      tags: item.tags,
+      riskLevel: risk.level,
+      risks: risk.risks,
+      metrics: { views: 0, likes: 0, comments: 0, saves: 0, shares: 0, clicks: 0 },
+    };
+    audit('选题转内容任务', item.title, {
+      ...data,
+      contents: [content, ...data.contents],
+      topics: data.topics.map((topicItem) => topicItem.id === item.id ? { ...topicItem, status: '已生成内容', updatedAt: nowText() } : topicItem),
+    });
+  };
+  return (
+    <div className="page-grid">
+      <section className="toolbar">
+        <div><h1>选题库</h1><p>沉淀岗位种草、技术观点、职场话题和校招内容选题，并转化为内容任务。</p></div>
+        <button onClick={() => exportJson('选题库.json', data.topics)}><FileText size={16} />导出选题</button>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>新增选题</h2><Sparkles size={18} /></div>
+        <div className="inline-form">
+          <input value={topic.title} onChange={(event) => setTopic({ ...topic, title: event.target.value })} placeholder="选题标题" />
+          <select value={topic.type} onChange={(event) => setTopic({ ...topic, type: event.target.value })}>{contentTypes.map((type) => <option key={type}>{type}</option>)}</select>
+          <select value={topic.platform} onChange={(event) => setTopic({ ...topic, platform: event.target.value as TopicItem['platform'] })}><option>全部</option>{platforms.map((platform) => <option key={platform}>{platform}</option>)}</select>
+          <select value={topic.targetJobId} onChange={(event) => setTopic({ ...topic, targetJobId: event.target.value })}><option value="">关联岗位</option>{data.jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select>
+          <button onClick={addTopic}><Plus size={16} />保存选题</button>
+        </div>
+        <div className="inline-form model-form">
+          <input value={topic.owner} onChange={(event) => setTopic({ ...topic, owner: event.target.value })} placeholder="负责人" />
+          <input value={topic.tags} onChange={(event) => setTopic({ ...topic, tags: event.target.value })} placeholder="标签，用顿号分隔" />
+        </div>
+        <textarea className="small-textarea" value={topic.inspiration} onChange={(event) => setTopic({ ...topic, inspiration: event.target.value })} placeholder="选题灵感、候选人痛点、可引用素材或平台表达方向" />
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>从岗位生成选题</h2><Bot size={18} /></div>
+        <div className="entry-grid">
+          {data.jobs.length === 0 && <EmptyState title="暂无岗位" body="先录入真实岗位后，可从岗位一键生成选题。" />}
+          {data.jobs.map((job) => <article key={job.id}><strong>{job.title}</strong><span>{job.family} · {job.level} · {job.targetPlatforms.join('、')}</span><button className="ghost" onClick={() => generateTopics(job.id)}>生成 3 个选题</button></article>)}
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>选题列表</h2><ClipboardList size={18} /></div>
+        <div className="entry-grid">
+          {data.topics.length === 0 && <EmptyState title="暂无真实选题" body="新增选题或从岗位生成选题后，会在这里管理认领、写作和复盘状态。" />}
+          {data.topics.map((item) => (
+            <article key={item.id}>
+              <strong>{item.title}</strong>
+              <span>{item.type} · {item.platform} · {item.owner} · {item.tags.join('、')}</span>
+              <p>{item.inspiration}</p>
+              <select value={item.status} onChange={(event) => updateTopic(item.id, { status: event.target.value as TopicItem['status'] })}>
+                <option>待认领</option><option>已认领</option><option>写作中</option><option>已生成内容</option><option>已发布</option><option>已复盘</option><option>已归档</option>
+              </select>
+              <div className="row-actions"><Badge tone="info">{item.source}</Badge><button className="ghost" onClick={() => convertTopicToContent(item)}>转内容任务</button></div>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ScheduleCalendar({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+  const [view, setView] = useState<'周' | '月'>('周');
+  const [platform, setPlatform] = useState<Platform | '全部'>('全部');
+  const [accountId, setAccountId] = useState('全部');
+  const [milestone, setMilestone] = useState({ title: '', date: new Date().toISOString().slice(0, 10), type: '招聘活动' as CalendarMilestone['type'], note: '' });
+  const filtered = data.contents.filter((content) => (platform === '全部' || content.platform === platform) && (accountId === '全部' || content.accountId === accountId));
+  const dates = [...new Set([...filtered.map((content) => content.dueDate), ...data.calendarMilestones.map((item) => item.date)])].filter(Boolean).sort();
+  const updateContentDate = (id: string, dueDate: string) => {
+    const target = data.contents.find((content) => content.id === id);
+    audit('调整内容排期', `${target?.title ?? id}：${dueDate}`, { ...data, contents: data.contents.map((content) => content.id === id ? { ...content, dueDate } : content) });
+  };
+  const addMilestone = () => {
+    if (!milestone.title.trim()) return;
+    const item: CalendarMilestone = { id: `mile-${Date.now()}`, ...milestone };
+    audit('新增日历节点', item.title, { ...data, calendarMilestones: [item, ...data.calendarMilestones] });
+    setMilestone({ title: '', date: new Date().toISOString().slice(0, 10), type: '招聘活动', note: '' });
+  };
+  return (
+    <div className="page-grid">
+      <section className="toolbar">
+        <div><h1>排期日历</h1><p>按周/月查看内容排期、平台频次、账号冲突和招聘节点。</p></div>
+        <div className="toolbar-actions"><button className={view === '周' ? '' : 'secondary'} onClick={() => setView('周')}>周视图</button><button className={view === '月' ? '' : 'secondary'} onClick={() => setView('月')}>月视图</button></div>
+      </section>
+      <section className="panel wide">
+        <div className="inline-form">
+          <select value={platform} onChange={(event) => setPlatform(event.target.value as Platform | '全部')}><option>全部</option>{platforms.map((item) => <option key={item}>{item}</option>)}</select>
+          <select value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="全部">全部账号</option>{data.accounts.map((account) => <option key={account.id} value={account.id}>{account.platform}｜{account.name}</option>)}</select>
+        </div>
+        <div className={`calendar-grid ${view === '周' ? 'week-mode' : ''}`}>
+          {dates.length === 0 && <EmptyState title="暂无排期" body="内容任务有截止日期后，会进入排期日历。" />}
+          {dates.map((date) => (
+            <div className="calendar-day" key={date}>
+              <strong>{date}</strong>
+              {data.calendarMilestones.filter((item) => item.date === date).map((item) => <div className="calendar-item milestone-item" key={item.id}><Badge tone="info">{item.type}</Badge><span>{item.title}</span><small>{item.note}</small></div>)}
+              {filtered.filter((content) => content.dueDate === date).map((content) => {
+                const conflicts = detectCalendarConflicts(content, data);
+                return (
+                  <div className="calendar-item" key={content.id}>
+                    <strong>{content.title}</strong>
+                    <span>{content.platform} · {content.status}</span>
+                    <input type="date" value={content.dueDate} onChange={(event) => updateContentDate(content.id, event.target.value)} />
+                    {conflicts.map((conflict) => <Badge key={conflict.type} tone={conflict.level === '阻断' ? 'danger' : conflict.level === '预警' ? 'warn' : 'info'}>{conflict.type}</Badge>)}
+                    <details className="version-box"><summary>查看详情</summary><p>{content.content}</p>{conflicts.map((conflict) => <p key={conflict.message}>{conflict.message}</p>)}</details>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>招聘节点</h2><Target size={18} /></div>
+        <div className="inline-form">
+          <input value={milestone.title} onChange={(event) => setMilestone({ ...milestone, title: event.target.value })} placeholder="节点名称" />
+          <input type="date" value={milestone.date} onChange={(event) => setMilestone({ ...milestone, date: event.target.value })} />
+          <select value={milestone.type} onChange={(event) => setMilestone({ ...milestone, type: event.target.value as CalendarMilestone['type'] })}><option>节假日</option><option>校招节点</option><option>招聘活动</option><option>业务节点</option><option>自定义</option></select>
+          <input value={milestone.note} onChange={(event) => setMilestone({ ...milestone, note: event.target.value })} placeholder="说明" />
+          <button onClick={addMilestone}><Plus size={16} />新增节点</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function LeadPool({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
+  const [lead, setLead] = useState({ name: '', contact: '', sourcePlatform: '小红书' as Platform | '未知', sourceAccountId: '', sourceContentId: '', targetJobId: '', owner: '招聘专员', note: '' });
+  const [selectedLeadId, setSelectedLeadId] = useState('');
+  const [csv, setCsv] = useState('');
+  const [follow, setFollow] = useState({ actor: '招聘专员', method: '私信' as LeadFollowUp['method'], result: '未回复' as LeadFollowUp['result'], content: '', nextFollowAt: '' });
+  const addLead = () => {
+    if (!lead.name.trim() && !lead.contact.trim()) return;
+    const item: CandidateLead = { id: `lead-${Date.now()}`, ...lead, sourceAccountId: lead.sourceAccountId || undefined, sourceContentId: lead.sourceContentId || undefined, targetJobId: lead.targetJobId || undefined, stage: '待联系', beisenStatus: '待转入', duplicateOf: undefined, createdAt: nowText(), updatedAt: nowText() };
+    const duplicated = findDuplicateLead(data.candidateLeads, item);
+    audit('新增候选人线索', item.name || item.contact, { ...data, candidateLeads: [{ ...item, duplicateOf: duplicated?.id }, ...data.candidateLeads] });
+    setLead({ name: '', contact: '', sourcePlatform: '小红书', sourceAccountId: '', sourceContentId: '', targetJobId: '', owner: '招聘专员', note: '' });
+  };
+  const importLeads = () => {
+    const leads = parseLeadCsv(csv, data.candidateLeads);
+    if (leads.length === 0) return;
+    audit('导入候选人线索', `${leads.length} 条`, { ...data, candidateLeads: [...leads, ...data.candidateLeads] });
+    setCsv('');
+  };
+  const updateLead = (id: string, patch: Partial<CandidateLead>) => {
+    const target = data.candidateLeads.find((item) => item.id === id);
+    audit('更新候选人线索', target?.name ?? id, { ...data, candidateLeads: data.candidateLeads.map((item) => item.id === id ? { ...item, ...patch, updatedAt: nowText() } : item) });
+  };
+  const addFollowUp = () => {
+    if (!selectedLeadId || !follow.content.trim()) return;
+    const item: LeadFollowUp = { id: `follow-${Date.now()}`, leadId: selectedLeadId, ...follow, nextFollowAt: follow.nextFollowAt || undefined, createdAt: nowText() };
+    audit('新增线索跟进', selectedLeadId, { ...data, leadFollowUps: [item, ...data.leadFollowUps] });
+    setFollow({ actor: '招聘专员', method: '私信', result: '未回复', content: '', nextFollowAt: '' });
+  };
+  const transferToBeisen = (id: string) => {
+    const item = data.candidateLeads.find((leadItem) => leadItem.id === id);
+    if (!item) return;
+    const result: BeisenResult = { id: `beisen-lead-${Date.now()}`, jobId: item.targetJobId ?? '', sourcePlatform: item.sourcePlatform, sourceContentId: item.sourceContentId, candidateCode: `lead-${item.id}`, stage: '已投递', importedAt: nowText() };
+    audit('线索转入北森', item.name || item.contact, { ...data, candidateLeads: data.candidateLeads.map((leadItem) => leadItem.id === id ? { ...leadItem, stage: '已转北森', beisenStatus: '已转入', updatedAt: nowText() } : leadItem), beisenResults: [result, ...data.beisenResults] });
+  };
+  const selectedLead = data.candidateLeads.find((item) => item.id === selectedLeadId);
+  return (
+    <div className="page-grid">
+      <section className="toolbar">
+        <div><h1>线索池</h1><p>管理平台私信、评论、落地页和手动录入的候选人线索，并转入北森归因。</p></div>
+        <button onClick={() => downloadText('候选人线索.csv', toCsv(data.candidateLeads.map((item) => ({ name: item.name, contact: item.contact, sourcePlatform: item.sourcePlatform, owner: item.owner, stage: item.stage, beisenStatus: item.beisenStatus }))), 'text/csv;charset=utf-8')}><FileText size={16} />导出线索</button>
+      </section>
+      <div className="stats-row">
+        <StatCard label="总线索" value={data.candidateLeads.length} note="真实线索池" icon={Users} />
+        <StatCard label="待联系" value={data.candidateLeads.filter((item) => item.stage === '待联系').length} note="需要跟进" icon={Bell} />
+        <StatCard label="已转北森" value={data.candidateLeads.filter((item) => item.beisenStatus === '已转入').length} note="进入 ATS" icon={CheckCircle2} />
+        <StatCard label="疑似重复" value={data.candidateLeads.filter((item) => item.duplicateOf).length} note="按联系方式识别" icon={AlertTriangle} />
+      </div>
+      <section className="panel wide">
+        <div className="panel-title"><h2>新增线索</h2><Plus size={18} /></div>
+        <div className="inline-form">
+          <input value={lead.name} onChange={(event) => setLead({ ...lead, name: event.target.value })} placeholder="姓名/昵称" />
+          <input value={lead.contact} onChange={(event) => setLead({ ...lead, contact: event.target.value })} placeholder="联系方式" />
+          <select value={lead.sourcePlatform} onChange={(event) => setLead({ ...lead, sourcePlatform: event.target.value as Platform | '未知' })}><option>未知</option>{platforms.map((item) => <option key={item}>{item}</option>)}</select>
+          <select value={lead.targetJobId} onChange={(event) => setLead({ ...lead, targetJobId: event.target.value })}><option value="">意向岗位</option>{data.jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select>
+          <button onClick={addLead}><Plus size={16} />保存线索</button>
+        </div>
+        <div className="inline-form model-form"><input value={lead.owner} onChange={(event) => setLead({ ...lead, owner: event.target.value })} placeholder="跟进人" /><input value={lead.note} onChange={(event) => setLead({ ...lead, note: event.target.value })} placeholder="备注" /></div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>批量导入</h2><Database size={18} /></div>
+        <textarea className="small-textarea" value={csv} onChange={(event) => setCsv(event.target.value)} placeholder="name,contact,sourcePlatform,targetJobId,owner,note&#10;张三,13800000000,脉脉,job-xxx,招聘专员,Java候选人" />
+        <button className="full" onClick={importLeads}>导入线索</button>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>线索列表</h2><Users size={18} /></div>
+        {data.candidateLeads.length === 0 && <EmptyState title="暂无真实线索" body="可手动录入、CSV 导入或从落地页线索转入。" />}
+        <table>
+          <thead><tr><th>线索</th><th>来源</th><th>意向岗位</th><th>阶段</th><th>北森</th><th>操作</th></tr></thead>
+          <tbody>
+            {data.candidateLeads.map((item) => (
+              <tr key={item.id}>
+                <td><strong>{item.name || '未命名'}</strong><span>{item.contact}{item.duplicateOf ? ' · 疑似重复' : ''}</span></td>
+                <td>{item.sourcePlatform}<span>{data.accounts.find((account) => account.id === item.sourceAccountId)?.name ?? '未绑定账号'}</span></td>
+                <td>{data.jobs.find((job) => job.id === item.targetJobId)?.title ?? '未关联'}</td>
+                <td><select value={item.stage} onChange={(event) => updateLead(item.id, { stage: event.target.value as CandidateLead['stage'] })}><option>待联系</option><option>已联系</option><option>已转北森</option><option>无效</option><option>暂不合适</option></select></td>
+                <td><Badge tone={item.beisenStatus === '已转入' ? 'good' : item.beisenStatus === '转入失败' ? 'danger' : 'warn'}>{item.beisenStatus}</Badge></td>
+                <td><div className="row-actions"><button className="ghost" onClick={() => setSelectedLeadId(item.id)}>详情/跟进</button><button className="ghost" onClick={() => transferToBeisen(item.id)} disabled={item.beisenStatus === '已转入'}>转北森</button></div></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {selectedLead && <div className="detail-panel">
+          <strong>{selectedLead.name || selectedLead.contact}</strong>
+          <span>{selectedLead.note || '暂无备注'}</span>
+          <div className="inline-form">
+            <input value={follow.actor} onChange={(event) => setFollow({ ...follow, actor: event.target.value })} placeholder="跟进人" />
+            <select value={follow.method} onChange={(event) => setFollow({ ...follow, method: event.target.value as LeadFollowUp['method'] })}><option>私信</option><option>电话</option><option>微信</option><option>邮件</option><option>评论</option><option>其他</option></select>
+            <select value={follow.result} onChange={(event) => setFollow({ ...follow, result: event.target.value as LeadFollowUp['result'] })}><option>未回复</option><option>有意向</option><option>已投递</option><option>不合适</option><option>待下次跟进</option></select>
+            <input type="date" value={follow.nextFollowAt} onChange={(event) => setFollow({ ...follow, nextFollowAt: event.target.value })} />
+            <button onClick={addFollowUp}>保存跟进</button>
+          </div>
+          <textarea className="small-textarea" value={follow.content} onChange={(event) => setFollow({ ...follow, content: event.target.value })} placeholder="沟通记录" />
+          {data.leadFollowUps.filter((item) => item.leadId === selectedLead.id).map((item) => <p key={item.id}>{item.createdAt} · {item.actor} · {item.method} · {item.result}：{item.content}</p>)}
+        </div>}
       </section>
     </div>
   );
@@ -3564,8 +3937,14 @@ function renderSection(
       return <Dashboard data={data} audit={audit} openSection={openSection} />;
     case '招聘需求':
       return <Jobs data={data} audit={audit} />;
+    case '选题库':
+      return <TopicLibrary data={data} audit={audit} />;
     case '内容运营':
       return <ContentOps data={data} audit={audit} apiToken={apiToken} />;
+    case '排期日历':
+      return <ScheduleCalendar data={data} audit={audit} />;
+    case '线索池':
+      return <LeadPool data={data} audit={audit} />;
     case '素材资产':
       return <Assets data={data} audit={audit} apiToken={apiToken} />;
     case '账号与平台':

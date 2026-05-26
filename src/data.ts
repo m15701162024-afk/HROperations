@@ -68,6 +68,16 @@ export const emptyData: AppData = {
   promptTemplates: [],
   modelRunLogs: [],
   pluginRules: [],
+  tasks: [],
+  taskCompletions: [],
+  candidateLeads: [],
+  leadFollowUps: [],
+  contentQualityScores: [],
+  topics: [],
+  accountHealthSnapshots: [],
+  calendarMilestones: [],
+  dataExplanations: [],
+  reviewMentions: [],
 };
 
 export const seedData: AppData = {
@@ -356,6 +366,16 @@ export const seedData: AppData = {
   promptTemplates: [],
   modelRunLogs: [],
   pluginRules: [],
+  tasks: [],
+  taskCompletions: [],
+  candidateLeads: [],
+  leadFollowUps: [],
+  contentQualityScores: [],
+  topics: [],
+  accountHealthSnapshots: [],
+  calendarMilestones: [],
+  dataExplanations: [],
+  reviewMentions: [],
 };
 
 export function generateContent(job: JobNeed, platform: Platform) {
