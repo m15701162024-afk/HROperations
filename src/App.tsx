@@ -2357,6 +2357,63 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       clicks: related.reduce((sum, item) => sum + item.metrics.clicks, 0),
     };
   }).filter((item) => item.count > 0);
+  const topContents = selectedContents
+    .slice()
+    .sort((a, b) => (b.metrics.clicks * 3 + b.metrics.likes + b.metrics.comments + b.metrics.saves + b.metrics.shares) - (a.metrics.clicks * 3 + a.metrics.likes + a.metrics.comments + a.metrics.saves + a.metrics.shares))
+    .slice(0, 5);
+  const bottomContents = selectedContents
+    .filter((item) => item.metrics.views > 0 || item.metrics.clicks > 0)
+    .slice()
+    .sort((a, b) => {
+      const aRate = a.metrics.views > 0 ? a.metrics.clicks / a.metrics.views : 0;
+      const bRate = b.metrics.views > 0 ? b.metrics.clicks / b.metrics.views : 0;
+      return aRate - bRate || a.metrics.clicks - b.metrics.clicks;
+    })
+    .slice(0, 5);
+  const funnelDiagnostics = [
+    {
+      id: '曝光到点击',
+      current: selectedClicks,
+      base: selectedViews,
+      rate: analyticsResult.summary.clickRate,
+      threshold: 0.01,
+      owner: '运营/内容',
+      action: '优先优化标题、封面、首段 CTA 和招聘入口位置。',
+    },
+    {
+      id: '点击到投递',
+      current: selectedApplications,
+      base: selectedClicks,
+      rate: analyticsResult.summary.applicationRate,
+      threshold: 0.08,
+      owner: '招聘/平台入口',
+      action: '检查北森链接、岗位页转化、入口追踪码和候选人投递门槛。',
+    },
+    {
+      id: '投递到有效',
+      current: selectedEffective,
+      base: selectedApplications,
+      rate: analyticsResult.summary.effectiveRate,
+      threshold: 0.25,
+      owner: '招聘/用人部门',
+      action: '复盘候选人画像、岗位卖点和筛选标准，减少低匹配投递。',
+    },
+    {
+      id: '投递到入职',
+      current: selectedHires,
+      base: selectedApplications,
+      rate: analyticsResult.summary.hireRate,
+      threshold: 0.03,
+      owner: '招聘负责人',
+      action: '定位面试转化、Offer 接受率和岗位竞争力问题。',
+    },
+  ];
+  const activeBottlenecks = funnelDiagnostics.filter((item) => item.base > 0 && item.rate < item.threshold);
+  const priorityActions = [
+    ...(visibleQualityIssues.length > 0 ? [`先处理 ${visibleQualityIssues.length} 条数据质量问题，避免错误归因影响决策。`] : []),
+    ...(activeBottlenecks.length > 0 ? activeBottlenecks.map((item) => `${item.id}偏低：${item.action}`) : ['当前漏斗未发现明显断点，可放大高表现内容并补齐更多真实回流数据。']),
+    ...(topContents[0] ? [`复用高表现内容「${topContents[0].title}」的标题结构、平台表达和 CTA。`] : ['先导入内容指标，系统才能识别高表现内容模板。']),
+  ].slice(0, 5);
   const maxSelectedViews = Math.max(...selectedContents.map((item) => item.metrics.views), 1);
   const maxStageCount = Math.max(...stageStats.map((item) => item.count), 1);
   const explanations = buildDataExplanations(data);
@@ -2437,10 +2494,10 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           {platforms.map((platform) => <button key={platform} className={selectedPlatform === platform ? 'active' : ''} onClick={() => { setSelectedPlatform(platform); setDetailPage(1); }}>{platform}</button>)}
         </div>
         <div className="stats-row compact-stats analytics-stats">
-          <StatCard label="内容数" value={selectedContents.length} note="当前筛选平台" icon={FileText} />
-          <StatCard label="曝光" value={selectedViews.toLocaleString()} note={`互动率 ${formatMetricRate(analyticsResult.summary.interactionRate)}`} icon={Rocket} />
-          <StatCard label="点击" value={selectedClicks.toLocaleString()} note={`点击率 ${formatMetricRate(analyticsResult.summary.clickRate)}`} icon={Link} />
-          <StatCard label="北森回流" value={selectedResults.length} note="投递/面试/入职" icon={Users} />
+          <button className="stat-button" onClick={() => setDrill({ type: '平台', id: String(selectedPlatform) })}><StatCard label="内容数" value={selectedContents.length} note="当前筛选平台" icon={FileText} /></button>
+          <button className="stat-button" onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}><StatCard label="曝光" value={selectedViews.toLocaleString()} note={`互动率 ${formatMetricRate(analyticsResult.summary.interactionRate)}`} icon={Rocket} /></button>
+          <button className="stat-button" onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}><StatCard label="点击" value={selectedClicks.toLocaleString()} note={`点击率 ${formatMetricRate(analyticsResult.summary.clickRate)}`} icon={Link} /></button>
+          <button className="stat-button" onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}><StatCard label="北森回流" value={selectedResults.length} note="投递/面试/入职" icon={Users} /></button>
         </div>
         <div className="analytics-kpi-strip">
           <div><span>互动量</span><b>{selectedInteractions.toLocaleString()}</b><small>赞评藏转合计</small></div>
@@ -2452,6 +2509,54 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           <strong>当前结论</strong>
           <span>{platformConclusion}</span>
           <button className="ghost" onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}>查看漏斗下钻</button>
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>效率诊断与行动优先级</h2><Target size={18} /></div>
+        <div className="efficiency-grid">
+          {funnelDiagnostics.map((item) => (
+            <button key={item.id} className={`efficiency-card ${item.base > 0 && item.rate < item.threshold ? 'risk' : 'ok'}`} onClick={() => setDrill({ type: '漏斗', id: item.id })}>
+              <span>{item.id}</span>
+              <strong>{formatMetricRate(item.rate)}</strong>
+              <small>{item.current} / {item.base || 0} · 负责人：{item.owner}</small>
+              <Badge tone={item.base === 0 ? 'neutral' : item.rate < item.threshold ? 'danger' : 'good'}>{item.base === 0 ? '待补数据' : item.rate < item.threshold ? '需处理' : '正常'}</Badge>
+            </button>
+          ))}
+        </div>
+        <div className="action-priority-list">
+          {priorityActions.map((item, index) => (
+            <div key={item}>
+              <b>{index + 1}</b>
+              <span>{item}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>内容表现 Top / Bottom</h2><BarChart3 size={18} /></div>
+        <div className="performance-compare-grid">
+          <article>
+            <strong>优先复用</strong>
+            {topContents.length === 0 && <EmptyState title="暂无高表现内容" body="导入真实曝光、互动、点击后会生成可复用内容样本。" />}
+            {topContents.map((content) => (
+              <button key={content.id} className="performance-row" onClick={() => setDrill({ type: '内容', id: content.id })}>
+                <span>{content.title}</span>
+                <small>{content.platform} · {content.type} · {content.metrics.views} 曝光 · {content.metrics.clicks} 点击</small>
+                <Badge tone="good">复用</Badge>
+              </button>
+            ))}
+          </article>
+          <article>
+            <strong>优先复盘</strong>
+            {bottomContents.length === 0 && <EmptyState title="暂无低表现内容" body="有曝光但点击偏低的内容会进入这里。" />}
+            {bottomContents.map((content) => (
+              <button key={content.id} className="performance-row" onClick={() => setDrill({ type: '内容', id: content.id })}>
+                <span>{content.title}</span>
+                <small>{content.platform} · 点击率 {formatRate(content.metrics.clicks, content.metrics.views)} · 建议复盘标题/CTA/平台匹配</small>
+                <Badge tone="warn">复盘</Badge>
+              </button>
+            ))}
+          </article>
         </div>
       </section>
       <section className="panel wide analytics-board">
