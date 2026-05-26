@@ -457,6 +457,61 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (pathname === '/api/analytics/summary' && request.method === 'GET') {
+    if (!requireSession(request, response)) return;
+    try {
+      const query = Object.fromEntries(currentUrl.searchParams.entries());
+      const data = await repository.readData();
+      send(response, 200, buildAnalyticsDrill(data, { ...query, dimension: 'summary' }));
+    } catch (error) {
+      send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Analytics summary failed' });
+    }
+    return;
+  }
+
+  if (pathname.startsWith('/api/analytics/drill/') && request.method === 'POST') {
+    if (!requireSession(request, response)) return;
+    try {
+      const dimension = pathname.replace('/api/analytics/drill/', '') || 'platform';
+      const body = JSON.parse(await readBody(request));
+      const data = await repository.readData();
+      send(response, 200, buildAnalyticsDrill(data, { ...body, dimension }));
+    } catch (error) {
+      send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Analytics drill failed' });
+    }
+    return;
+  }
+
+  if (pathname === '/api/analytics/quality-issues' && request.method === 'GET') {
+    if (!requireSession(request, response)) return;
+    try {
+      const data = await repository.readData();
+      send(response, 200, { qualityIssues: detectMetricQualityIssues(data, Object.fromEntries(currentUrl.searchParams.entries())) });
+    } catch (error) {
+      send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Quality issues query failed' });
+    }
+    return;
+  }
+
+  if (pathname === '/api/analytics/export' && request.method === 'POST') {
+    if (!requireSession(request, response)) return;
+    try {
+      const body = JSON.parse(await readBody(request));
+      const data = await repository.readData();
+      const result = buildAnalyticsDrill(data, body.query ?? {});
+      send(response, 200, {
+        taskId: `export-${Date.now()}`,
+        status: '已完成',
+        downloadUrl: '',
+        format: body.format ?? 'json',
+        result,
+      });
+    } catch (error) {
+      send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Analytics export failed' });
+    }
+    return;
+  }
+
   if (pathname === '/api/assets/upload' && request.method === 'POST') {
     if (!requireSession(request, response)) return;
     try {
@@ -602,6 +657,142 @@ function normalizeMetricRecord(record, mapping) {
     shares: valueOf('shares', '分享'),
     clicks: valueOf('clicks', '点击'),
   };
+}
+
+const analyticsPlatforms = ['小红书', '脉脉', 'B站', '公众号', '抖音', '知乎', '技术社区'];
+const analyticsStageRank = { 已投递: 1, 有效简历: 2, 初筛通过: 3, 已约面: 4, 已面试: 5, Offer: 6, 已入职: 7 };
+const emptyAnalyticsSnapshot = {
+  views: 0,
+  interactions: 0,
+  clicks: 0,
+  applications: 0,
+  effectiveResumes: 0,
+  interviews: 0,
+  offers: 0,
+  hires: 0,
+  cost: 0,
+  roi: 0,
+  interactionRate: 0,
+  clickRate: 0,
+  applicationRate: 0,
+  effectiveRate: 0,
+  hireRate: 0,
+};
+
+function analyticsRate(value, base) {
+  return base > 0 ? Number((value / base).toFixed(4)) : 0;
+}
+
+function analyticsDateInRange(date, query) {
+  if (!date) return true;
+  if (query.dateFrom && date < query.dateFrom) return false;
+  if (query.dateTo && date > query.dateTo) return false;
+  return true;
+}
+
+function analyticsContentMatches(content, query) {
+  return (!query.platform || query.platform === '全部' || content.platform === query.platform)
+    && (!query.accountId || content.accountId === query.accountId)
+    && (!query.contentId || content.id === query.contentId)
+    && (!query.jobId || content.jobId === query.jobId)
+    && (!query.contentType || content.type === query.contentType)
+    && (!query.status || content.status === query.status)
+    && analyticsDateInRange(content.publishedAt ?? content.dueDate, query);
+}
+
+function analyticsBestStageResults(results) {
+  const byCandidate = new Map();
+  results.forEach((result) => {
+    const key = `${result.candidateCode || result.id}:${result.jobId || 'unknown'}`;
+    const previous = byCandidate.get(key);
+    if (!previous || analyticsStageRank[result.stage] > analyticsStageRank[previous.stage]) byCandidate.set(key, result);
+  });
+  return [...byCandidate.values()];
+}
+
+function analyticsResultMatches(result, contents, query) {
+  const relatedContent = result.sourceContentId ? contents.find((content) => content.id === result.sourceContentId) : undefined;
+  return (!query.platform || query.platform === '全部' || result.sourcePlatform === query.platform)
+    && (!query.contentId || result.sourceContentId === query.contentId)
+    && (!query.jobId || result.jobId === query.jobId)
+    && (!query.accountId || relatedContent?.accountId === query.accountId)
+    && analyticsDateInRange(result.importedAt?.slice(0, 10), query);
+}
+
+function summarizeAnalytics(data, query) {
+  const contents = (data.contents ?? []).filter((content) => analyticsContentMatches(content, query));
+  const results = analyticsBestStageResults((data.beisenResults ?? []).filter((result) => analyticsResultMatches(result, data.contents ?? [], query)));
+  const views = contents.reduce((sum, content) => sum + Number(content.metrics?.views || 0), 0);
+  const interactions = contents.reduce((sum, content) => sum + Number(content.metrics?.likes || 0) + Number(content.metrics?.comments || 0) + Number(content.metrics?.saves || 0) + Number(content.metrics?.shares || 0), 0);
+  const clicks = contents.reduce((sum, content) => sum + Number(content.metrics?.clicks || 0), 0);
+  const applications = results.filter((result) => analyticsStageRank[result.stage] >= analyticsStageRank.已投递).length;
+  const effectiveResumes = results.filter((result) => analyticsStageRank[result.stage] >= analyticsStageRank.有效简历).length;
+  const interviews = results.filter((result) => analyticsStageRank[result.stage] >= analyticsStageRank.已约面).length;
+  const offers = results.filter((result) => analyticsStageRank[result.stage] >= analyticsStageRank.Offer).length;
+  const hires = results.filter((result) => result.stage === '已入职').length;
+  const cost = (data.costs ?? []).reduce((sum, item) => sum + Number(item.laborCost || 0) + Number(item.mediaCost || 0) + Number(item.productionCost || 0), 0);
+  return {
+    views,
+    interactions,
+    clicks,
+    applications,
+    effectiveResumes,
+    interviews,
+    offers,
+    hires,
+    cost,
+    roi: cost > 0 ? Number((hires / cost).toFixed(4)) : 0,
+    interactionRate: analyticsRate(interactions, views),
+    clickRate: analyticsRate(clicks, views),
+    applicationRate: analyticsRate(applications, clicks),
+    effectiveRate: analyticsRate(effectiveResumes, applications),
+    hireRate: analyticsRate(hires, applications),
+  };
+}
+
+function detectMetricQualityIssues(data, query) {
+  const now = new Date().toLocaleString('zh-CN', { hour12: false });
+  const issues = [];
+  const push = (item) => issues.push({ ...item, id: `quality-${issues.length + 1}-${item.targetId}`, resolved: false, createdAt: now });
+  (data.contents ?? []).filter((content) => analyticsContentMatches(content, query)).forEach((content) => {
+    if (!content.jobId || !(data.jobs ?? []).some((job) => job.id === content.jobId)) push({ issueType: '缺少字段', severity: '高', targetType: 'content', targetId: content.id, message: `${content.title} 未关联有效岗位。` });
+    if (!content.accountId || !(data.accounts ?? []).some((account) => account.id === content.accountId)) push({ issueType: '缺少字段', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 未绑定有效账号。` });
+    if (Number(content.metrics?.views || 0) === 0 && (Number(content.metrics?.clicks || 0) > 0 || Number(content.metrics?.likes || 0) > 0)) push({ issueType: '指标异常', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 曝光为 0 但存在点击或互动。` });
+  });
+  (data.beisenResults ?? []).filter((result) => analyticsResultMatches(result, data.contents ?? [], query)).forEach((result) => {
+    const hasContent = result.sourceContentId && (data.contents ?? []).some((content) => content.id === result.sourceContentId);
+    const hasJob = result.jobId && (data.jobs ?? []).some((job) => job.id === result.jobId);
+    if (!hasContent && !hasJob) push({ issueType: '无法归因', severity: result.sourcePlatform === '未知' ? '高' : '中', targetType: 'source', targetId: result.id, message: `${result.candidateCode} 无法归因到内容或岗位。` });
+  });
+  (data.integrationSyncRuns ?? []).filter((run) => run.status === '失败').forEach((run) => push({ issueType: '同步失败', severity: '高', targetType: 'sync', targetId: run.id, syncBatchId: run.id, message: `${run.syncType} 失败：${run.message}` }));
+  return issues;
+}
+
+function buildAnalyticsInsights(summary) {
+  if (summary.views === 0) return [{ id: 'insight-1', title: '暂无真实平台指标', body: '请先导入平台指标或配置平台 API。', severity: '建议', evidence: ['曝光 0', '点击 0'] }];
+  if (summary.clicks === 0) return [{ id: 'insight-1', title: '有曝光但无点击', body: '优先检查 CTA、招聘入口、岗位链接和内容落点。', severity: '风险', evidence: [`曝光 ${summary.views}`, '点击 0'] }];
+  if (summary.applications === 0) return [{ id: 'insight-1', title: '有点击但无北森回流', body: '优先检查追踪码、北森导入、岗位入口和归因字段。', severity: '风险', evidence: [`点击 ${summary.clicks}`, '投递 0'] }];
+  return [{ id: 'insight-1', title: '链路已有有效回流', body: '建议继续放大高点击内容和高质量岗位方向。', severity: '机会', evidence: [`投递 ${summary.applications}`, `有效 ${summary.effectiveResumes}`] }];
+}
+
+function buildAnalyticsDrill(data, query = {}) {
+  const normalizedQuery = { dimension: query.dimension ?? 'summary', platform: query.platform ?? '全部', page: Number(query.page ?? 1), pageSize: Number(query.pageSize ?? 20), ...query };
+  const summary = summarizeAnalytics(data, normalizedQuery);
+  const breakdowns = normalizedQuery.dimension === 'funnel'
+    ? [
+      ['views', '曝光', summary.views],
+      ['interactions', '互动', summary.interactions],
+      ['clicks', '点击', summary.clicks],
+      ['applications', '投递', summary.applications],
+      ['effectiveResumes', '有效简历', summary.effectiveResumes],
+      ['interviews', '面试', summary.interviews],
+      ['offers', 'Offer', summary.offers],
+      ['hires', '入职', summary.hires],
+    ].map(([id, label, value]) => ({ id, label, dimension: 'funnel', snapshot: { ...emptyAnalyticsSnapshot, [id]: value }, meta: { value } }))
+    : analyticsPlatforms.map((platform) => ({ id: platform, label: platform, dimension: 'platform', snapshot: summarizeAnalytics(data, { ...normalizedQuery, platform }), meta: { contentCount: (data.contents ?? []).filter((content) => content.platform === platform).length, accountCount: (data.accounts ?? []).filter((account) => account.platform === platform).length } }));
+  const allDetails = (data.contents ?? []).filter((content) => analyticsContentMatches(content, normalizedQuery));
+  const details = allDetails.slice((normalizedQuery.page - 1) * normalizedQuery.pageSize, normalizedQuery.page * normalizedQuery.pageSize).map((content) => ({ id: content.id, title: content.title, dimension: 'content', snapshot: summarizeAnalytics(data, { ...normalizedQuery, contentId: content.id }), meta: { platform: content.platform, status: content.status, contentType: content.type } }));
+  return { query: normalizedQuery, summary, breakdowns, details, insights: buildAnalyticsInsights(summary), qualityIssues: detectMetricQualityIssues(data, normalizedQuery), pagination: { page: normalizedQuery.page, pageSize: normalizedQuery.pageSize, total: allDetails.length }, generatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) };
 }
 
 server.listen(port, () => {

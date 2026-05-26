@@ -1,5 +1,5 @@
 import { emptyData } from './data';
-import type { AppData } from './types';
+import type { AppData, DrillQuery, DrillResult } from './types';
 import type { AssetItem, IntegrationConfig, IntegrationSyncRun, ModelApiConfig } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? defaultApiBase();
@@ -143,6 +143,28 @@ export async function createSystemBackup(token?: string) {
     backupFile: string;
     createdAt: string;
   }>(`${API_BASE}/api/system/backup`, 'POST', token, {});
+}
+
+export async function loadAnalyticsSummary(query: DrillQuery, token?: string) {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  });
+  return await requestJson<DrillResult>(`${API_BASE}/api/analytics/summary?${params.toString()}`, 'GET', token);
+}
+
+export async function loadAnalyticsDrill(query: DrillQuery, token?: string) {
+  const pathByDimension: Record<DrillQuery['dimension'], string> = {
+    summary: 'summary',
+    platform: 'platform',
+    account: 'account',
+    content: 'content',
+    job: 'job',
+    contentType: 'content',
+    funnel: 'funnel',
+  };
+  const path = pathByDimension[query.dimension] ?? 'platform';
+  return await requestJson<DrillResult>(`${API_BASE}/api/analytics/drill/${path}`, 'POST', token, query);
 }
 
 class ApiError extends Error {

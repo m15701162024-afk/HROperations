@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type ApiUser, createSystemBackup, loadRemoteData, loadSystemHealth, loginLocalApi, normalizeAppData, runIntegrationSync, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
+import { buildAnalyticsDrill, formatMetricRate } from './analytics';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
 import type { AccountType, AppData, AppSection, AssetItem, BeisenResult, CalendarMilestone, CandidateLead, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, LeadFollowUp, ModelApiConfig, NotificationItem, OperationSettings, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, TaskItem, TopicItem, UserProfile, WorkflowRule } from './types';
 import type { ImportRun, ModelRunLog, PluginRule, PromptTemplate, ReportAction, ReviewMention } from './types';
@@ -2257,6 +2258,19 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   const [drill, setDrill] = useState<{ type: '平台' | '内容' | '岗位' | '账号' | '漏斗'; id: string } | null>(null);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [cost, setCost] = useState({ targetType: '内容' as CostRecord['targetType'], targetId: '', laborCost: 0, mediaCost: 0, productionCost: 0 });
+  const analyticsQuery = useMemo(() => ({
+    dimension: drill?.type === '账号' ? 'account' as const : drill?.type === '岗位' ? 'job' as const : drill?.type === '漏斗' ? 'funnel' as const : 'platform' as const,
+    platform: selectedPlatform,
+    accountId: drill?.type === '账号' ? drill.id : undefined,
+    contentId: drill?.type === '内容' ? drill.id : undefined,
+    jobId: drill?.type === '岗位' ? drill.id : undefined,
+    dateFrom: dateRange.from,
+    dateTo: dateRange.to,
+    page: 1,
+    pageSize: 20,
+  }), [dateRange.from, dateRange.to, drill, selectedPlatform]);
+  const analyticsResult = useMemo(() => buildAnalyticsDrill(data, analyticsQuery), [data, analyticsQuery]);
+  const platformDrillResult = useMemo(() => buildAnalyticsDrill(data, { ...analyticsQuery, dimension: 'platform', accountId: undefined, contentId: undefined, jobId: undefined }), [data, analyticsQuery]);
   const inDateRange = (date?: string) => {
     if (!date) return true;
     if (dateRange.from && date < dateRange.from) return false;
@@ -2264,33 +2278,27 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
     return true;
   };
   const filteredContentsByDate = data.contents.filter((item) => inDateRange(item.publishedAt ?? item.dueDate));
-  const byPlatform = platforms.map((platform) => {
-    const items = filteredContentsByDate.filter((item) => item.platform === platform);
-    const results = data.beisenResults.filter((item) => item.sourcePlatform === platform);
-    const interactions = items.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
-    const clicks = items.reduce((sum, item) => sum + item.metrics.clicks, 0);
-    return {
-      platform,
-      views: items.reduce((sum, item) => sum + item.metrics.views, 0),
-      interactions,
-      clicks,
-      count: items.length,
-      applications: results.filter((item) => item.stage === '已投递').length,
-      effective: results.filter((item) => item.stage === '有效简历' || item.stage === '初筛通过' || item.stage === '已约面' || item.stage === '已面试' || item.stage === 'Offer' || item.stage === '已入职').length,
-      offers: results.filter((item) => item.stage === 'Offer' || item.stage === '已入职').length,
-      hires: results.filter((item) => item.stage === '已入职').length,
-    };
-  });
+  const byPlatform = platformDrillResult.breakdowns.map((item) => ({
+    platform: item.id as Platform,
+    views: item.snapshot.views,
+    interactions: item.snapshot.interactions,
+    clicks: item.snapshot.clicks,
+    count: Number(item.meta?.contentCount ?? 0),
+    applications: item.snapshot.applications,
+    effective: item.snapshot.effectiveResumes,
+    offers: item.snapshot.offers,
+    hires: item.snapshot.hires,
+  }));
   const visiblePlatforms = byPlatform.filter((item) => item.count > 0 || item.applications > 0);
   const maxViews = Math.max(...byPlatform.map((p) => p.views), 1);
   const selectedContents = selectedPlatform === '全部' ? filteredContentsByDate : filteredContentsByDate.filter((item) => item.platform === selectedPlatform);
   const selectedResults = selectedPlatform === '全部' ? data.beisenResults : data.beisenResults.filter((item) => item.sourcePlatform === selectedPlatform);
-  const selectedViews = selectedContents.reduce((sum, item) => sum + item.metrics.views, 0);
-  const selectedInteractions = selectedContents.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
-  const selectedClicks = selectedContents.reduce((sum, item) => sum + item.metrics.clicks, 0);
-  const selectedApplications = selectedResults.filter((item) => item.stage === '已投递').length;
-  const selectedEffective = selectedResults.filter((item) => item.stage === '有效简历' || item.stage === '初筛通过' || item.stage === '已约面' || item.stage === '已面试' || item.stage === 'Offer' || item.stage === '已入职').length;
-  const selectedHires = selectedResults.filter((item) => item.stage === '已入职').length;
+  const selectedViews = analyticsResult.summary.views;
+  const selectedInteractions = analyticsResult.summary.interactions;
+  const selectedClicks = analyticsResult.summary.clicks;
+  const selectedApplications = analyticsResult.summary.applications;
+  const selectedEffective = analyticsResult.summary.effectiveResumes;
+  const selectedHires = analyticsResult.summary.hires;
   const formatRate = (value: number, base: number) => `${base > 0 ? ((value / base) * 100).toFixed(1) : '0.0'}%`;
   const selectedAccountStats = data.accounts
     .filter((account) => selectedPlatform === '全部' || account.platform === selectedPlatform)
@@ -2305,15 +2313,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   const selectedDrillContent = drill?.type === '内容' ? data.contents.find((item) => item.id === drill.id) : undefined;
   const selectedDrillJob = drill?.type === '岗位' ? data.jobs.find((item) => item.id === drill.id) : undefined;
   const selectedDrillAccount = drill?.type === '账号' ? data.accounts.find((item) => item.id === drill.id) : undefined;
-  const platformConclusion = selectedViews === 0
-    ? '当前筛选范围暂无真实平台数据，请先导入内容指标。'
-    : selectedClicks === 0
-      ? '已有曝光但招聘入口点击为 0，优先检查 CTA、入口链接和内容落点。'
-      : selectedApplications === 0
-        ? '已有点击但暂无北森回流，优先检查追踪码、北森导入和岗位入口。'
-        : selectedEffective === 0
-          ? '已有投递但有效简历为 0，优先复盘候选人画像、岗位表达和投放平台。'
-          : '当前平台链路已有有效回流，可继续放大高点击内容与高质量岗位方向。';
+  const platformConclusion = analyticsResult.insights[0]?.body ?? '当前暂无可解释的数据结论。';
   const stageOrder: BeisenResult['stage'][] = ['已投递', '有效简历', '初筛通过', '已约面', '已面试', 'Offer', '已入职'];
   const stageStats = stageOrder.map((stage) => ({
     stage,
@@ -2394,15 +2394,15 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
         </div>
         <div className="stats-row compact-stats analytics-stats">
           <StatCard label="内容数" value={selectedContents.length} note="当前筛选平台" icon={FileText} />
-          <StatCard label="曝光" value={selectedViews.toLocaleString()} note={`互动率 ${formatRate(selectedInteractions, selectedViews)}`} icon={Rocket} />
-          <StatCard label="点击" value={selectedClicks.toLocaleString()} note={`点击率 ${formatRate(selectedClicks, selectedViews)}`} icon={Link} />
+          <StatCard label="曝光" value={selectedViews.toLocaleString()} note={`互动率 ${formatMetricRate(analyticsResult.summary.interactionRate)}`} icon={Rocket} />
+          <StatCard label="点击" value={selectedClicks.toLocaleString()} note={`点击率 ${formatMetricRate(analyticsResult.summary.clickRate)}`} icon={Link} />
           <StatCard label="北森回流" value={selectedResults.length} note="投递/面试/入职" icon={Users} />
         </div>
         <div className="analytics-kpi-strip">
           <div><span>互动量</span><b>{selectedInteractions.toLocaleString()}</b><small>赞评藏转合计</small></div>
-          <div><span>投递转化</span><b>{formatRate(selectedApplications, selectedClicks)}</b><small>{selectedApplications} 投递 / {selectedClicks} 点击</small></div>
-          <div><span>有效简历率</span><b>{formatRate(selectedEffective, selectedApplications)}</b><small>{selectedEffective} 有效 / {selectedApplications} 投递</small></div>
-          <div><span>入职转化</span><b>{formatRate(selectedHires, selectedApplications)}</b><small>{selectedHires} 入职 / {selectedApplications} 投递</small></div>
+          <div><span>投递转化</span><b>{formatMetricRate(analyticsResult.summary.applicationRate)}</b><small>{selectedApplications} 投递 / {selectedClicks} 点击</small></div>
+          <div><span>有效简历率</span><b>{formatMetricRate(analyticsResult.summary.effectiveRate)}</b><small>{selectedEffective} 有效 / {selectedApplications} 投递</small></div>
+          <div><span>入职转化</span><b>{formatMetricRate(analyticsResult.summary.hireRate)}</b><small>{selectedHires} 入职 / {selectedApplications} 投递</small></div>
         </div>
         <div className="analytics-conclusion">
           <strong>当前结论</strong>
@@ -2488,6 +2488,25 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           )}
           <p>{platformConclusion}</p>
         </div>}
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>数据质量与来源追踪</h2><ShieldCheck size={18} /></div>
+        <div className="template-grid">
+          <div className="template-chip">当前查询<small>{analyticsResult.query.dimension} · {analyticsResult.query.platform || '全部平台'} · {analyticsResult.generatedAt}</small></div>
+          <div className="template-chip">分页明细<small>{analyticsResult.pagination?.total ?? 0} 条 · 每页 {analyticsResult.pagination?.pageSize ?? 20}</small></div>
+          <div className="template-chip">质量问题<small>{analyticsResult.qualityIssues.length} 条待处理</small></div>
+          <div className="template-chip">数据来源<small>平台指标 / 北森回流 / 成本录入 / 账号配置</small></div>
+        </div>
+        {analyticsResult.qualityIssues.length === 0 && <EmptyState title="暂无数据质量问题" body="当前筛选范围内未发现缺字段、无法归因、指标异常或同步失败。" />}
+        <div className="entry-grid">
+          {analyticsResult.qualityIssues.slice(0, 6).map((issue) => (
+            <article key={issue.id}>
+              <strong>{issue.issueType}｜{issue.targetId}</strong>
+              <span>{issue.message}</span>
+              <Badge tone={issue.severity === '高' ? 'danger' : issue.severity === '中' ? 'warn' : 'info'}>{issue.severity}</Badge>
+            </article>
+          ))}
+        </div>
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>智能数据解释与平台策略</h2><Bot size={18} /></div>

@@ -33,6 +33,105 @@ export type ContentStatus =
 
 export type RiskLevel = '低' | '中' | '高';
 
+export type DrillDimension = 'summary' | 'platform' | 'account' | 'content' | 'job' | 'contentType' | 'funnel';
+
+export type MetricKey =
+  | 'views'
+  | 'interactions'
+  | 'clicks'
+  | 'applications'
+  | 'effectiveResumes'
+  | 'interviews'
+  | 'offers'
+  | 'hires'
+  | 'cost'
+  | 'roi';
+
+export interface DrillQuery {
+  dimension: DrillDimension;
+  platform?: Platform | '全部';
+  accountId?: string;
+  contentId?: string;
+  jobId?: string;
+  contentType?: string;
+  status?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  sourceId?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface MetricSnapshot {
+  views: number;
+  interactions: number;
+  clicks: number;
+  applications: number;
+  effectiveResumes: number;
+  interviews: number;
+  offers: number;
+  hires: number;
+  cost: number;
+  roi: number;
+  interactionRate: number;
+  clickRate: number;
+  applicationRate: number;
+  effectiveRate: number;
+  hireRate: number;
+}
+
+export interface DrillBreakdown {
+  id: string;
+  label: string;
+  dimension: DrillDimension;
+  snapshot: MetricSnapshot;
+  meta?: Record<string, string | number | boolean | undefined>;
+}
+
+export interface DrillDetail {
+  id: string;
+  title: string;
+  dimension: DrillDimension;
+  snapshot: MetricSnapshot;
+  meta?: Record<string, string | number | boolean | undefined>;
+}
+
+export interface DrillInsight {
+  id: string;
+  title: string;
+  body: string;
+  severity: '机会' | '风险' | '建议';
+  evidence: string[];
+}
+
+export interface MetricQualityIssue {
+  id: string;
+  issueType: '缺少字段' | '重复数据' | '无法归因' | '日期异常' | '指标异常' | '同步失败' | '权限不足';
+  severity: '低' | '中' | '高';
+  targetType: 'platform' | 'account' | 'content' | 'job' | 'source' | 'sync';
+  targetId: string;
+  message: string;
+  sourceId?: string;
+  syncBatchId?: string;
+  resolved: boolean;
+  createdAt: string;
+}
+
+export interface DrillResult {
+  query: DrillQuery;
+  summary: MetricSnapshot;
+  breakdowns: DrillBreakdown[];
+  details: DrillDetail[];
+  insights: DrillInsight[];
+  qualityIssues: MetricQualityIssue[];
+  pagination?: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+  generatedAt: string;
+}
+
 export interface JobNeed {
   id: string;
   title: string;
