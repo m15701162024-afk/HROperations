@@ -40,7 +40,6 @@ const navItems: { key: Section; icon: React.ComponentType<{ size?: number }> }[]
   { key: '选题库', icon: Sparkles },
   { key: '内容运营', icon: Megaphone },
   { key: '排期日历', icon: Target },
-  { key: '线索池', icon: Users },
   { key: '素材资产', icon: Database },
   { key: '账号与平台', icon: Users },
   { key: '导入中心', icon: Database },
@@ -278,9 +277,13 @@ function LoginScreen({ onLogin, error }: { onLogin: (username: string, password:
 function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; openSection: (section: Section) => void }) {
   const [goal, setGoal] = useState({ title: '', dimension: '平台', target: 0, current: 0, metric: '发布篇数' });
   const [drilldown, setDrilldown] = useState<'内容' | '曝光' | '互动' | '点击' | ''>('');
-  const [taskFilter, setTaskFilter] = useState<'全部' | TaskItem['type']>('全部');
-  const tasks = useMemo(() => deriveTasks(data), [data]);
+  const [taskFilter, setTaskFilter] = useState<'全部' | Exclude<TaskItem['type'], '线索待跟进'>>('全部');
+  const tasks = useMemo(() => deriveTasks(data).filter((task) => task.type !== '线索待跟进'), [data]);
   const visibleTasks = tasks.filter((task) => taskFilter === '全部' || task.type === taskFilter);
+  const pendingPublish = data.contents.filter((item) => item.status === '待发布').length;
+  const pendingReview = data.contents.filter((item) => item.status === '待专业审核' || item.status === '待品牌合规审核').length;
+  const pendingMetrics = data.contents.filter((item) => (item.status === '已发布' || item.status === '数据回收中') && Object.values(item.metrics).every((value) => value === 0)).length;
+  const accountWarnings = tasks.filter((task) => task.type === '账号停更').length;
   const totals = useMemo(() => {
     const published = data.contents.filter((item) => item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘').length;
     const views = data.contents.reduce((sum, item) => sum + item.metrics.views, 0);
@@ -334,12 +337,13 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
         <div>
           <span className="eyebrow">工作台</span>
           <h1>今日招聘运营概览</h1>
-          <p>{tasks.length} 项待处理 · {pendingNotices.length} 条提醒 · {data.candidateLeads.filter((lead) => lead.stage === '待联系').length} 条线索待跟进</p>
+          <p>{tasks.length} 项运营待办 · {pendingPublish} 条待发布 · {pendingReview} 条待审核 · {pendingMetrics} 条数据待回收</p>
         </div>
         <div className="hero-actions">
-          <button onClick={() => openSection('线索池')}><Users size={16} />处理线索</button>
-          <button className="secondary" onClick={() => openSection('内容运营')}><Sparkles size={16} />生成内容</button>
-          <button className="ghost" onClick={() => openSection('数据分析')}><BarChart3 size={16} />查看数据</button>
+          <button onClick={() => openSection('内容运营')}><Sparkles size={16} />生成内容</button>
+          <button className="secondary" onClick={() => openSection('排期日历')}><Target size={16} />看排期</button>
+          <button className="secondary" onClick={() => openSection('账号与平台')}><Users size={16} />看平台</button>
+          <button className="ghost" onClick={() => openSection('数据分析')}><BarChart3 size={16} />看数据</button>
         </div>
       </div>
 
@@ -376,17 +380,17 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
           <ClipboardList size={18} />
         </div>
         <div className="module-tabs">
-          {(['全部', '待发布', '待审核', '数据待回收', '高风险待处理', '素材授权到期', '线索待跟进', '账号停更'] as const).map((item) => (
+          {(['全部', '待发布', '待审核', '数据待回收', '高风险待处理', '素材授权到期', '审核超时', '账号停更'] as const).map((item) => (
             <button key={item} className={taskFilter === item ? 'active' : ''} onClick={() => setTaskFilter(item)}>{item}</button>
           ))}
         </div>
         <div className="task-summary-grid">
           <div><span>待处理</span><b>{tasks.length}</b></div>
           <div><span>高优先级</span><b>{tasks.filter((task) => task.priority === '高').length}</b></div>
-          <div><span>线索待跟进</span><b>{tasks.filter((task) => task.type === '线索待跟进').length}</b></div>
-          <div><span>审核/发布</span><b>{tasks.filter((task) => task.type === '待审核' || task.type === '待发布').length}</b></div>
+          <div><span>数据待回收</span><b>{tasks.filter((task) => task.type === '数据待回收').length}</b></div>
+          <div><span>账号/素材预警</span><b>{accountWarnings + tasks.filter((task) => task.type === '素材授权到期').length}</b></div>
         </div>
-        {visibleTasks.length === 0 && <EmptyState title="暂无待处理任务" body="当内容、线索、素材、账号出现待办时会自动进入这里。" />}
+        {visibleTasks.length === 0 && <EmptyState title="暂无待处理任务" body="当内容、素材、账号和数据回收出现待办时会自动进入这里。" />}
         <div className="task-list">
           {visibleTasks.map((task) => (
             <div className="task-row" key={task.id}>
@@ -1491,6 +1495,16 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     contents: data.contents.filter((item) => item.platform === selectedPlatform),
     results: data.beisenResults.filter((item) => item.sourcePlatform === selectedPlatform),
   };
+  const platformIntegrations = data.integrations.filter((item) => item.type === '平台API' && (item.name.includes(selectedPlatform) || item.extraConfig?.includes(selectedPlatform)));
+  const platformTopics = data.topics.filter((item) => item.platform === selectedPlatform || item.platform === '全部');
+  const platformTarget = selectedPlatform === 'B站' || selectedPlatform === '抖音' ? 1 : selectedPlatform === '公众号' || selectedPlatform === '知乎' || selectedPlatform === '技术社区' ? 2 : 3;
+  const platformPublished = platformDetail.contents.filter((item) => item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘').length;
+  const platformMissing = [
+    platformDetail.accounts.length === 0 ? '未配置运营账号' : '',
+    platformDetail.entries.length === 0 ? '未配置招聘入口' : '',
+    platformIntegrations.length === 0 ? '未配置平台 API' : '',
+    platformDetail.contents.length === 0 ? '暂无内容任务' : '',
+  ].filter(Boolean);
 
   const buildAccountPayload = () => ({
     platform: account.platform,
@@ -1932,6 +1946,25 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
             <div className="template-chip">入口<small>{platformDetail.entries.map((item) => item.headline).join('、') || '未配置'}</small></div>
             <div className="template-chip">内容效果<small>{platformDetail.contents.reduce((sum, item) => sum + item.metrics.views, 0)} 曝光 · {platformDetail.contents.reduce((sum, item) => sum + item.metrics.clicks, 0)} 点击</small></div>
             <div className="template-chip">北森回流<small>{platformDetail.results.length} 条</small></div>
+            <div className="template-chip">本周建议<small>{platformPublished}/{platformTarget} 条已发布</small></div>
+            <div className="template-chip">接口状态<small>{platformIntegrations.map((item) => `${item.name} ${item.status}`).join('、') || '未配置'}</small></div>
+          </div>
+          <div className="platform-workbench-grid">
+            <article>
+              <strong>内容计划</strong>
+              <span>{platformTopics.length} 个选题 · {platformDetail.contents.filter((item) => item.status !== '已复盘' && item.status !== '已归档').length} 个进行中内容</span>
+              <p>{platformTopics[0]?.title ?? '暂无平台选题，可从选题库为该平台生成内容方向。'}</p>
+            </article>
+            <article>
+              <strong>数据缺口</strong>
+              {platformMissing.length === 0 ? <span>账号、入口、API 和内容任务已具备基础闭环。</span> : <span>{platformMissing.join(' / ')}</span>}
+              <p>优先补齐缺口后，再进入数据分析查看平台贡献。</p>
+            </article>
+            <article>
+              <strong>平台 SOP</strong>
+              <span>{platformPositioning[selectedPlatform]}</span>
+              <p>每次发布前确认账号定位、审核规则、招聘入口、风险词和数据回收时间。</p>
+            </article>
           </div>
           <div className="card-actions-inline">
             <button className="secondary" onClick={() => { setAccount({ ...account, platform: selectedPlatform, positioning: platformPositioning[selectedPlatform] }); setActivePanel('账号入口'); }}>配置该平台账号</button>
@@ -2074,10 +2107,11 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
       {activePanel === 'API集成' && <section className="panel wide">
         <div className="panel-title"><h2>平台与系统集成配置</h2><RefreshCw size={18} /></div>
         <div className="usage-steps">
-          <div><b>1</b><span>选择北森/平台API/企微飞书</span></div>
-          <div><b>2</b><span>填写接口地址、Token、字段映射</span></div>
-          <div><b>3</b><span>测试连接后执行同步或拉取</span></div>
+          <div><b>1</b><span>选择平台模板或北森/企微/飞书/BI 类型</span></div>
+          <div><b>2</b><span>填写接口地址、Token、鉴权方式和字段映射</span></div>
+          <div><b>3</b><span>测试连接，通过后执行指标拉取或消息同步</span></div>
         </div>
+        <div className="platform-note"><ShieldCheck size={16} />平台开放能力不一致：支持 API 的平台可直接拉取；不支持稳定 API 的平台，优先使用 CSV 导入或插件采集规则。</div>
         <div className="inline-form">
           <select value={integration.type} onChange={(event) => setIntegration({ ...integration, type: event.target.value as IntegrationConfig['type'] })}>
             <option>北森</option>
@@ -2220,6 +2254,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   const [metricsCsv, setMetricsCsv] = useState('');
   const [beisenCsv, setBeisenCsv] = useState('');
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | '全部'>('全部');
+  const [drill, setDrill] = useState<{ type: '平台' | '内容' | '岗位' | '账号' | '漏斗'; id: string } | null>(null);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [cost, setCost] = useState({ targetType: '内容' as CostRecord['targetType'], targetId: '', laborCost: 0, mediaCost: 0, productionCost: 0 });
   const inDateRange = (date?: string) => {
@@ -2257,6 +2292,28 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   const selectedEffective = selectedResults.filter((item) => item.stage === '有效简历' || item.stage === '初筛通过' || item.stage === '已约面' || item.stage === '已面试' || item.stage === 'Offer' || item.stage === '已入职').length;
   const selectedHires = selectedResults.filter((item) => item.stage === '已入职').length;
   const formatRate = (value: number, base: number) => `${base > 0 ? ((value / base) * 100).toFixed(1) : '0.0'}%`;
+  const selectedAccountStats = data.accounts
+    .filter((account) => selectedPlatform === '全部' || account.platform === selectedPlatform)
+    .map((account) => {
+      const items = selectedContents.filter((content) => content.accountId === account.id);
+      const views = items.reduce((sum, item) => sum + item.metrics.views, 0);
+      const clicks = items.reduce((sum, item) => sum + item.metrics.clicks, 0);
+      const interactions = items.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
+      return { account, items, views, clicks, interactions };
+    })
+    .filter((item) => item.items.length > 0 || item.account.status === '启用');
+  const selectedDrillContent = drill?.type === '内容' ? data.contents.find((item) => item.id === drill.id) : undefined;
+  const selectedDrillJob = drill?.type === '岗位' ? data.jobs.find((item) => item.id === drill.id) : undefined;
+  const selectedDrillAccount = drill?.type === '账号' ? data.accounts.find((item) => item.id === drill.id) : undefined;
+  const platformConclusion = selectedViews === 0
+    ? '当前筛选范围暂无真实平台数据，请先导入内容指标。'
+    : selectedClicks === 0
+      ? '已有曝光但招聘入口点击为 0，优先检查 CTA、入口链接和内容落点。'
+      : selectedApplications === 0
+        ? '已有点击但暂无北森回流，优先检查追踪码、北森导入和岗位入口。'
+        : selectedEffective === 0
+          ? '已有投递但有效简历为 0，优先复盘候选人画像、岗位表达和投放平台。'
+          : '当前平台链路已有有效回流，可继续放大高点击内容与高质量岗位方向。';
   const stageOrder: BeisenResult['stage'][] = ['已投递', '有效简历', '初筛通过', '已约面', '已面试', 'Offer', '已入职'];
   const stageStats = stageOrder.map((stage) => ({
     stage,
@@ -2347,6 +2404,11 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           <div><span>有效简历率</span><b>{formatRate(selectedEffective, selectedApplications)}</b><small>{selectedEffective} 有效 / {selectedApplications} 投递</small></div>
           <div><span>入职转化</span><b>{formatRate(selectedHires, selectedApplications)}</b><small>{selectedHires} 入职 / {selectedApplications} 投递</small></div>
         </div>
+        <div className="analytics-conclusion">
+          <strong>当前结论</strong>
+          <span>{platformConclusion}</span>
+          <button className="ghost" onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}>查看漏斗下钻</button>
+        </div>
       </section>
       <section className="panel wide analytics-board">
         <div className="panel-title"><h2>平台效率矩阵</h2><PieChart size={18} /></div>
@@ -2366,9 +2428,66 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
               </div>
               <Progress current={item.views} target={maxViews} />
               <small>点击率 {formatRate(item.clicks, item.views)} · 有效率 {formatRate(item.effective, item.applications)} · Offer {item.offers}</small>
+              <span className="text-link" onClick={(event) => { event.stopPropagation(); setSelectedPlatform(item.platform); setDrill({ type: '平台', id: item.platform }); }}>查看平台明细</span>
             </button>
           ))}
         </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>下钻维度</h2><Filter size={18} /></div>
+        <div className="drill-grid">
+          <button onClick={() => setDrill({ type: '平台', id: String(selectedPlatform) })}><strong>平台</strong><span>看该平台账号、内容、入口和北森回流</span></button>
+          <button onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}><strong>漏斗</strong><span>从曝光到点击、投递、有效、入职逐级定位问题</span></button>
+          <button onClick={() => setDrill({ type: '内容', id: selectedContents[0]?.id ?? '' })} disabled={selectedContents.length === 0}><strong>内容</strong><span>查看单条内容指标和归因结果</span></button>
+          <button onClick={() => setDrill({ type: '岗位', id: familyStats[0]?.id ?? '' })} disabled={familyStats.length === 0}><strong>岗位</strong><span>查看岗位关联内容和候选人回流</span></button>
+          <button onClick={() => setDrill({ type: '账号', id: selectedAccountStats[0]?.account.id ?? '' })} disabled={selectedAccountStats.length === 0}><strong>账号</strong><span>查看账号发布频次、健康度和效果</span></button>
+        </div>
+        {drill && <div className="detail-panel">
+          <strong>{drill.type}下钻</strong>
+          {drill.type === '平台' && (
+            <div className="template-grid">
+              <div className="template-chip">平台<small>{selectedPlatform}</small></div>
+              <div className="template-chip">内容<small>{selectedContents.length} 条</small></div>
+              <div className="template-chip">账号<small>{selectedAccountStats.length} 个</small></div>
+              <div className="template-chip">北森回流<small>{selectedResults.length} 条</small></div>
+            </div>
+          )}
+          {drill.type === '漏斗' && (
+            <div className="funnel drill-funnel">
+              <div>曝光 <b>{selectedViews.toLocaleString()}</b><small>全部平台内容阅读/播放</small></div>
+              <div>互动 <b>{selectedInteractions.toLocaleString()}</b><small>{formatRate(selectedInteractions, selectedViews)}</small></div>
+              <div>点击 <b>{selectedClicks.toLocaleString()}</b><small>{formatRate(selectedClicks, selectedViews)}</small></div>
+              <div>投递 <b>{selectedApplications}</b><small>{formatRate(selectedApplications, selectedClicks)}</small></div>
+              <div>有效 <b>{selectedEffective}</b><small>{formatRate(selectedEffective, selectedApplications)}</small></div>
+              <div>入职 <b>{selectedHires}</b><small>{formatRate(selectedHires, selectedApplications)}</small></div>
+            </div>
+          )}
+          {selectedDrillContent && (
+            <div className="template-grid">
+              <div className="template-chip">内容<small>{selectedDrillContent.title}</small></div>
+              <div className="template-chip">曝光/点击<small>{selectedDrillContent.metrics.views} / {selectedDrillContent.metrics.clicks}</small></div>
+              <div className="template-chip">互动<small>{selectedDrillContent.metrics.likes + selectedDrillContent.metrics.comments + selectedDrillContent.metrics.saves + selectedDrillContent.metrics.shares}</small></div>
+              <div className="template-chip">北森结果<small>{data.beisenResults.filter((item) => item.sourceContentId === selectedDrillContent.id).length} 条</small></div>
+            </div>
+          )}
+          {selectedDrillJob && (
+            <div className="template-grid">
+              <div className="template-chip">岗位<small>{selectedDrillJob.title}</small></div>
+              <div className="template-chip">内容<small>{data.contents.filter((item) => item.jobId === selectedDrillJob.id).length} 条</small></div>
+              <div className="template-chip">回流<small>{data.beisenResults.filter((item) => item.jobId === selectedDrillJob.id).length} 条</small></div>
+              <div className="template-chip">目标平台<small>{selectedDrillJob.targetPlatforms.join('、') || '未配置'}</small></div>
+            </div>
+          )}
+          {selectedDrillAccount && (
+            <div className="template-grid">
+              <div className="template-chip">账号<small>{selectedDrillAccount.platform}｜{selectedDrillAccount.name}</small></div>
+              <div className="template-chip">定位<small>{selectedDrillAccount.positioning || '未填写'}</small></div>
+              <div className="template-chip">内容<small>{data.contents.filter((item) => item.accountId === selectedDrillAccount.id).length} 条</small></div>
+              <div className="template-chip">授权<small>{selectedDrillAccount.authStatus}</small></div>
+            </div>
+          )}
+          <p>{platformConclusion}</p>
+        </div>}
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>智能数据解释与平台策略</h2><Bot size={18} /></div>
@@ -2405,6 +2524,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
                 <th>点击</th>
                 <th>点击率</th>
                 <th>状态</th>
+                <th>下钻</th>
               </tr>
             </thead>
             <tbody>
@@ -2423,6 +2543,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
                       <td>{item.metrics.clicks.toLocaleString()}</td>
                       <td>{formatRate(item.metrics.clicks, item.metrics.views)}</td>
                       <td><Badge tone={item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘' ? 'good' : 'warn'}>{item.status}</Badge></td>
+                      <td><button className="ghost" onClick={() => setDrill({ type: '内容', id: item.id })}>查看</button></td>
                     </tr>
                   );
                 })}
@@ -2486,7 +2607,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       <section className="panel">
         <div className="panel-title"><h2>岗位族群效果</h2><GitBranch size={18} /></div>
         {familyStats.length === 0 && <EmptyState title="暂无岗位族群数据" body="录入真实岗位并关联内容后，这里会按岗位族群汇总曝光和点击。" />}
-        {familyStats.map((job) => <div className="compact-row" key={job.id}><div><strong>{job.family}</strong><span>{job.title} · {job.count} 条内容 · {job.views.toLocaleString()} 曝光</span></div><Badge tone="info">{job.clicks} 点击</Badge></div>)}
+        {familyStats.map((job) => <div className="compact-row" key={job.id}><div><strong>{job.family}</strong><span>{job.title} · {job.count} 条内容 · {job.views.toLocaleString()} 曝光</span></div><div className="row-actions"><Badge tone="info">{job.clicks} 点击</Badge><button className="ghost" onClick={() => setDrill({ type: '岗位', id: job.id })}>下钻</button></div></div>)}
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>多触点归因</h2><Link size={18} /></div>
@@ -2510,6 +2631,25 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
             <Badge tone="info">{item.clicks} 点击</Badge>
           </div>
         ))}
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>账号效果下钻</h2><Users size={18} /></div>
+        {selectedAccountStats.length === 0 && <EmptyState title="暂无账号效果数据" body="配置账号并绑定内容后，可按账号查看发布频次和效果。" />}
+        <div className="entry-grid">
+          {selectedAccountStats.map(({ account, items, views, clicks, interactions }) => (
+            <article key={account.id}>
+              <strong>{account.platform}｜{account.name}</strong>
+              <span>{account.positioning || '未填写定位'} · {items.length} 条内容</span>
+              <div className="metric-mini-grid">
+                <span>曝光 <b>{views}</b></span>
+                <span>互动 <b>{interactions}</b></span>
+                <span>点击 <b>{clicks}</b></span>
+                <span>点击率 <b>{formatRate(clicks, views)}</b></span>
+              </div>
+              <button className="ghost" onClick={() => setDrill({ type: '账号', id: account.id })}>查看账号下钻</button>
+            </article>
+          ))}
+        </div>
       </section>
       <section className="panel">
         <div className="panel-title"><h2>漏斗代理指标</h2><Target size={18} /></div>
@@ -3366,6 +3506,12 @@ function AiWorkbench({ data, audit, apiToken }: { data: AppData; audit: (action:
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>统一模型入口</h2><LockKeyhole size={18} /></div>
+        <div className="ai-scenario-grid">
+          <article><strong>JD 拆解</strong><span>提取岗位卖点、候选人关注点和平台表达角度。</span></article>
+          <article><strong>内容生成</strong><span>按小红书、脉脉、B站、公众号等平台生成初稿。</span></article>
+          <article><strong>风险改写</strong><span>识别薪酬、承诺、歧视、保密和夸大表达风险。</span></article>
+          <article><strong>复盘建议</strong><span>结合曝光、点击、投递和有效简历给出下一步动作。</span></article>
+        </div>
         <div className="usage-steps">
           <div><b>1</b><span>在这里保存 DeepSeek/OpenAI 兼容 API</span></div>
           <div><b>2</b><span>选择模型用途：内容生成、风险识别、复盘建议、标题推荐</span></div>

@@ -1021,6 +1021,32 @@ textarea {
   line-height: 1.45;
 }
 
+.platform-workbench-grid,
+.ai-scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.platform-workbench-grid article,
+.ai-scenario-grid article {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  background: #f7f8fa;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.platform-workbench-grid span,
+.platform-workbench-grid p,
+.ai-scenario-grid span {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 .compact-stats {
   margin-top: 12px;
 }
@@ -1085,6 +1111,24 @@ textarea {
   font-size: 24px;
 }
 
+.analytics-conclusion {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  color: #1d2129;
+  background: #f7fbff;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+}
+
+.analytics-conclusion span {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 .analytics-board {
   background: #fff;
 }
@@ -1124,6 +1168,54 @@ textarea {
 .platform-metric-card small {
   color: var(--muted);
   line-height: 1.5;
+}
+
+.text-link {
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.drill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.drill-grid button {
+  min-height: 86px;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 12px;
+  color: var(--ink);
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.drill-grid button:hover {
+  color: var(--blue);
+  background: #f0f5ff;
+  border-color: #dbe5ff;
+}
+
+.drill-grid button:disabled {
+  color: var(--muted);
+  background: #f7f8fa;
+  cursor: not-allowed;
+}
+
+.drill-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.drill-funnel {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
 }
 
 .metric-mini-grid {
@@ -1540,6 +1632,7 @@ textarea {
   .lead-form,
   .stats-row,
   .analytics-kpi-strip,
+  .analytics-conclusion,
   .task-summary-grid,
   .task-row {
     grid-template-columns: 1fr;
