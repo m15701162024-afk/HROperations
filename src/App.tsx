@@ -26,7 +26,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { type ApiUser, createSystemBackup, loadRemoteData, loadSystemHealth, loginLocalApi, normalizeAppData, runIntegrationSync, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, uploadAssetFile } from './api';
+import { type ApiUser, createAuthUser, createSystemBackup, listAuthUsers, loadRemoteData, loadSystemHealth, loginLocalApi, normalizeAppData, runIntegrationSync, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, updateAuthUser, uploadAssetFile } from './api';
 import { buildAnalyticsDrill, formatMetricRate } from './analytics';
 import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
 import type { AccountType, AppData, AppSection, AssetItem, BeisenResult, CalendarMilestone, CandidateLead, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, LeadFollowUp, ModelApiConfig, NotificationItem, OperationSettings, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, TaskItem, TopicItem, UserProfile, WorkflowRule } from './types';
@@ -3669,6 +3669,8 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
   const [task, setTask] = useState({ title: '', category: '平台接口' as DeploymentTask['category'], owner: '', dueDate: '', note: '' });
   const [pluginRule, setPluginRule] = useState({ platform: '小红书' as Platform, name: '', urlPattern: '', selectors: '{"title":"h1","views":".view","likes":".like"}' });
   const [systemStatus, setSystemStatus] = useState('');
+  const [authUsers, setAuthUsers] = useState<ApiUser[]>([]);
+  const [authUser, setAuthUser] = useState({ username: '', name: '', role: '招聘专员', password: '' });
   const [modelApi, setModelApi] = useState({
     provider: 'OpenAI' as ModelApiConfig['provider'],
     name: '',
@@ -3715,6 +3717,35 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
     };
     update({ ...data, users: [item, ...data.users] });
     setUser({ name: '', roleId: '', team: '招聘团队' });
+  };
+  const refreshAuthUsers = async () => {
+    try {
+      const result = await listAuthUsers(apiToken);
+      setAuthUsers(result.users);
+      setSystemStatus(`已加载 ${result.users.length} 个本地登录账号`);
+    } catch {
+      setSystemStatus('登录账号加载失败，请确认当前账号具备管理员权限');
+    }
+  };
+  const addAuthUser = async () => {
+    if (!authUser.username.trim() || !authUser.password.trim()) return;
+    try {
+      const result = await createAuthUser(authUser, apiToken);
+      setAuthUsers([result.user, ...authUsers]);
+      setAuthUser({ username: '', name: '', role: '招聘专员', password: '' });
+      setSystemStatus(`登录账号已创建：${result.user.username}`);
+    } catch {
+      setSystemStatus('登录账号创建失败，请确认账号不重复且当前用户具备管理员权限');
+    }
+  };
+  const toggleAuthUserStatus = async (item: ApiUser) => {
+    try {
+      const result = await updateAuthUser({ id: item.id, status: item.status === '停用' ? '启用' : '停用' }, apiToken);
+      setAuthUsers(authUsers.map((current) => current.id === item.id ? result.user : current));
+      setSystemStatus(`登录账号已更新：${result.user.username}`);
+    } catch {
+      setSystemStatus('登录账号状态更新失败');
+    }
   };
   const removeRole = (id: string) => {
     update({ ...data, roles: data.roles.filter((item) => item.id !== id), users: data.users.map((item) => item.roleId === id ? { ...item, roleId: '' } : item) });
@@ -3990,6 +4021,31 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
             </select>
           </div>
         ))}
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>本地登录账号</h2><LockKeyhole size={18} /></div>
+        <p className="helper">用于验收不同角色的数据权限。只有管理员/招聘运营/招聘负责人可维护登录账号，密码仅写入本地认证文件。</p>
+        <div className="inline-form">
+          <input value={authUser.username} onChange={(event) => setAuthUser({ ...authUser, username: event.target.value })} placeholder="登录账号" />
+          <input value={authUser.name} onChange={(event) => setAuthUser({ ...authUser, name: event.target.value })} placeholder="姓名" />
+          <select value={authUser.role} onChange={(event) => setAuthUser({ ...authUser, role: event.target.value })}>
+            {['招聘专员', '招聘运营', '招聘负责人', '用人部门', '系统管理员'].map((item) => <option key={item}>{item}</option>)}
+            {data.roles.map((item) => <option key={item.id}>{item.name}</option>)}
+          </select>
+          <input type="password" value={authUser.password} onChange={(event) => setAuthUser({ ...authUser, password: event.target.value })} placeholder="初始密码" />
+          <button onClick={() => void addAuthUser()}><Plus size={16} />创建登录账号</button>
+          <button className="secondary" onClick={() => void refreshAuthUsers()}>刷新账号</button>
+        </div>
+        {authUsers.length === 0 && <EmptyState title="暂无已加载登录账号" body="点击刷新账号查看本地认证账号；也可以创建招聘专员、招聘运营、用人部门等验收账号。" />}
+        <div className="entry-grid">
+          {authUsers.map((item) => (
+            <article key={item.id}>
+              <strong>{item.username}｜{item.name}</strong>
+              <span>{item.role} · {item.status ?? '启用'}</span>
+              <button className="ghost" onClick={() => void toggleAuthUserStatus(item)}>{item.status === '停用' ? '启用' : '停用'}</button>
+            </article>
+          ))}
+        </div>
       </section>
       <section className="panel">
         <div className="panel-title"><h2>高风险规则库</h2><ShieldCheck size={18} /></div>

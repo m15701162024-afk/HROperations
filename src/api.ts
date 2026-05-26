@@ -17,6 +17,7 @@ export interface ApiUser {
   username: string;
   name: string;
   role: string;
+  status?: string;
 }
 
 export type RemoteLoadResult =
@@ -143,6 +144,18 @@ export async function createSystemBackup(token?: string) {
     backupFile: string;
     createdAt: string;
   }>(`${API_BASE}/api/system/backup`, 'POST', token, {});
+}
+
+export async function listAuthUsers(token?: string) {
+  return await requestJson<{ users: ApiUser[] }>(`${API_BASE}/api/auth/users`, 'GET', token);
+}
+
+export async function createAuthUser(input: { username: string; name: string; role: string; password: string; status?: string }, token?: string) {
+  return await requestJson<{ ok: boolean; user: ApiUser }>(`${API_BASE}/api/auth/users`, 'POST', token, input);
+}
+
+export async function updateAuthUser(input: { id: string; username?: string; name?: string; role?: string; password?: string; status?: string }, token?: string) {
+  return await requestJson<{ ok: boolean; user: ApiUser }>(`${API_BASE}/api/auth/users/update`, 'POST', token, input);
 }
 
 export async function loadAnalyticsSummary(query: DrillQuery, token?: string) {

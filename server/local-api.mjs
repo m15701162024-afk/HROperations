@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createJsonRepository } from './repositories/jsonRepository.mjs';
@@ -13,6 +13,7 @@ const authFile = resolve(rootDir, 'data/hr-assistant-auth.json');
 const uploadDir = resolve(rootDir, 'data/uploads');
 const backupDir = resolve(rootDir, 'data/backups');
 const exportDir = resolve(rootDir, 'data/exports');
+const analyticsCacheDir = resolve(rootDir, 'data/analytics-cache');
 const distDir = resolve(rootDir, 'dist');
 const port = Number(process.env.HR_ASSISTANT_API_PORT ?? 5173);
 const SECRET_MASK = '********';
@@ -266,9 +267,10 @@ const server = createServer(async (request, response) => {
         ok: true,
         storage: 'json',
         dataFileSize: dataFileStat.size,
-        backupCount: backupFiles.length,
-        latestBackup: backupFiles[0],
-        counts: {
+      backupCount: backupFiles.length,
+      latestBackup: backupFiles[0],
+      analyticsCacheSize: analyticsCache.size,
+      counts: {
           jobs: data.jobs.length,
           contents: data.contents.length,
           accounts: data.accounts.length,
@@ -469,7 +471,7 @@ const server = createServer(async (request, response) => {
       const data = JSON.parse(body);
       const existing = await repository.readData();
       await repository.writeData(preserveSecrets(data, existing));
-      analyticsCache.clear();
+      await clearAnalyticsCache();
       send(response, 200, { ok: true });
     } catch (error) {
       send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid request' });
@@ -483,7 +485,7 @@ const server = createServer(async (request, response) => {
     try {
       const query = Object.fromEntries(currentUrl.searchParams.entries());
       const data = filterDataForAnalytics(await repository.readData(), session);
-      send(response, 200, cachedAnalyticsDrill(data, { ...query, dimension: 'summary' }, session));
+      send(response, 200, await cachedAnalyticsDrill(data, { ...query, dimension: 'summary' }, session));
     } catch (error) {
       send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Analytics summary failed' });
     }
@@ -497,7 +499,7 @@ const server = createServer(async (request, response) => {
       const dimension = pathname.replace('/api/analytics/drill/', '') || 'platform';
       const body = JSON.parse(await readBody(request));
       const data = filterDataForAnalytics(await repository.readData(), session);
-      send(response, 200, cachedAnalyticsDrill(data, { ...body, dimension }, session));
+      send(response, 200, await cachedAnalyticsDrill(data, { ...body, dimension }, session));
     } catch (error) {
       send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Analytics drill failed' });
     }
@@ -522,7 +524,7 @@ const server = createServer(async (request, response) => {
     try {
       const body = JSON.parse(await readBody(request));
       const data = filterDataForAnalytics(await repository.readData(), session);
-      const result = cachedAnalyticsDrill(data, body.query ?? {}, session);
+      const result = await cachedAnalyticsDrill(data, body.query ?? {}, session);
       const taskId = `export-${Date.now()}`;
       const format = body.format === 'json' ? 'json' : 'csv';
       const fileName = `${taskId}.${format}`;
@@ -549,6 +551,53 @@ const server = createServer(async (request, response) => {
       });
     } catch (error) {
       send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Analytics export failed' });
+    }
+    return;
+  }
+
+  if (pathname === '/api/auth/users' && request.method === 'GET') {
+    const session = requireSession(request, response);
+    if (!session) return;
+    if (!hasGlobalAnalyticsAccess(session)) {
+      send(response, 403, { ok: false, error: 'Forbidden' });
+      return;
+    }
+    try {
+      send(response, 200, { users: await authService.listUsers() });
+    } catch (error) {
+      send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'List auth users failed' });
+    }
+    return;
+  }
+
+  if (pathname === '/api/auth/users' && request.method === 'POST') {
+    const session = requireSession(request, response);
+    if (!session) return;
+    if (!hasGlobalAnalyticsAccess(session)) {
+      send(response, 403, { ok: false, error: 'Forbidden' });
+      return;
+    }
+    try {
+      const body = JSON.parse(await readBody(request));
+      send(response, 200, { ok: true, user: await authService.createUser(body) });
+    } catch (error) {
+      send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Create auth user failed' });
+    }
+    return;
+  }
+
+  if (pathname === '/api/auth/users/update' && request.method === 'POST') {
+    const session = requireSession(request, response);
+    if (!session) return;
+    if (!hasGlobalAnalyticsAccess(session)) {
+      send(response, 403, { ok: false, error: 'Forbidden' });
+      return;
+    }
+    try {
+      const body = JSON.parse(await readBody(request));
+      send(response, 200, { ok: true, user: await authService.updateUser(body.id, body) });
+    } catch (error) {
+      send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Update auth user failed' });
     }
     return;
   }
@@ -627,7 +676,7 @@ const server = createServer(async (request, response) => {
           createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
         }, ...data.auditLogs],
       });
-      analyticsCache.clear();
+      await clearAnalyticsCache();
       send(response, 200, { ok: true, recordCount: records.length });
     } catch (error) {
       send(response, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid request' });
@@ -746,15 +795,47 @@ function filterDataForAnalytics(data, session) {
   };
 }
 
-function cachedAnalyticsDrill(data, query, session) {
+async function cachedAnalyticsDrill(data, query, session) {
   const cacheKey = `${session.role}:${session.id}:${JSON.stringify(query)}`;
   const cached = analyticsCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return { ...cached.result, cache: { hit: true, expiresAt: new Date(cached.expiresAt).toISOString() } };
   }
+  const diskCache = await readAnalyticsCache(cacheKey);
+  if (diskCache) {
+    analyticsCache.set(cacheKey, diskCache);
+    return { ...diskCache.result, cache: { hit: true, storage: 'disk', expiresAt: new Date(diskCache.expiresAt).toISOString() } };
+  }
   const result = buildAnalyticsDrill(data, query);
-  analyticsCache.set(cacheKey, { result, expiresAt: Date.now() + 5 * 60 * 1000 });
-  return { ...result, cache: { hit: false, expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString() } };
+  const entry = { result, expiresAt: Date.now() + 5 * 60 * 1000 };
+  analyticsCache.set(cacheKey, entry);
+  await writeAnalyticsCache(cacheKey, entry);
+  return { ...result, cache: { hit: false, storage: 'memory+disk', expiresAt: new Date(entry.expiresAt).toISOString() } };
+}
+
+function analyticsCacheFile(cacheKey) {
+  const hash = createHash('sha256').update(cacheKey).digest('hex');
+  return resolve(analyticsCacheDir, `${hash}.json`);
+}
+
+async function readAnalyticsCache(cacheKey) {
+  try {
+    const entry = JSON.parse(await readFile(analyticsCacheFile(cacheKey), 'utf-8'));
+    if (entry.expiresAt > Date.now()) return entry;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeAnalyticsCache(cacheKey, entry) {
+  await mkdir(analyticsCacheDir, { recursive: true });
+  await writeFile(analyticsCacheFile(cacheKey), JSON.stringify(entry), 'utf-8');
+}
+
+async function clearAnalyticsCache() {
+  analyticsCache.clear();
+  await rm(analyticsCacheDir, { recursive: true, force: true });
 }
 
 const analyticsPlatforms = ['小红书', '脉脉', 'B站', '公众号', '抖音', '知乎', '技术社区'];
