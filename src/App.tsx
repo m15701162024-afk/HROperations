@@ -28,7 +28,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type ApiUser, createAuthUser, createSystemBackup, listAuthUsers, loadRemoteData, loadSystemHealth, loginLocalApi, normalizeAppData, runIntegrationSync, runModelTask, saveRemoteData, sendIntegrationMessage, testIntegrationConfig, testModelApiConfig, updateAuthUser, uploadAssetFile } from './api';
 import { buildAnalyticsDrill, formatMetricRate } from './analytics';
-import { emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
+import { buildMvpSeedData, emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
+import { evaluateMvpMatrix, mvpReportMarkdown, summarizeMvp } from './mvp';
 import type { AccountType, AppData, AppSection, AssetItem, BeisenResult, CalendarMilestone, CandidateLead, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, LeadFollowUp, ModelApiConfig, NotificationItem, OperationSettings, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, TaskItem, TopicItem, UserProfile, WorkflowRule } from './types';
 import type { ImportRun, ModelRunLog, PluginRule, PromptTemplate, ReportAction, ReviewMention } from './types';
 import { applyMetricsCsv, buildDataExplanations, buildPlatformStrategy, buildRecommendations, buildReportMarkdown, calculateAccountHealth, calculateRoi, deriveTasks, detectCalendarConflicts, downloadText, exportJson, findDuplicateLead, generateTopicsFromJob, parseBeisenCsv, parseJobCsv, parseLeadCsv, readJsonFile, scoreContentQuality, toCsv } from './utils';
@@ -41,6 +42,7 @@ const navItems: { key: Section; icon: React.ComponentType<{ size?: number }> }[]
   { key: '选题库', icon: Sparkles },
   { key: '内容运营', icon: Megaphone },
   { key: '排期日历', icon: Target },
+  { key: '线索池', icon: Users },
   { key: '素材资产', icon: Database },
   { key: '账号与平台', icon: Users },
   { key: '导入中心', icon: Database },
@@ -67,7 +69,11 @@ const sectionPermissions: Record<Section, string> = {
   系统配置: '系统配置',
 };
 
+const operatorSections = new Set<Section>(['工作台', '招聘需求', '选题库', '内容运营', '排期日历', '线索池', '素材资产', '数据分析', '复盘报告']);
+const mvpSeedKey = 'hr-assistant-mvp-seeded-v1';
+
 function isLegacyDemoData(data: Partial<AppData>) {
+  if (localStorage.getItem(mvpSeedKey) === 'true') return false;
   const demoJobIds = new Set(['job-1', 'job-2', 'job-3']);
   const demoContentIds = new Set(['ct-1', 'ct-2', 'ct-3']);
   return Boolean(
@@ -87,18 +93,29 @@ function useAppData() {
   const [data, setData] = useState<AppData>(() => {
     const mode = localStorage.getItem('hr-assistant-data-mode');
     if (mode !== 'real-v1') {
+      const seeded = buildMvpSeedData(emptyData);
+      localStorage.setItem(mvpSeedKey, 'true');
       localStorage.setItem('hr-assistant-data-mode', 'real-v1');
-      localStorage.setItem('hr-assistant-data', JSON.stringify(emptyData));
-      return emptyData;
+      localStorage.setItem('hr-assistant-data', JSON.stringify(seeded));
+      return seeded;
     }
     const stored = localStorage.getItem('hr-assistant-data');
-    if (!stored) return emptyData;
+    if (!stored) return buildMvpSeedData(emptyData);
     const parsed = JSON.parse(stored) as Partial<AppData>;
     if (isLegacyDemoData(parsed)) {
-      localStorage.setItem('hr-assistant-data', JSON.stringify(emptyData));
-      return emptyData;
+      const seeded = buildMvpSeedData(emptyData);
+      localStorage.setItem(mvpSeedKey, 'true');
+      localStorage.setItem('hr-assistant-data', JSON.stringify(seeded));
+      return seeded;
     }
-    return normalizeAppData(parsed);
+    const normalized = normalizeAppData(parsed);
+    if (localStorage.getItem(mvpSeedKey) !== 'true') {
+      const seeded = buildMvpSeedData(normalized);
+      localStorage.setItem(mvpSeedKey, 'true');
+      localStorage.setItem('hr-assistant-data', JSON.stringify(seeded));
+      return seeded;
+    }
+    return normalized;
   });
 
   useEffect(() => {
@@ -111,12 +128,18 @@ function useAppData() {
         return;
       }
       if (remote.status !== 'ok') return;
-      setData(remote.data);
+      const shouldSeed = localStorage.getItem(mvpSeedKey) !== 'true';
+      const nextData = shouldSeed ? buildMvpSeedData(remote.data) : remote.data;
+      if (shouldSeed) {
+        localStorage.setItem(mvpSeedKey, 'true');
+        void saveRemoteData(nextData, apiToken);
+      }
+      setData(nextData);
       setApiUser(remote.user ?? null);
       setAuthRequired(false);
       setStorageMode('本地API');
       localStorage.setItem('hr-assistant-data-mode', 'real-v1');
-      localStorage.setItem('hr-assistant-data', JSON.stringify(remote.data));
+      localStorage.setItem('hr-assistant-data', JSON.stringify(nextData));
     });
     return () => {
       active = false;
@@ -172,10 +195,16 @@ function useAppData() {
   };
 
   const resetData = () => {
+    localStorage.removeItem(mvpSeedKey);
     update(emptyData);
   };
 
-  return { data, update, audit, resetData, storageMode, apiUser, apiToken, authRequired, authError, login, logout };
+  const seedMvpData = () => {
+    localStorage.setItem(mvpSeedKey, 'true');
+    update(buildMvpSeedData(data));
+  };
+
+  return { data, update, audit, resetData, seedMvpData, storageMode, apiUser, apiToken, authRequired, authError, login, logout };
 }
 
 function StatCard({ label, value, note, icon: Icon }: { label: string; value: string | number; note: string; icon: React.ComponentType<{ size?: number }> }) {
@@ -279,8 +308,10 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
   const [goal, setGoal] = useState({ title: '', dimension: '平台', target: 0, current: 0, metric: '发布篇数' });
   const [drilldown, setDrilldown] = useState<'内容' | '曝光' | '互动' | '点击' | ''>('');
   const [taskFilter, setTaskFilter] = useState<'全部' | Exclude<TaskItem['type'], '线索待跟进'>>('全部');
+  const [selectedTaskId, setSelectedTaskId] = useState('');
   const tasks = useMemo(() => deriveTasks(data).filter((task) => task.type !== '线索待跟进'), [data]);
   const visibleTasks = tasks.filter((task) => taskFilter === '全部' || task.type === taskFilter);
+  const selectedTask = tasks.find((task) => task.id === selectedTaskId);
   const pendingPublish = data.contents.filter((item) => item.status === '待发布').length;
   const pendingReview = data.contents.filter((item) => item.status === '待专业审核' || item.status === '待品牌合规审核').length;
   const pendingMetrics = data.contents.filter((item) => (item.status === '已发布' || item.status === '数据回收中') && Object.values(item.metrics).every((value) => value === 0)).length;
@@ -402,12 +433,29 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
               </div>
               <div className="row-actions">
                 <Badge tone={task.priority === '高' ? 'danger' : task.priority === '中' ? 'warn' : 'info'}>{task.priority}</Badge>
+                <button className="ghost" onClick={() => setSelectedTaskId(selectedTaskId === task.id ? '' : task.id)}>详情</button>
                 <button className="ghost" onClick={() => openSection(task.targetSection)}>处理</button>
                 <button className="ghost" onClick={() => completeTask(task.id)}>完成</button>
               </div>
             </div>
           ))}
         </div>
+        {selectedTask && (
+          <div className="detail-panel">
+            <strong>{selectedTask.title}</strong>
+            <div className="template-grid">
+              <div className="template-chip">任务来源<small>{selectedTask.type} · {selectedTask.targetSection}</small></div>
+              <div className="template-chip">责任归属<small>{selectedTask.owner || '未分配'} · {selectedTask.dueDate || '无截止日期'}</small></div>
+              <div className="template-chip">处理状态<small>{data.taskCompletions.includes(selectedTask.id) ? '已完成' : '待处理'} · {selectedTask.priority}优先级</small></div>
+            </div>
+            <p>{selectedTask.body || '暂无补充说明'}</p>
+            <div className="platform-note"><AlertTriangle size={16} />异常说明：如数据为空、权限不足或源数据被删除，任务会保留当前描述并引导进入对应模块核查。</div>
+            <div className="card-actions-inline">
+              <button className="secondary" onClick={() => openSection(selectedTask.targetSection)}>进入处理模块</button>
+              <button className="ghost" onClick={() => completeTask(selectedTask.id)}>标记完成</button>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="panel wide">
@@ -855,13 +903,17 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
     const model = findModelApi(data, '内容生成');
     if (model) {
       setAiStatus('正在调用大模型生成内容...');
-      const result = await runModelTask(model, '内容生成', { job: selectedJob, platform }, apiToken);
-      if (result.ok && result.text) {
-        setDraft(result.text);
-        setAiStatus(`已使用 ${model.name} 生成`);
-        return;
+      try {
+        const result = await runModelTask(model, '内容生成', { job: selectedJob, platform }, apiToken);
+        if (result.ok && result.text) {
+          setDraft(result.text);
+          setAiStatus(`已使用 ${model.name} 生成`);
+          return;
+        }
+        setAiStatus(`模型调用失败，已回退本地模板：${result.message ?? '未知错误'}`);
+      } catch {
+        setAiStatus('模型调用失败，已回退本地模板：API 无法连接或未配置');
       }
-      setAiStatus(`模型调用失败，已回退本地模板：${result.message ?? '未知错误'}`);
     } else {
       setAiStatus('未配置内容生成模型，使用本地模板');
     }
@@ -875,20 +927,24 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
     const riskModel = findModelApi(data, '风险识别');
     if (riskModel) {
       setAiStatus('正在调用大模型识别风险...');
-      const result = await runModelTask(riskModel, '风险识别', { text: draft }, apiToken);
-      if (result.ok && result.text) {
-        try {
-          const parsed = JSON.parse(result.text) as { level?: '低' | '中' | '高'; risks?: string[] };
-          scanned = {
-            level: parsed.level === '低' || parsed.level === '中' || parsed.level === '高' ? parsed.level : scanned.level,
-            risks: Array.isArray(parsed.risks) ? parsed.risks : scanned.risks,
-          };
-          setAiStatus(`已使用 ${riskModel.name} 识别风险`);
-        } catch {
-          setAiStatus('模型风险识别返回格式不可解析，已回退本地规则');
+      try {
+        const result = await runModelTask(riskModel, '风险识别', { text: draft }, apiToken);
+        if (result.ok && result.text) {
+          try {
+            const parsed = JSON.parse(result.text) as { level?: '低' | '中' | '高'; risks?: string[] };
+            scanned = {
+              level: parsed.level === '低' || parsed.level === '中' || parsed.level === '高' ? parsed.level : scanned.level,
+              risks: Array.isArray(parsed.risks) ? parsed.risks : scanned.risks,
+            };
+            setAiStatus(`已使用 ${riskModel.name} 识别风险`);
+          } catch {
+            setAiStatus('模型风险识别返回格式不可解析，已回退本地规则');
+          }
+        } else {
+          setAiStatus(`模型风险识别失败，已回退本地规则：${result.message ?? '未知错误'}`);
         }
-      } else {
-        setAiStatus(`模型风险识别失败，已回退本地规则：${result.message ?? '未知错误'}`);
+      } catch {
+        setAiStatus('模型风险识别失败，已回退本地规则：API 无法连接或未配置');
       }
     }
     const newTask: ContentTask = {
@@ -1294,6 +1350,8 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
   const [activePanel, setActivePanel] = useState<'素材库' | '采集表' | '模板案例'>('素材库');
   const [templateDetail, setTemplateDetail] = useState('');
   const [collectionDraft, setCollectionDraft] = useState('');
+  const [selectedAssetId, setSelectedAssetId] = useState('');
+  const selectedAsset = data.assets.find((item) => item.id === selectedAssetId);
   const collectionTemplates = [
     { name: '技术案例采集表', fields: '项目背景、技术挑战、技术栈、解决方案、团队分工、业务价值、可公开范围、禁止公开内容、适合平台、审核人' },
     { name: '员工访谈采集表', fields: '员工角色、加入时间、成长经历、印象项目、团队氛围、管理风格、候选人建议、实名授权、照片授权、有效期' },
@@ -1301,7 +1359,10 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
   ];
 
   const createAsset = async () => {
-    if (!asset.name.trim()) return;
+    if (!asset.name.trim()) {
+      setUploadStatus('保存失败：素材名称为必填项，请补充后再保存。');
+      return;
+    }
     setUploadStatus(assetFile ? '正在上传素材文件...' : '');
     let fileMeta: Pick<AssetItem, 'fileName' | 'fileUrl' | 'mimeType' | 'fileSize' | 'uploadedAt'> = {};
 
@@ -1325,6 +1386,7 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
       usageCount: 0,
     };
     audit('新增素材', item.name, { ...data, assets: [item, ...data.assets] });
+    setSelectedAssetId(item.id);
     setAsset({ name: '', category: '公司/业务介绍', owner: '招聘专员', scope: '招聘内容可用' });
     setAssetFile(null);
   };
@@ -1424,9 +1486,32 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
                 <p key={content.id}>{content.title} · {content.platform} · {content.status}</p>
               ))}
             </details>
+            <button className="ghost" onClick={() => setSelectedAssetId(selectedAssetId === asset.id ? '' : asset.id)}>详情</button>
             <button className="ghost" onClick={() => removeAsset(asset.id)}>删除</button>
           </div>
         ))}
+        {selectedAsset && (
+          <div className="detail-panel">
+            <strong>{selectedAsset.name}</strong>
+            <div className="template-grid">
+              <div className="template-chip">数据来源<small>{selectedAsset.fileName ? `文件上传：${selectedAsset.fileName}` : '手动录入/采集表'}</small></div>
+              <div className="template-chip">归属隔离<small>{selectedAsset.owner} · {selectedAsset.platforms.join('、')}</small></div>
+              <div className="template-chip">状态闭环<small>{selectedAsset.authorization} · 使用 {selectedAsset.usageCount} 次</small></div>
+              <div className="template-chip">异常说明<small>{daysUntil(selectedAsset.expiresAt) <= 30 ? '授权即将到期，请复核' : '暂无授权异常'}</small></div>
+            </div>
+            <p>{selectedAsset.scope}</p>
+            <div className="entry-grid">
+              {data.contents.filter((content) => content.content.includes(selectedAsset.name) || content.tags.includes(selectedAsset.category)).map((content) => (
+                <article key={content.id}>
+                  <strong>{content.title}</strong>
+                  <span>{content.platform} · {content.status} · {content.owner}</span>
+                  <span>{content.metrics.views} 曝光 · {content.metrics.clicks} 点击</span>
+                </article>
+              ))}
+              {data.contents.filter((content) => content.content.includes(selectedAsset.name) || content.tags.includes(selectedAsset.category)).length === 0 && <EmptyState title="暂无关联内容" body="内容正文或标签命中素材名称/类型后，会自动进入素材详情下钻。" />}
+            </div>
+          </div>
+        )}
       </section>}
       {activePanel === '采集表' && <section className="panel wide">
         <div className="panel-title"><h2>采集表框架</h2><FileText size={18} /></div>
@@ -3044,6 +3129,15 @@ function LeadPool({ data, audit }: { data: AppData; audit: (action: string, targ
     const target = data.candidateLeads.find((item) => item.id === id);
     audit('更新候选人线索', target?.name ?? id, { ...data, candidateLeads: data.candidateLeads.map((item) => item.id === id ? { ...item, ...patch, updatedAt: nowText() } : item) });
   };
+  const removeLead = (id: string) => {
+    const target = data.candidateLeads.find((item) => item.id === id);
+    audit('删除候选人线索', target?.name || target?.contact || id, {
+      ...data,
+      candidateLeads: data.candidateLeads.filter((item) => item.id !== id),
+      leadFollowUps: data.leadFollowUps.filter((item) => item.leadId !== id),
+    });
+    if (selectedLeadId === id) setSelectedLeadId('');
+  };
   const addFollowUp = () => {
     if (!selectedLeadId || !follow.content.trim()) return;
     const item: LeadFollowUp = { id: `follow-${Date.now()}`, leadId: selectedLeadId, ...follow, nextFollowAt: follow.nextFollowAt || undefined, createdAt: nowText() };
@@ -3151,7 +3245,7 @@ function LeadPool({ data, audit }: { data: AppData; audit: (action: string, targ
                 <td>{data.jobs.find((job) => job.id === item.targetJobId)?.title ?? '未关联'}</td>
                 <td><select value={item.stage} onChange={(event) => updateLead(item.id, { stage: event.target.value as CandidateLead['stage'] })}><option>待联系</option><option>已联系</option><option>已转北森</option><option>无效</option><option>暂不合适</option></select></td>
                 <td><Badge tone={item.beisenStatus === '已转入' ? 'good' : item.beisenStatus === '转入失败' ? 'danger' : 'warn'}>{item.beisenStatus}</Badge></td>
-                <td><div className="row-actions"><button className="ghost" onClick={() => setSelectedLeadId(item.id)}>详情/跟进</button><button className="ghost" onClick={() => transferToBeisen(item.id)} disabled={item.beisenStatus === '已转入'}>转北森</button></div></td>
+                <td><div className="row-actions"><button className="ghost" onClick={() => setSelectedLeadId(item.id)}>详情/跟进</button><button className="ghost" onClick={() => transferToBeisen(item.id)} disabled={item.beisenStatus === '已转入'}>转北森</button><button className="ghost" onClick={() => removeLead(item.id)}>删除</button></div></td>
               </tr>
             ))}
           </tbody>
@@ -4169,6 +4263,8 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
     '企业微信/飞书：已支持 Webhook 摘要发送，并纳入集成测试与同步记录',
     '公网落地页：已提供公开线索接口、埋点 SDK、隐私合规台账和上线任务管理',
   ];
+  const mvpResults = evaluateMvpMatrix(data);
+  const mvpSummary = summarizeMvp(mvpResults);
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -4182,8 +4278,40 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
             <LockKeyhole size={16} />恢复备份
             <input type="file" accept="application/json" onChange={(event) => void restoreBackup(event.target.files?.[0])} />
           </label>
+          <button className="ghost" onClick={() => downloadText('招聘运营助手_MVP验收报告.md', mvpReportMarkdown(mvpResults), 'text/markdown;charset=utf-8')}><FileText size={16} />导出MVP报告</button>
           <button className="secondary" onClick={resetData}>清空本地数据</button>
         </div>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>MVP 验收矩阵</h2><ShieldCheck size={18} /></div>
+        <div className="stats-row compact-stats analytics-stats">
+          <StatCard label="模块总数" value={mvpSummary.total} note="覆盖全部业务模块" icon={Database} />
+          <StatCard label="已达标" value={mvpSummary.passed} note={`${mvpSummary.passRate}% 达标率`} icon={CheckCircle2} />
+          <StatCard label="接近MVP" value={mvpSummary.near} note="通常缺测试或真实配置" icon={AlertTriangle} />
+          <StatCard label="未达标" value={mvpSummary.failed} note="需优先修复" icon={ShieldCheck} />
+        </div>
+        <table className="analytics-table">
+          <thead>
+            <tr>
+              <th>模块</th>
+              <th>状态</th>
+              <th>得分</th>
+              <th>已具备能力</th>
+              <th>剩余缺口/异常说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mvpResults.map((item) => (
+              <tr key={item.module}>
+                <td>{item.module}</td>
+                <td><Badge tone={item.status === '达标' ? 'good' : item.status === '接近' ? 'warn' : 'danger'}>{item.status}</Badge></td>
+                <td>{item.score}/8</td>
+                <td>{item.evidence.join('；')}</td>
+                <td>{item.gaps.join('；') || '无阻断缺口'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </section>
       <section className="panel">
         <div className="panel-title"><h2>角色权限矩阵</h2><Users size={18} /></div>
@@ -4602,9 +4730,13 @@ function canAccessSection(section: Section, data: AppData, apiUser: ApiUser | nu
 
 export function App() {
   const [section, setSection] = useState<Section>('工作台');
-  const { data, update, audit, resetData, storageMode, apiUser, apiToken, authRequired, authError, login, logout } = useAppData();
+  const [navMode, setNavMode] = useState<'我的工作' | '全部模块'>('我的工作');
+  const { data, update, audit, resetData, seedMvpData, storageMode, apiUser, apiToken, authRequired, authError, login, logout } = useAppData();
   const permittedNavItems = navItems.filter(({ key }) => canAccessSection(key, data, apiUser));
-  const activeSection = canAccessSection(section, data, apiUser) ? section : permittedNavItems[0]?.key ?? '工作台';
+  const focusedNavItems = navMode === '我的工作' ? permittedNavItems.filter(({ key }) => operatorSections.has(key)) : permittedNavItems;
+  const visibleNavItems = focusedNavItems.length > 0 ? focusedNavItems : permittedNavItems;
+  const activeSection = visibleNavItems.some(({ key }) => key === section) && canAccessSection(section, data, apiUser) ? section : visibleNavItems[0]?.key ?? '工作台';
+  const myTasks = deriveTasks(data).filter((task) => !apiUser || task.owner === apiUser.name || task.owner === apiUser.username || task.owner === '未分配' || task.owner === '招聘专员' || apiUser.role === '系统管理员');
 
   if (authRequired) {
     return <LoginScreen onLogin={login} error={authError} />;
@@ -4615,10 +4747,19 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <div><Sparkles size={22} /></div>
-          <span>招聘运营助手</span>
+          <span>招聘运营助手<small>我的运营台</small></span>
+        </div>
+        <div className="sidebar-summary">
+          <strong>{apiUser?.name ?? '当前用户'}</strong>
+          <span>{apiUser?.role ?? '本地视图'} · {myTasks.length} 项待办</span>
+        </div>
+        <div className="sidebar-segment">
+          {(['我的工作', '全部模块'] as const).map((mode) => (
+            <button key={mode} className={navMode === mode ? 'active' : ''} onClick={() => setNavMode(mode)}>{mode}</button>
+          ))}
         </div>
         <nav>
-          {permittedNavItems.map(({ key, icon: Icon }) => (
+          {visibleNavItems.map(({ key, icon: Icon }) => (
             <button key={key} className={activeSection === key ? 'active' : ''} onClick={() => setSection(key)}>
               <Icon size={18} />
               {key}
@@ -4629,8 +4770,9 @@ export function App() {
           <Badge tone="good">一期闭环版</Badge>
           <Badge tone={storageMode === '本地API' ? 'good' : 'warn'}>{storageMode}</Badge>
           {apiUser && <small>{apiUser.name} · {apiUser.role}</small>}
+          <button className="ghost" onClick={seedMvpData}>补齐MVP样例数据</button>
           {apiUser && <button className="ghost" onClick={logout}>退出登录</button>}
-          <small>Web 系统 · 北森前置运营中台</small>
+          <small>{navMode === '我的工作' ? '仅显示招聘运营日常模块' : '显示配置与管理模块'}</small>
         </div>
       </aside>
       <main>

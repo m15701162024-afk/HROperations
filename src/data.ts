@@ -396,6 +396,122 @@ export const seedData: AppData = {
   operationSettings: emptyData.operationSettings,
 };
 
+export function buildMvpSeedData(data: AppData = emptyData): AppData {
+  const now = '2026-05-26 10:00';
+  return {
+    ...data,
+    jobs: data.jobs.length ? data.jobs : seedData.jobs,
+    accounts: data.accounts.length ? data.accounts : seedData.accounts,
+    contents: data.contents.length ? data.contents : seedData.contents,
+    assets: data.assets.length ? data.assets : seedData.assets,
+    goals: data.goals.length ? data.goals : seedData.goals,
+    reports: data.reports.length ? data.reports : seedData.reports,
+    entries: data.entries.length ? data.entries : seedData.entries,
+    beisenResults: data.beisenResults.length ? data.beisenResults : [
+      { id: 'mvp-beisen-1', jobId: 'job-2', sourcePlatform: '小红书', sourceContentId: 'ct-2', candidateCode: 'CAND-001', stage: '有效简历', importedAt: now },
+      { id: 'mvp-beisen-2', jobId: 'job-1', sourcePlatform: '脉脉', sourceContentId: 'ct-1', candidateCode: 'CAND-002', stage: '已约面', importedAt: now },
+      { id: 'mvp-beisen-3', jobId: 'job-3', sourcePlatform: '公众号', sourceContentId: 'ct-3', candidateCode: 'CAND-003', stage: '已投递', importedAt: now },
+    ],
+    integrations: data.integrations.length ? data.integrations : [
+      { id: 'mvp-integration-beisen', type: '北森', name: '北森候选人同步', endpoint: 'https://openapi.example-beisen.com', apiKey: '', authMode: 'Token', status: '待验证', extraConfig: '{"method":"POST","endpointPath":"/candidate/import"}' },
+      { id: 'mvp-integration-platform', type: '平台API', name: '小红书指标拉取', endpoint: 'https://api.example-platform.com', apiKey: '', authMode: 'Token', status: '待验证', extraConfig: '{"platform":"小红书","fields":["views","likes","comments","clicks"]}' },
+    ],
+    integrationSyncRuns: data.integrationSyncRuns.length ? data.integrationSyncRuns : [
+      { id: 'mvp-sync-1', integrationId: 'mvp-integration-platform', syncType: '平台指标拉取', status: '成功', message: '样例指标已进入内容明细', recordCount: 3, retryCount: 0, dataQualityScore: 92, ranAt: now },
+    ],
+    modelApis: data.modelApis.length ? data.modelApis : [
+      { id: 'mvp-model-deepseek', provider: 'DeepSeek', name: 'DeepSeek 内容生成', baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat', enabledFor: ['内容生成', '风险识别', '复盘建议'], status: '未配置' },
+    ],
+    landingPages: data.landingPages.length ? data.landingPages : [
+      { id: 'mvp-landing-1', title: '杭州技术岗位集合页', slug: 'hangzhou-tech-jobs', pageType: '岗位集合页', linkedJobIds: ['job-1', 'job-2'], destinationUrl: 'https://example.com/careers', status: '已发布', visits: 620, clicks: 94 },
+    ],
+    landingLeads: data.landingLeads.length ? data.landingLeads : [
+      { id: 'mvp-landing-lead-1', landingPageId: 'mvp-landing-1', name: '周同学', contact: 'zhou@example.com', targetJobId: 'job-2', sourcePlatform: '小红书', note: '关注 VLA 实习', status: '待转入北森', submittedAt: now },
+    ],
+    roles: data.roles.length ? data.roles : [
+      { id: 'role-recruiter', name: '招聘专员', dataScope: '个人', permissions: ['工作台查看', '岗位查看', '内容查看', '内容创建', '素材查看', '数据查看'] },
+      { id: 'role-ops', name: '招聘运营', dataScope: '团队', permissions: ['工作台查看', '岗位查看', '内容查看', '内容创建', '素材查看', '账号查看', '数据查看', '复盘查看', '数据导入', 'AI配置'] },
+      { id: 'role-owner', name: '招聘负责人', dataScope: '全部', permissions: ['全部'] },
+    ],
+    users: data.users.length ? data.users : [
+      { id: 'user-a', name: '招聘专员A', roleId: 'role-recruiter', team: '招聘团队', status: '启用' },
+      { id: 'user-ops', name: '新媒体运营', roleId: 'role-ops', team: '招聘运营', status: '启用' },
+    ],
+    workflowRules: data.workflowRules.length ? data.workflowRules : [
+      { id: 'workflow-high-risk', name: '高风险内容审核流', platform: '全部', contentType: '全部', minRiskLevel: '高', steps: ['草稿', 'AI已生成', '待专业补充', '待专业审核', '待品牌合规审核', '待平台适配', '待发布', '已发布', '数据回收中', '已复盘'], enabled: true },
+    ],
+    sensitiveRules: data.sensitiveRules.length ? data.sensitiveRules : [
+      { id: 'rule-salary', keyword: '保证年薪', category: '薪酬承诺', riskLevel: '高', suggestion: '改为“薪酬面议，以正式 Offer 为准”', enabled: true },
+      { id: 'rule-customer', keyword: '客户名称', category: '客户信息', riskLevel: '高', suggestion: '改为行业或场景描述', enabled: true },
+    ],
+    costs: data.costs.length ? data.costs : [
+      { id: 'mvp-cost-xhs', targetType: '平台', targetId: '小红书', laborCost: 1800, mediaCost: 500, productionCost: 700 },
+      { id: 'mvp-cost-maimai', targetType: '平台', targetId: '脉脉', laborCost: 1200, mediaCost: 0, productionCost: 400 },
+    ],
+    notifications: data.notifications.length ? data.notifications : [
+      { id: 'mvp-notice-1', title: '高风险内容待审核', body: '脉脉技术观点内容需要 HR 负责人复核', targetSection: '内容运营', level: '待办', read: false, createdAt: now },
+    ],
+    auditLogs: data.auditLogs.length ? data.auditLogs : [
+      { id: 'mvp-audit-1', actor: '系统', action: '补齐MVP样例数据', target: '全部空数据模块', createdAt: now },
+    ],
+    integrationMappings: data.integrationMappings.length ? data.integrationMappings : [
+      { id: 'mvp-mapping-beisen', name: '北森线索字段映射', integrationType: '北森', scenario: '北森线索同步', method: 'POST', endpointPath: '/candidate/import', resultPath: 'data', fieldMapping: '{"candidateName":"name","mobile":"contact","jobCode":"jobId"}', enabled: true },
+    ],
+    compliancePolicies: data.compliancePolicies.length ? data.compliancePolicies : [
+      { id: 'mvp-policy-privacy', title: '候选人线索隐私告知', scope: '隐私授权', owner: '招聘负责人', status: '生效', content: '收集联系方式前需告知招聘用途和数据保留边界。', updatedAt: now },
+    ],
+    deploymentTasks: data.deploymentTasks.length ? data.deploymentTasks : [
+      { id: 'mvp-deploy-api', title: '配置北森 OpenAPI 字段', category: '平台接口', owner: '招聘运营', status: '进行中', dueDate: '2026-06-05', note: '拿到正式字段后在生产集成字段映射中维护。' },
+    ],
+    importRuns: data.importRuns.length ? data.importRuns : [
+      { id: 'mvp-import-1', source: '内容指标', fileName: '小红书-指标样例.csv', mapping: '{"views":"曝光","clicks":"点击"}', status: '成功', recordCount: 3, errorRows: [], createdAt: now },
+    ],
+    reportActions: data.reportActions.length ? data.reportActions : [
+      { id: 'mvp-report-action-1', reportId: 'rp-1', title: '复用 VLA 实习内容结构', owner: '招聘专员A', dueDate: '2026-05-31', status: '进行中', createdAt: now },
+    ],
+    promptTemplates: data.promptTemplates.length ? data.promptTemplates : [
+      { id: 'mvp-prompt-content', task: '内容生成', name: '岗位种草内容框架', provider: 'DeepSeek', prompt: '基于 JD、候选人画像、岗位卖点生成平台内容。', enabled: true, updatedAt: now },
+    ],
+    modelRunLogs: data.modelRunLogs.length ? data.modelRunLogs : [
+      { id: 'mvp-model-log-1', modelApiId: 'mvp-model-deepseek', task: '内容生成', status: '失败', inputSummary: '资深后端岗位', outputPreview: '', message: '未配置 API Key，等待使用人配置', ranAt: now },
+    ],
+    pluginRules: data.pluginRules.length ? data.pluginRules : [
+      { id: 'mvp-plugin-xhs', platform: '小红书', name: '笔记指标采集', urlPattern: 'xiaohongshu.com/explore/*', selectors: '{"title":"h1","views":".view","likes":".like"}', enabled: true, updatedAt: now },
+    ],
+    candidateLeads: data.candidateLeads.length ? data.candidateLeads : [
+      { id: 'mvp-lead-1', name: '李同学', contact: 'li@example.com', sourcePlatform: '小红书', sourceAccountId: 'acc-1', sourceContentId: 'ct-2', targetJobId: 'job-2', owner: '招聘专员A', stage: '已联系', beisenStatus: '待转入', note: '收藏 VLA 内容后私信咨询', createdAt: now, updatedAt: now },
+      { id: 'mvp-lead-2', name: '王工', contact: 'wang@example.com', sourcePlatform: '脉脉', sourceAccountId: 'acc-2', sourceContentId: 'ct-1', targetJobId: 'job-1', owner: '招聘主管', stage: '待联系', beisenStatus: '待转入', note: '评论区表达兴趣', createdAt: now, updatedAt: now },
+    ],
+    leadFollowUps: data.leadFollowUps.length ? data.leadFollowUps : [
+      { id: 'mvp-follow-1', leadId: 'mvp-lead-1', actor: '招聘专员A', method: '私信', result: '有意向', content: '已发送岗位链接，候选人表示本周投递。', nextFollowAt: '2026-05-28', createdAt: now },
+    ],
+    contentQualityScores: data.contentQualityScores.length ? data.contentQualityScores : [
+      { id: 'mvp-score-1', contentId: 'ct-2', total: 86, titleScore: 16, personaScore: 15, sellingPointScore: 18, platformFitScore: 16, ctaScore: 11, complianceScore: 10, suggestions: ['保留真实场景表达', 'CTA 可更明确'], createdAt: now, evaluator: '规则' },
+    ],
+    topics: data.topics.length ? data.topics : [
+      { id: 'mvp-topic-1', title: '研究型实习生最关心导师带教什么', type: '校招内容', platform: '小红书', targetJobId: 'job-2', owner: '招聘专员A', status: '写作中', inspiration: '围绕真实机器人场景和成长速度展开', tags: ['校招', '算法'], source: '复盘沉淀', createdAt: now, updatedAt: now },
+    ],
+    accountHealthSnapshots: data.accountHealthSnapshots.length ? data.accountHealthSnapshots : [
+      { id: 'mvp-health-acc-1', accountId: 'acc-1', periodStart: '2026-05-01', periodEnd: '2026-05-26', publishCount: 2, averageViews: 8900, averageInteractionRate: 0.07, averageClickRate: 0.014, highRiskRatio: 0.2, inactiveDays: 8, positioningMatchScore: 78, level: '健康', suggestions: ['继续复用校招答疑内容结构'], createdAt: now },
+    ],
+    calendarMilestones: data.calendarMilestones.length ? data.calendarMilestones : [
+      { id: 'mvp-milestone-1', title: '暑期实习投递高峰', date: '2026-06-01', type: '校招节点', note: '提前准备小红书/B站校招内容。' },
+    ],
+    dataExplanations: data.dataExplanations.length ? data.dataExplanations : [
+      { id: 'mvp-explain-1', scope: '平台', targetId: '小红书', title: '小红书收藏高于点击', body: '候选人对内容有兴趣，但投递入口还可以更明显。', severity: '建议', evidence: ['收藏 512', '点击 188'], createdAt: now },
+    ],
+    reviewMentions: data.reviewMentions.length ? data.reviewMentions : [
+      { id: 'mvp-mention-1', contentId: 'ct-1', userId: 'HR负责人', commentId: 'mvp-review-1', read: false, createdAt: now },
+    ],
+    reviewComments: data.reviewComments.length ? data.reviewComments : [
+      { id: 'mvp-review-1', contentId: 'ct-1', reviewer: 'HR负责人', stage: '待品牌合规审核', decision: '修改建议', comment: '技术架构表述需要再降敏。', createdAt: now },
+    ],
+    contentVersions: data.contentVersions.length ? data.contentVersions : [
+      { id: 'mvp-version-1', contentId: 'ct-1', version: 1, body: seedData.contents[0]?.content ?? '', editor: '招聘主管', changeNote: '创建观点内容初稿', createdAt: now },
+    ],
+  };
+}
+
 export function generateContent(job: JobNeed, platform: Platform) {
   const tone = {
     小红书: '真实、种草、轻量、亲和',

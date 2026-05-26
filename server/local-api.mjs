@@ -455,9 +455,10 @@ const server = createServer(async (request, response) => {
   }
 
   if (pathname === '/api/data' && request.method === 'GET') {
-    if (!requireSession(request, response)) return;
+    const session = requireSession(request, response);
+    if (!session) return;
     try {
-      send(response, 200, redactSecrets(await repository.readData()));
+      send(response, 200, redactSecrets(filterDataForSession(await repository.readData(), session)));
     } catch (error) {
       send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Data store unavailable' });
     }
@@ -465,12 +466,14 @@ const server = createServer(async (request, response) => {
   }
 
   if (pathname === '/api/data' && request.method === 'PUT') {
-    if (!requireSession(request, response)) return;
+    const session = requireSession(request, response);
+    if (!session) return;
     try {
       const body = await readBody(request);
       const data = JSON.parse(body);
       const existing = await repository.readData();
-      await repository.writeData(preserveSecrets(data, existing));
+      const nextData = hasGlobalAnalyticsAccess(session) ? preserveSecrets(data, existing) : mergeScopedData(existing, data, session);
+      await repository.writeData(nextData);
       await clearAnalyticsCache();
       send(response, 200, { ok: true });
     } catch (error) {
@@ -817,9 +820,13 @@ function normalizeAnalyticsQuery(input = {}, fallbackDimension = 'platform') {
   };
 }
 
-function filterDataForAnalytics(data, session) {
+function sessionUserKeys(session) {
+  return new Set([session.id, session.name, session.username].filter(Boolean));
+}
+
+function filterDataForSession(data, session) {
   if (hasGlobalAnalyticsAccess(session)) return data;
-  const userKeys = new Set([session.id, session.name, session.username].filter(Boolean));
+  const userKeys = sessionUserKeys(session);
   const contents = (data.contents ?? []).filter((content) => userKeys.has(content.owner) || userKeys.has(content.reviewer));
   const contentIds = new Set(contents.map((content) => content.id));
   const jobIds = new Set(contents.map((content) => content.jobId).filter(Boolean));
@@ -827,17 +834,72 @@ function filterDataForAnalytics(data, session) {
   const accounts = (data.accounts ?? []).filter((account) => accountIds.has(account.id) || userKeys.has(account.owner));
   accounts.forEach((account) => accountIds.add(account.id));
   const jobs = (data.jobs ?? []).filter((job) => jobIds.has(job.id));
+  jobs.forEach((job) => jobIds.add(job.id));
   const beisenResults = (data.beisenResults ?? []).filter((result) => (result.sourceContentId && contentIds.has(result.sourceContentId)) || jobIds.has(result.jobId));
   const costs = (data.costs ?? []).filter((cost) => cost.targetId === 'all' || contentIds.has(cost.targetId) || jobIds.has(cost.targetId) || accountIds.has(cost.targetId));
+  const candidateLeads = (data.candidateLeads ?? []).filter((lead) => userKeys.has(lead.owner) || (lead.sourceContentId && contentIds.has(lead.sourceContentId)) || (lead.targetJobId && jobIds.has(lead.targetJobId)) || (lead.sourceAccountId && accountIds.has(lead.sourceAccountId)));
+  const leadIds = new Set(candidateLeads.map((lead) => lead.id));
+  const landingPages = (data.landingPages ?? []).filter((page) => (page.linkedJobIds ?? []).some((id) => jobIds.has(id)));
+  const landingPageIds = new Set(landingPages.map((page) => page.id));
   return {
     ...data,
     jobs,
     accounts,
     contents,
+    contentVersions: (data.contentVersions ?? []).filter((version) => contentIds.has(version.contentId)),
+    reviewComments: (data.reviewComments ?? []).filter((comment) => contentIds.has(comment.contentId) || userKeys.has(comment.reviewer)),
+    assets: (data.assets ?? []).filter((asset) => userKeys.has(asset.owner) || (asset.platforms ?? []).some((platform) => accounts.some((account) => account.platform === platform))),
     beisenResults,
     costs,
     entries: (data.entries ?? []).filter((entry) => accounts.some((account) => account.platform === entry.platform)),
+    landingPages,
+    landingLeads: (data.landingLeads ?? []).filter((lead) => landingPageIds.has(lead.landingPageId) || jobIds.has(lead.targetJobId)),
+    candidateLeads,
+    leadFollowUps: (data.leadFollowUps ?? []).filter((followUp) => leadIds.has(followUp.leadId) || userKeys.has(followUp.actor)),
+    topics: (data.topics ?? []).filter((topic) => !topic.owner || userKeys.has(topic.owner) || jobIds.has(topic.jobId)),
+    accountHealthSnapshots: (data.accountHealthSnapshots ?? []).filter((snapshot) => accountIds.has(snapshot.accountId)),
+    reportActions: (data.reportActions ?? []).filter((action) => userKeys.has(action.owner)),
+    notifications: (data.notifications ?? []).filter((notification) => !notification.owner || userKeys.has(notification.owner)),
+    auditLogs: (data.auditLogs ?? []).filter((log) => userKeys.has(log.actor)),
   };
+}
+
+function filterDataForAnalytics(data, session) {
+  return filterDataForSession(data, session);
+}
+
+function mergeScopedData(existing, incoming, session) {
+  const scoped = filterDataForSession(existing, session);
+  const mergeVisible = (key) => {
+    const visibleIds = new Set((scoped[key] ?? []).map((item) => item.id));
+    const incomingRows = incoming[key] ?? [];
+    const incomingIds = new Set(incomingRows.map((item) => item.id));
+    return [
+      ...incomingRows,
+      ...(existing[key] ?? []).filter((item) => !visibleIds.has(item.id) && !incomingIds.has(item.id)),
+    ];
+  };
+  return preserveSecrets({
+    ...existing,
+    jobs: mergeVisible('jobs'),
+    accounts: mergeVisible('accounts'),
+    contents: mergeVisible('contents'),
+    contentVersions: mergeVisible('contentVersions'),
+    reviewComments: mergeVisible('reviewComments'),
+    assets: mergeVisible('assets'),
+    entries: mergeVisible('entries'),
+    beisenResults: mergeVisible('beisenResults'),
+    costs: mergeVisible('costs'),
+    landingPages: mergeVisible('landingPages'),
+    landingLeads: mergeVisible('landingLeads'),
+    candidateLeads: mergeVisible('candidateLeads'),
+    leadFollowUps: mergeVisible('leadFollowUps'),
+    topics: mergeVisible('topics'),
+    accountHealthSnapshots: mergeVisible('accountHealthSnapshots'),
+    reportActions: mergeVisible('reportActions'),
+    notifications: mergeVisible('notifications'),
+    auditLogs: mergeVisible('auditLogs'),
+  }, existing);
 }
 
 async function cachedAnalyticsDrill(data, query, session) {
