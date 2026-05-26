@@ -792,6 +792,16 @@ function nowText() {
   return new Date().toLocaleString('zh-CN', { hour12: false });
 }
 
+function escapeHtmlText(value: string | number | undefined) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[char] ?? char);
+}
+
 function daysUntil(date: string) {
   if (!date) return Number.POSITIVE_INFINITY;
   return Math.ceil((new Date(date).getTime() - Date.now()) / 86400000);
@@ -3117,6 +3127,28 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
       return emptyFields.length > 0 ? `第 ${index + 2} 行缺少：${emptyFields.join('、')}` : '';
     })
     .filter(Boolean);
+  const rowObjects = allRows.rows.map((row) => rowObject(allRows.headers, row));
+  const duplicateChecks = rowObjects
+    .map((object, index) => {
+      if (source === '岗位' && data.jobs.some((job) => job.title === object.title && job.city === object.city)) return `第 ${index + 2} 行疑似重复岗位：${object.title}`;
+      if (source === '账号' && data.accounts.some((account) => account.platform === object.platform && account.name === object.name)) return `第 ${index + 2} 行疑似重复账号：${object.platform}/${object.name}`;
+      if (source === '素材' && data.assets.some((asset) => asset.name === object.name && asset.category === object.category)) return `第 ${index + 2} 行疑似重复素材：${object.category}/${object.name}`;
+      if (source === '北森结果' && data.beisenResults.some((result) => result.candidateCode === object.candidateCode && result.jobId === object.jobId && result.stage === object.stage)) return `第 ${index + 2} 行疑似重复北森结果：${object.candidateCode}/${object.jobId}/${object.stage}`;
+      return '';
+    })
+    .filter(Boolean);
+  const unmatchedMetricRows = source === '内容指标'
+    ? rowObjects
+        .map((object, index) => {
+          const contentId = String(object.contentId ?? '').trim();
+          const title = String(object.title ?? '').trim();
+          const matched = data.contents.some((content) => content.id === contentId || content.title === title);
+          return matched ? '' : `第 ${index + 2} 行未匹配内容：${contentId || title || '空内容标识'}`;
+        })
+        .filter(Boolean)
+    : [];
+  const blockingErrors = [...(missing.length > 0 ? [`缺少必要字段：${missing.join('、')}`] : []), ...rowErrors, ...unmatchedMetricRows];
+  const warningErrors = duplicateChecks;
   const templates: Record<ImportRun['source'], string> = {
     岗位: 'title,family,city,level,type,jd,persona,sellingPoints,targetPlatforms,beisenUrl,websiteUrl\n',
     内容指标: 'contentId,title,views,likes,comments,saves,shares,clicks\n',
@@ -3128,12 +3160,11 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
     if (!csv.trim()) return;
     let next: AppData = data;
     let recordCount = 0;
-    const errors = [...(missing.length > 0 ? [`缺少必要字段：${missing.join('、')}`] : []), ...rowErrors];
     if (!confirmImport) {
-      setLastImportMessage(errors.length === 0 ? `预检通过：将导入 ${allRows.rows.length} 行，请勾选确认后再导入` : errors.join('；'));
+      setLastImportMessage(blockingErrors.length === 0 ? `预检通过：将导入 ${allRows.rows.length} 行${warningErrors.length ? `，另有 ${warningErrors.length} 条重复提醒` : ''}，请勾选确认后再导入` : blockingErrors.join('；'));
       return;
     }
-    if (errors.length === 0) {
+    if (blockingErrors.length === 0) {
       if (source === '岗位') {
         const jobs = parseJobCsv(mappedCsv);
         recordCount = jobs.length;
@@ -3193,14 +3224,14 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
       source,
       fileName,
       mapping: mappingText,
-      status: errors.length === 0 ? '成功' : '失败',
+      status: blockingErrors.length === 0 ? '成功' : '失败',
       recordCount,
-      errorRows: errors,
+      errorRows: [...blockingErrors, ...warningErrors],
       createdAt: nowText(),
     };
     audit('执行数据导入', `${source}：${run.status}`, { ...next, importRuns: [run, ...next.importRuns] });
-    setLastImportMessage(errors.length === 0 ? `已导入 ${recordCount} 条${source}数据` : errors.join('；'));
-    if (errors.length === 0) setCsv('');
+    setLastImportMessage(blockingErrors.length === 0 ? `已导入 ${recordCount} 条${source}数据${warningErrors.length ? `，重复提醒 ${warningErrors.length} 条已记录` : ''}` : blockingErrors.join('；'));
+    if (blockingErrors.length === 0) setCsv('');
     setConfirmImport(false);
   };
 
@@ -3239,12 +3270,24 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
         <textarea className="small-textarea" value={csv} onChange={(event) => setCsv(event.target.value)} placeholder={templates[source]} />
         <textarea className="small-textarea" value={mappingText} onChange={(event) => setMappingText(event.target.value)} placeholder='字段映射 JSON，例如 {"岗位名称":"title","曝光":"views"}' />
         <div className="platform-note"><Database size={16} />识别到 {allRows.rows.length} 行数据，预览显示前 {preview.rows.length} 行。必要字段：{requiredHeaders[source].join('、')}</div>
+        <div className="stats-row compact-stats analytics-stats">
+          <StatCard label="待导入行" value={allRows.rows.length} note="CSV 有效数据行" icon={Database} />
+          <StatCard label="阻断错误" value={blockingErrors.length} note="需修复后才能写入" icon={AlertTriangle} />
+          <StatCard label="重复提醒" value={warningErrors.length} note="可写入但会记录" icon={ClipboardList} />
+          <StatCard label="预览列数" value={preview.headers.length} note="映射后的字段" icon={FileText} />
+        </div>
         {lastImportMessage && <div className="platform-note"><CheckCircle2 size={16} />{lastImportMessage}</div>}
         {missing.length > 0 && <div className="platform-note danger-note"><AlertTriangle size={16} />缺少必要字段：{missing.join('、')}</div>}
-        {rowErrors.length > 0 && (
+        {blockingErrors.length > 0 && (
           <div className="platform-note danger-note">
-            <AlertTriangle size={16} />发现 {rowErrors.length} 条错误行
-            <button className="ghost" onClick={() => downloadText(`${source}导入错误行.txt`, rowErrors.join('\n'), 'text/plain;charset=utf-8')}>下载错误行</button>
+            <AlertTriangle size={16} />发现 {blockingErrors.length} 条阻断问题
+            <button className="ghost" onClick={() => downloadText(`${source}导入错误行.txt`, blockingErrors.join('\n'), 'text/plain;charset=utf-8')}>下载错误行</button>
+          </div>
+        )}
+        {warningErrors.length > 0 && (
+          <div className="platform-note">
+            <AlertTriangle size={16} />发现 {warningErrors.length} 条重复提醒，确认后仍可写入并在导入历史记录
+            <button className="ghost" onClick={() => downloadText(`${source}导入重复提醒.txt`, warningErrors.join('\n'), 'text/plain;charset=utf-8')}>下载提醒</button>
           </div>
         )}
         <table>
@@ -3370,6 +3413,22 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
     audit('删除复盘报告', target?.title ?? id, { ...data, reports: data.reports.filter((item) => item.id !== id), reportActions: data.reportActions.filter((item) => item.reportId !== id) });
     if (selectedReportId === id) setSelectedReportId('');
   };
+  const exportReportCsv = () => {
+    downloadText('复盘报告行动项.csv', toCsv(data.reportActions.map((item) => ({
+      report: data.reports.find((report) => report.id === item.reportId)?.title ?? item.reportId,
+      title: item.title,
+      owner: item.owner,
+      dueDate: item.dueDate,
+      status: item.status,
+      createdAt: item.createdAt,
+    }))), 'text/csv;charset=utf-8');
+  };
+  const exportReportHtml = () => {
+    const views = scopedContents.reduce((sum, item) => sum + item.metrics.views, 0);
+    const clicks = scopedContents.reduce((sum, item) => sum + item.metrics.clicks, 0);
+    const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" /><title>招聘运营复盘报告</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;margin:32px;color:#172033}h1{font-size:28px}section{margin:24px 0}.card{border:1px solid #dce3eb;border-radius:8px;padding:16px;margin:12px 0}table{border-collapse:collapse;width:100%}th,td{border:1px solid #dce3eb;padding:8px;text-align:left}th{background:#f5f7fa}</style></head><body><h1>${escapeHtmlText(reportParams.period)}招聘新媒体运营复盘</h1><p>范围：${escapeHtmlText(reportParams.platform)} · ${escapeHtmlText(reportParams.family)} · ${escapeHtmlText(reportParams.from || '不限')} 至 ${escapeHtmlText(reportParams.to || '不限')}</p><section><h2>核心指标</h2><table><tbody><tr><th>内容数</th><td>${scopedContents.length}</td></tr><tr><th>曝光</th><td>${views}</td></tr><tr><th>点击</th><td>${clicks}</td></tr><tr><th>点击率</th><td>${views > 0 ? ((clicks / views) * 100).toFixed(1) : '0.0'}%</td></tr></tbody></table></section><section><h2>复盘结论</h2>${generatedReports.map((report) => `<article class="card"><strong>${escapeHtmlText(report.severity)}｜${escapeHtmlText(report.title)}</strong><p>${escapeHtmlText(report.body)}</p><p>行动计划：${escapeHtmlText(report.action)}</p></article>`).join('') || '<p>暂无复盘报告。</p>'}</section><section><h2>高表现内容</h2>${sortedContents.slice(0, 5).map((content) => `<article class="card"><strong>${escapeHtmlText(content.title)}</strong><p>${escapeHtmlText(content.platform)} · ${content.metrics.views} 曝光 · ${content.metrics.clicks} 点击</p></article>`).join('') || '<p>暂无内容。</p>'}</section></body></html>`;
+    downloadText('招聘运营复盘报告.html', html, 'text/html;charset=utf-8');
+  };
   return (
     <div className="page-grid">
       <section className="toolbar">
@@ -3380,6 +3439,8 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
         <div className="toolbar-actions">
           <button onClick={() => void generateReport()}><Sparkles size={16} />生成复盘</button>
           <button onClick={() => downloadText('招聘新媒体运营周报.md', buildReportMarkdown(data), 'text/markdown;charset=utf-8')}><FileText size={16} />下载周报</button>
+          <button className="ghost" onClick={exportReportHtml}><FileText size={16} />导出HTML</button>
+          <button className="ghost" onClick={exportReportCsv}><Database size={16} />导出行动项</button>
         </div>
       </section>
       <section className="panel wide">
@@ -3531,6 +3592,45 @@ function AiWorkbench({ data, audit, apiToken }: { data: AppData; audit: (action:
     audit('新增提示词模板', item.name, { ...data, promptTemplates: [item, ...data.promptTemplates] });
     setTemplate({ task: '内容生成', name: '', provider: '通用', prompt: '' });
   };
+  const addDefaultTemplates = () => {
+    const presets: PromptTemplate[] = [
+      {
+        id: `prompt-default-content-${Date.now()}`,
+        task: '内容生成',
+        name: '招聘内容初稿生成',
+        provider: '通用',
+        prompt: '你是招聘新媒体运营专家。请基于输入的岗位、平台、人群关注点，输出标题、正文、CTA、风险提醒。要求真实、具体、不过度承诺。',
+        enabled: true,
+        updatedAt: nowText(),
+      },
+      {
+        id: `prompt-default-risk-${Date.now()}`,
+        task: '风险识别',
+        name: '招聘内容合规风险识别',
+        provider: '通用',
+        prompt: '请识别输入内容中的薪酬承诺、歧视表达、夸大宣传、保密风险和绝对化表达，并给出可直接替换的改写建议。',
+        enabled: true,
+        updatedAt: nowText(),
+      },
+      {
+        id: `prompt-default-report-${Date.now()}`,
+        task: '复盘建议',
+        name: '运营数据复盘建议',
+        provider: '通用',
+        prompt: '请根据曝光、互动、点击、投递、有效简历、入职数据，判断问题环节，输出下周平台策略、内容策略和数据补齐动作。',
+        enabled: true,
+        updatedAt: nowText(),
+      },
+    ];
+    const existingNames = new Set(data.promptTemplates.map((item) => item.name));
+    const nextPresets = presets.filter((item) => !existingNames.has(item.name));
+    if (nextPresets.length === 0) {
+      setStatus('默认模板已存在，无需重复创建');
+      return;
+    }
+    audit('创建默认提示词模板', `${nextPresets.length} 个`, { ...data, promptTemplates: [...nextPresets, ...data.promptTemplates] });
+    setStatus(`已创建 ${nextPresets.length} 个默认提示词模板`);
+  };
   const toggleTemplate = (id: string) => {
     const target = data.promptTemplates.find((item) => item.id === id);
     audit('切换提示词模板状态', target?.name ?? id, { ...data, promptTemplates: data.promptTemplates.map((item) => item.id === id ? { ...item, enabled: !item.enabled, updatedAt: nowText() } : item) });
@@ -3562,6 +3662,20 @@ function AiWorkbench({ data, audit, apiToken }: { data: AppData; audit: (action:
     };
     audit('运行大模型任务', `${selectedTemplate.name}：${log.status}`, { ...data, modelRunLogs: [log, ...data.modelRunLogs] });
     setStatus(log.message);
+  };
+  const fillBusinessContext = () => {
+    const topContent = data.contents.slice().sort((a, b) => b.metrics.clicks - a.metrics.clicks)[0];
+    const job = topContent ? data.jobs.find((item) => item.id === topContent.jobId) : data.jobs[0];
+    const summary = {
+      jobs: data.jobs.length,
+      contents: data.contents.length,
+      accounts: data.accounts.length,
+      beisenResults: data.beisenResults.length,
+      topContent: topContent ? `${topContent.title}｜${topContent.platform}｜${topContent.metrics.views}曝光｜${topContent.metrics.clicks}点击` : '暂无内容',
+      targetJob: job ? `${job.title}｜${job.city}｜${job.level}｜${job.sellingPoints.join('、')}` : '暂无岗位',
+    };
+    setRunDraft({ ...runDraft, input: JSON.stringify(summary, null, 2) });
+    setStatus('已填入当前业务上下文，可直接选择模板运行');
   };
 
   return (
@@ -3633,6 +3747,7 @@ function AiWorkbench({ data, audit, apiToken }: { data: AppData; audit: (action:
           <input value={template.name} onChange={(event) => setTemplate({ ...template, name: event.target.value })} placeholder="模板名称" />
           <input value={template.provider} onChange={(event) => setTemplate({ ...template, provider: event.target.value })} placeholder="适用模型/平台" />
           <button onClick={addTemplate}><Plus size={16} />保存模板</button>
+          <button className="ghost" onClick={addDefaultTemplates}><Sparkles size={16} />一键默认模板</button>
         </div>
         <textarea className="small-textarea" value={template.prompt} onChange={(event) => setTemplate({ ...template, prompt: event.target.value })} placeholder="输入系统提示词、变量说明和输出格式要求" />
         <div className="entry-grid">
@@ -3658,6 +3773,7 @@ function AiWorkbench({ data, audit, apiToken }: { data: AppData; audit: (action:
             <option value="">选择模型配置</option>
             {data.modelApis.map((item) => <option value={item.id} key={item.id}>{item.name}｜{item.model}</option>)}
           </select>
+          <button className="ghost" onClick={fillBusinessContext}><Database size={16} />填入业务上下文</button>
           <button onClick={() => void runTemplate()}><Bot size={16} />运行</button>
         </div>
         <textarea className="small-textarea" value={runDraft.input} onChange={(event) => setRunDraft({ ...runDraft, input: event.target.value })} placeholder="输入岗位、平台、内容草稿或复盘数据" />
