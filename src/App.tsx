@@ -332,13 +332,14 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
     <div className="page-grid">
       <div className="hero-panel">
         <div>
-          <span className="eyebrow">招聘新媒体运营中台</span>
-          <h1>从 JD 到内容、审核、发布、归因和复盘的一条链路</h1>
-          <p>当前版本覆盖 PRD 中的一期核心闭环：岗位需求、AI 生成、风险识别、排期发布、数据看板、素材与账号权限、复盘沉淀。</p>
+          <span className="eyebrow">工作台</span>
+          <h1>今日招聘运营概览</h1>
+          <p>{tasks.length} 项待处理 · {pendingNotices.length} 条提醒 · {data.candidateLeads.filter((lead) => lead.stage === '待联系').length} 条线索待跟进</p>
         </div>
         <div className="hero-actions">
-          <button onClick={() => openSection('内容运营')}><Sparkles size={16} />生成内容</button>
-          <button className="secondary" onClick={() => openSection('数据分析')}><BarChart3 size={16} />查看看板</button>
+          <button onClick={() => openSection('线索池')}><Users size={16} />处理线索</button>
+          <button className="secondary" onClick={() => openSection('内容运营')}><Sparkles size={16} />生成内容</button>
+          <button className="ghost" onClick={() => openSection('数据分析')}><BarChart3 size={16} />查看数据</button>
         </div>
       </div>
 

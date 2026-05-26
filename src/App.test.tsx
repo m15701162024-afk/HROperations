@@ -13,7 +13,7 @@ describe('招聘运营助手', () => {
   it('renders the main dashboard metrics', () => {
     render(<App />);
 
-    expect(screen.getByText('招聘新媒体运营中台')).toBeInTheDocument();
+    expect(screen.getByText('今日招聘运营概览')).toBeInTheDocument();
     expect(screen.getByText('内容发布数量')).toBeInTheDocument();
     expect(screen.getByText('招聘入口点击')).toBeInTheDocument();
     expect(screen.getByText('暂无真实运营目标')).toBeInTheDocument();
