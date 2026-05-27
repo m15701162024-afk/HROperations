@@ -1031,6 +1031,22 @@ textarea {
   font-size: 24px;
 }
 
+.module-indicators {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.module-indicators span {
+  padding: 5px 8px;
+  color: #4f5c66;
+  background: #f7f6f2;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+}
+
 .usage-steps {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

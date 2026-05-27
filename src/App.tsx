@@ -91,6 +91,22 @@ const sectionParent: Record<Section, Section> = {
   AI工作台: '内容运营',
   系统配置: '账号与平台',
 };
+
+const sectionDataIndicators: Record<Section, string[]> = {
+  工作台: ['待办数量', '待发布内容', '待审核内容', '数据待回收内容', '招聘入口点击', '运营目标进度'],
+  招聘需求: ['招聘中岗位', '暂停/关闭岗位', '目标平台覆盖', '岗位入口完整度', '岗位关联内容数', '北森回流数'],
+  选题库: ['选题数量', '关联岗位数', '目标平台分布', '选题转内容数', '待生产选题'],
+  内容运营: ['内容任务数', '状态分布', '风险等级', '质量评分', '审核意见数', '待发布内容', '已发布内容'],
+  排期日历: ['排期内容数', '账号日发布量', '平台周频次', '排期冲突数', '发布延迟数'],
+  线索池: ['总线索', '待联系线索', '重复线索', '已转北森线索', '岗位归因线索', '线索负责人分布'],
+  素材资产: ['素材数量', '授权状态', '高风险素材', '素材使用次数', '到期素材', '文件上传记录'],
+  账号与平台: ['平台账号数', '授权状态', '账号健康分', '同步成功率', '招聘入口点击', '落地页访问/点击/留资'],
+  导入中心: ['导入批次数', '成功记录数', '失败记录数', '字段映射完整度', '重复数据', '未归因指标'],
+  数据分析: ['曝光', '互动', '点击', '投递', '有效简历', '面试', 'Offer', '入职', 'ROI', '数据质量问题'],
+  复盘报告: ['报告数量', '机会/风险/建议数', '行动项完成率', '高表现内容特征', '周报导出次数'],
+  AI工作台: ['模型任务数', '提示词模板数', '成功运行数', '失败运行数', '平均耗时', '生成内容采纳数'],
+  系统配置: ['角色数量', '用户数量', '流程规则数', '敏感词规则数', '上线任务进度', '系统备份数'],
+};
 const mvpSeedKey = 'hr-assistant-mvp-seeded-v1';
 const dataModeKey = 'hr-assistant-data-mode';
 const currentDataMode = 'real-v2-empty-platform-data';
@@ -4784,8 +4800,23 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
   );
 }
 
-function ContentFactoryModule({ section, data, audit, apiToken }: { section: Section; data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
-  const tabs = [
+type ModuleTab = { key: Section; label: string; note: string };
+
+function ModuleIndicatorStrip({ section }: { section: Section }) {
+  return (
+    <div className="module-indicators">
+      {sectionDataIndicators[section].map((item) => <span key={item}>{item}</span>)}
+    </div>
+  );
+}
+
+function visibleTabsFor(tabs: ModuleTab[], data: AppData, apiUser: ApiUser | null) {
+  const visible = tabs.filter((tab) => canAccessSection(tab.key, data, apiUser));
+  return visible.length > 0 ? visible : tabs.slice(0, 1);
+}
+
+function ContentFactoryModule({ section, data, audit, apiToken, apiUser }: { section: Section; data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string; apiUser: ApiUser | null }) {
+  const tabs: ModuleTab[] = [
     { key: '内容运营' as Section, label: '内容生产', note: '生成、审核、发布' },
     { key: '招聘需求' as Section, label: '岗位需求', note: '岗位源头与入口' },
     { key: '选题库' as Section, label: '选题库', note: '渠道选题储备' },
@@ -4793,12 +4824,13 @@ function ContentFactoryModule({ section, data, audit, apiToken }: { section: Sec
     { key: '素材资产' as Section, label: '素材资产', note: '案例、图片、授权' },
     { key: 'AI工作台' as Section, label: 'AI工作台', note: '提示词与模型任务' },
   ];
-  const initial = tabs.some((tab) => tab.key === section) ? section : '内容运营';
+  const visibleTabs = visibleTabsFor(tabs, data, apiUser);
+  const initial = visibleTabs.some((tab) => tab.key === section) ? section : visibleTabs[0].key;
   const [active, setActive] = useState<Section>(initial);
 
   useEffect(() => {
-    if (tabs.some((tab) => tab.key === section)) setActive(section);
-  }, [section]);
+    setActive(visibleTabs.some((tab) => tab.key === section) ? section : visibleTabs[0].key);
+  }, [section, visibleTabs.map((tab) => tab.key).join('|')]);
 
   return (
     <div className="page-grid">
@@ -4808,12 +4840,13 @@ function ContentFactoryModule({ section, data, audit, apiToken }: { section: Sec
           <h1>把岗位需求变成可发布的渠道内容</h1>
         </div>
         <div className="module-tabs">
-          {tabs.map((tab) => (
+          {visibleTabs.map((tab) => (
             <button key={tab.key} className={active === tab.key ? 'active' : ''} onClick={() => setActive(tab.key)}>
               {tab.label}<small>{tab.note}</small>
             </button>
           ))}
         </div>
+        <ModuleIndicatorStrip section={active} />
       </section>
       <div className="wide embedded-module">
         {active === '内容运营' && <ContentOps data={data} audit={audit} apiToken={apiToken} />}
@@ -4827,19 +4860,20 @@ function ContentFactoryModule({ section, data, audit, apiToken }: { section: Sec
   );
 }
 
-function ChannelDataModule({ section, data, audit, apiToken }: { section: Section; data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
-  const tabs = [
+function ChannelDataModule({ section, data, audit, apiToken, apiUser }: { section: Section; data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string; apiUser: ApiUser | null }) {
+  const tabs: ModuleTab[] = [
     { key: '数据分析' as Section, label: '渠道分析', note: '漏斗、归因、ROI' },
     { key: '导入中心' as Section, label: '导入中心', note: '平台指标与字段映射' },
     { key: '线索池' as Section, label: '线索池', note: '候选人线索跟进' },
     { key: '复盘报告' as Section, label: '复盘报告', note: '周报与改进动作' },
   ];
-  const initial = tabs.some((tab) => tab.key === section) ? section : '数据分析';
+  const visibleTabs = visibleTabsFor(tabs, data, apiUser);
+  const initial = visibleTabs.some((tab) => tab.key === section) ? section : visibleTabs[0].key;
   const [active, setActive] = useState<Section>(initial);
 
   useEffect(() => {
-    if (tabs.some((tab) => tab.key === section)) setActive(section);
-  }, [section]);
+    setActive(visibleTabs.some((tab) => tab.key === section) ? section : visibleTabs[0].key);
+  }, [section, visibleTabs.map((tab) => tab.key).join('|')]);
 
   return (
     <div className="page-grid">
@@ -4849,12 +4883,13 @@ function ChannelDataModule({ section, data, audit, apiToken }: { section: Sectio
           <h1>用渠道数据决定下一轮运营动作</h1>
         </div>
         <div className="module-tabs">
-          {tabs.map((tab) => (
+          {visibleTabs.map((tab) => (
             <button key={tab.key} className={active === tab.key ? 'active' : ''} onClick={() => setActive(tab.key)}>
               {tab.label}<small>{tab.note}</small>
             </button>
           ))}
         </div>
+        <ModuleIndicatorStrip section={active} />
       </section>
       <div className="wide embedded-module">
         {active === '数据分析' && <Analytics data={data} audit={audit} />}
@@ -4866,24 +4901,26 @@ function ChannelDataModule({ section, data, audit, apiToken }: { section: Sectio
   );
 }
 
-function ConnectionConfigModule({ section, data, update, audit, resetData, apiToken }: {
+function ConnectionConfigModule({ section, data, update, audit, resetData, apiToken, apiUser }: {
   section: Section;
   data: AppData;
   update: (data: AppData) => void;
   audit: (action: string, target: string, nextData?: AppData) => void;
   resetData: () => void;
   apiToken?: string;
+  apiUser: ApiUser | null;
 }) {
-  const tabs = [
+  const tabs: ModuleTab[] = [
     { key: '账号与平台' as Section, label: '账号与API', note: '平台账号、授权、同步' },
     { key: '系统配置' as Section, label: '系统配置', note: '权限、流程、策略' },
   ];
-  const initial = tabs.some((tab) => tab.key === section) ? section : '账号与平台';
+  const visibleTabs = visibleTabsFor(tabs, data, apiUser);
+  const initial = visibleTabs.some((tab) => tab.key === section) ? section : visibleTabs[0].key;
   const [active, setActive] = useState<Section>(initial);
 
   useEffect(() => {
-    if (tabs.some((tab) => tab.key === section)) setActive(section);
-  }, [section]);
+    setActive(visibleTabs.some((tab) => tab.key === section) ? section : visibleTabs[0].key);
+  }, [section, visibleTabs.map((tab) => tab.key).join('|')]);
 
   return (
     <div className="page-grid">
@@ -4893,12 +4930,13 @@ function ConnectionConfigModule({ section, data, update, audit, resetData, apiTo
           <h1>管理真实平台账号、接口和系统规则</h1>
         </div>
         <div className="module-tabs">
-          {tabs.map((tab) => (
+          {visibleTabs.map((tab) => (
             <button key={tab.key} className={active === tab.key ? 'active' : ''} onClick={() => setActive(tab.key)}>
               {tab.label}<small>{tab.note}</small>
             </button>
           ))}
         </div>
+        <ModuleIndicatorStrip section={active} />
       </section>
       <div className="wide embedded-module">
         {active === '账号与平台' && <Accounts data={data} audit={audit} apiToken={apiToken} />}
@@ -4915,6 +4953,7 @@ function renderSection(
   audit: (action: string, target: string, nextData?: AppData) => void,
   resetData: () => void,
   openSection: (section: Section) => void,
+  apiUser: ApiUser | null,
   apiToken?: string,
 ) {
   switch (section) {
@@ -4926,15 +4965,15 @@ function renderSection(
     case '排期日历':
     case '素材资产':
     case 'AI工作台':
-      return <ContentFactoryModule section={section} data={data} audit={audit} apiToken={apiToken} />;
+      return <ContentFactoryModule section={section} data={data} audit={audit} apiToken={apiToken} apiUser={apiUser} />;
     case '导入中心':
     case '线索池':
     case '数据分析':
     case '复盘报告':
-      return <ChannelDataModule section={section} data={data} audit={audit} apiToken={apiToken} />;
+      return <ChannelDataModule section={section} data={data} audit={audit} apiToken={apiToken} apiUser={apiUser} />;
     case '账号与平台':
     case '系统配置':
-      return <ConnectionConfigModule section={section} data={data} update={update} audit={audit} resetData={resetData} apiToken={apiToken} />;
+      return <ConnectionConfigModule section={section} data={data} update={update} audit={audit} resetData={resetData} apiToken={apiToken} apiUser={apiUser} />;
   }
 }
 
@@ -4990,7 +5029,7 @@ export function App() {
         </div>
       </aside>
       <main>
-        {renderSection(activeSection, data, update, audit, resetData, setSection, apiToken)}
+        {renderSection(activeSection, data, update, audit, resetData, setSection, apiUser, apiToken)}
       </main>
     </div>
   );
