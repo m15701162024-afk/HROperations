@@ -25,26 +25,6 @@ export type RemoteLoadResult =
   | { status: 'unauthorized' }
   | { status: 'ok'; data: AppData; user?: ApiUser };
 
-export interface OpsSummary {
-  activeJobs: number;
-  inProduction: number;
-  pendingPublish: number;
-  published: number;
-  pendingMetrics: number;
-  totals: { views: number; interactions: number; clicks: number };
-  channels: Array<{
-    platform: string;
-    accountConnected: boolean;
-    accountName: string;
-    contentCount: number;
-    target: number;
-    views: number;
-    clicks: number;
-    status: string;
-  }>;
-  generatedAt: string;
-}
-
 export async function loginLocalApi(username: string, password: string) {
   const payload = await requestJson<{ token: string; user: ApiUser }>(`${API_BASE}/api/login`, 'POST', undefined, { username, password });
   return payload;
@@ -70,10 +50,6 @@ export async function saveRemoteData(data: AppData, token?: string) {
   } catch {
     return false;
   }
-}
-
-export async function loadOpsSummary(token?: string) {
-  return await requestJson<OpsSummary>(`${API_BASE}/api/ops/summary`, 'GET', token);
 }
 
 export async function testIntegrationConfig(integration: IntegrationConfig, token?: string) {
@@ -256,24 +232,11 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 export function normalizeAppData(data: Partial<AppData>): AppData {
-  const mapSection = (section: unknown): AppData['tasks'][number]['targetSection'] => {
-    const sectionMap: Record<string, AppData['tasks'][number]['targetSection']> = {
-      选题库: '内容运营',
-      排期日历: '内容运营',
-      素材资产: '内容运营',
-      导入中心: '系统配置',
-      复盘报告: '数据分析',
-      AI工作台: '系统配置',
-    };
-    const value = String(section ?? '');
-    return sectionMap[value] ?? (['工作台', '招聘需求', '内容运营', '账号与平台', '线索池', '数据分析', '系统配置'].includes(value) ? value as AppData['tasks'][number]['targetSection'] : '工作台');
-  };
-  const accounts = (data.accounts ?? []).filter((account) => account.externalId && account.integrationId);
   return {
     ...emptyData,
     ...data,
     jobs: data.jobs ?? [],
-    accounts,
+    accounts: data.accounts ?? [],
     contents: data.contents ?? [],
     contentVersions: data.contentVersions ?? [],
     reviewComments: data.reviewComments ?? [],
@@ -292,7 +255,7 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     workflowRules: data.workflowRules ?? [],
     sensitiveRules: data.sensitiveRules ?? [],
     costs: data.costs ?? [],
-    notifications: (data.notifications ?? []).map((item) => ({ ...item, targetSection: mapSection(item.targetSection) })),
+    notifications: data.notifications ?? [],
     auditLogs: data.auditLogs ?? [],
     integrationMappings: data.integrationMappings ?? [],
     compliancePolicies: data.compliancePolicies ?? [],
@@ -302,7 +265,7 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     promptTemplates: data.promptTemplates ?? [],
     modelRunLogs: data.modelRunLogs ?? [],
     pluginRules: data.pluginRules ?? [],
-    tasks: (data.tasks ?? []).map((item) => ({ ...item, targetSection: mapSection(item.targetSection) })),
+    tasks: data.tasks ?? [],
     taskCompletions: data.taskCompletions ?? [],
     candidateLeads: data.candidateLeads ?? [],
     leadFollowUps: data.leadFollowUps ?? [],

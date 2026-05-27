@@ -35,13 +35,19 @@ const criteriaLabels: Record<MvpCriterion, string> = {
 const allCriteria = Object.keys(criteriaLabels) as MvpCriterion[];
 
 const baseMatrix: MvpModuleResult[] = [
-  module('工作台', allCriteria, ['聚合任务、通知、风险和复盘建议', '指标卡与任务入口可跳转', '已补任务详情主流程测试'], []),
+  module('工作台', allCriteria, ['聚合任务、通知、目标、风险和复盘建议', '指标卡与任务入口可跳转', '已补任务详情主流程测试'], []),
   module('招聘需求', allCriteria, ['手动录入、CSV 导入、编辑、复制、批量状态流转、岗位详情', '已补岗位导入主流程测试'], []),
-  module('内容运营', allCriteria, ['AI/本地生成、选题、审核、排期、发布、质量评分、版本记录', '已补质量评分和排期主流程测试'], []),
+  module('选题库', allCriteria, ['手动选题、岗位生成选题、状态更新、转内容任务', '已补选题生成主流程测试'], []),
+  module('内容运营', allCriteria, ['AI/本地生成、审核、修订、发布、质量评分、版本记录', '已补质量评分主流程测试'], []),
+  module('排期日历', allCriteria, ['按平台/账号筛选、改期、冲突提示、招聘节点', '已补排期冲突主流程测试'], []),
   module('线索池', allCriteria, ['手动录入、CSV 导入、筛选、详情跟进、转北森、批量分配、重复合并', '已补线索导入和查重主流程测试'], []),
-  module('账号与平台', allCriteria, ['真实账号同步、入口、API 配置、北森同步、同步日志', '平台/北森 API 已支持配置完整度、连接测试、失败说明和复验记录', '已补账号同步主流程测试'], []),
-  module('数据分析', allCriteria, ['平台/账号/内容/岗位/漏斗下钻、质量问题、分页、缓存、复盘导出、权限过滤', '已补数据下钻和报告导出主流程测试'], []),
-  module('系统配置', allCriteria, ['角色、用户、本地登录账号、模型、字段映射、合规、异常补录、健康备份', '已补权限配置主流程测试'], []),
+  module('素材资产', allCriteria, ['素材录入、上传、采集表、模板案例、授权状态、详情下钻', '已补素材授权主流程测试'], []),
+  module('账号与平台', allCriteria, ['账号、入口、API 配置、落地页、线索转入北森、同步日志', '平台/北森 API 已支持配置完整度、连接测试、失败说明和复验记录', '已补账号健康主流程测试'], []),
+  module('导入中心', allCriteria, ['模板、字段映射、预检、阻断错误、重复提醒、导入历史', '已补指标导入主流程测试'], []),
+  module('数据分析', allCriteria, ['平台/账号/内容/岗位/漏斗下钻、质量问题、分页、缓存、导出、权限过滤', '已补数据下钻主流程测试'], []),
+  module('复盘报告', allCriteria, ['报告生成、编辑、HTML/Markdown/行动项导出、行动项状态闭环', '已补报告导出主流程测试'], []),
+  module('AI工作台', allCriteria, ['模型配置、默认模板、业务上下文、试跑、日志、失败重试', '大模型 API 已支持配置完整度、连接测试、失败说明和复验记录', '已补模型配置主流程测试'], []),
+  module('系统配置', allCriteria, ['角色、用户、本地登录账号、模型、字段映射、合规、插件规则、部署任务', '已补权限配置主流程测试'], []),
 ];
 
 function module(moduleName: AppSection, passed: MvpCriterion[], evidence: string[], gaps: string[]): MvpModuleResult {
@@ -65,7 +71,7 @@ export function evaluateMvpMatrix(data: AppData): MvpModuleResult[] {
     if (item.module === '内容运营' && data.contents.length === 0) dynamicGaps.push('当前无内容任务，需生成或导入后验收');
     if (item.module === '账号与平台' && data.accounts.length === 0) dynamicGaps.push('当前无平台账号，需配置账号后验收');
     if (item.module === '数据分析' && data.contents.length === 0 && data.beisenResults.length === 0) dynamicGaps.push('当前无指标/北森回流数据，指标会按 0 展示');
-    if (item.module === '系统配置' && data.modelApis.length === 0) dynamicGaps.push('当前无模型 API 配置，模型调用会回退或无法试跑');
+    if (item.module === 'AI工作台' && data.modelApis.length === 0) dynamicGaps.push('当前无模型 API 配置，模型调用会回退或无法试跑');
     return {
       ...item,
       criteria,

@@ -24,11 +24,14 @@ const account: PlatformAccount = {
   id: 'acc-mvp',
   platform: '小红书',
   name: '招聘运营账号',
-  externalId: 'real-acc-mvp',
-  integrationId: 'integration-mvp',
-  provider: '小红书 API',
-  status: '已连接',
-  syncedAt: '2026-05-26 10:00',
+  type: '招聘专用账号',
+  owner: '招聘专员',
+  positioning: '技术挑战、成长空间',
+  publishingRoles: ['招聘专员'],
+  reviewRule: '默认审核流程',
+  attribution: '招聘团队',
+  authStatus: '已授权',
+  status: '启用',
 };
 
 const content: ContentTask = {

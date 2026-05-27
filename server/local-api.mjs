@@ -482,18 +482,6 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (pathname === '/api/ops/summary' && request.method === 'GET') {
-    const session = requireSession(request, response);
-    if (!session) return;
-    try {
-      const data = filterDataForSession(await repository.readData(), session);
-      send(response, 200, buildOpsSummary(data));
-    } catch (error) {
-      send(response, 500, { ok: false, error: error instanceof Error ? error.message : 'Operations summary failed' });
-    }
-    return;
-  }
-
   if (pathname === '/api/analytics/summary' && request.method === 'GET') {
     const session = requireSession(request, response);
     if (!session) return;
@@ -843,7 +831,7 @@ function filterDataForSession(data, session) {
   const contentIds = new Set(contents.map((content) => content.id));
   const jobIds = new Set(contents.map((content) => content.jobId).filter(Boolean));
   const accountIds = new Set(contents.map((content) => content.accountId).filter(Boolean));
-  const accounts = (data.accounts ?? []).filter((account) => accountIds.has(account.id));
+  const accounts = (data.accounts ?? []).filter((account) => accountIds.has(account.id) || userKeys.has(account.owner));
   accounts.forEach((account) => accountIds.add(account.id));
   const jobs = (data.jobs ?? []).filter((job) => jobIds.has(job.id));
   jobs.forEach((job) => jobIds.add(job.id));
@@ -878,50 +866,6 @@ function filterDataForSession(data, session) {
 
 function filterDataForAnalytics(data, session) {
   return filterDataForSession(data, session);
-}
-
-function buildOpsSummary(data) {
-  const activeJobs = (data.jobs ?? []).filter((job) => job.status === '招聘中').length;
-  const inProduction = (data.contents ?? []).filter((content) => !['已发布', '数据回收中', '已复盘', '已归档'].includes(content.status)).length;
-  const pendingPublish = (data.contents ?? []).filter((content) => content.status === '待发布').length;
-  const published = (data.contents ?? []).filter((content) => ['已发布', '数据回收中', '已复盘'].includes(content.status)).length;
-  const pendingMetrics = (data.contents ?? []).filter((content) => ['已发布', '数据回收中'].includes(content.status) && Object.values(content.metrics ?? {}).every((value) => Number(value) === 0)).length;
-  const totals = (data.contents ?? []).reduce((acc, content) => ({
-    views: acc.views + Number(content.metrics?.views ?? 0),
-    interactions: acc.interactions
-      + Number(content.metrics?.likes ?? 0)
-      + Number(content.metrics?.comments ?? 0)
-      + Number(content.metrics?.saves ?? 0)
-      + Number(content.metrics?.shares ?? 0),
-    clicks: acc.clicks + Number(content.metrics?.clicks ?? 0),
-  }), { views: 0, interactions: 0, clicks: 0 });
-  const channels = ['小红书', '脉脉', 'B站', '公众号', '抖音', '知乎', '技术社区'].map((platform) => {
-    const contents = (data.contents ?? []).filter((content) => content.platform === platform);
-    const account = (data.accounts ?? []).find((item) => item.platform === platform && item.status === '已连接');
-    const views = contents.reduce((sum, content) => sum + Number(content.metrics?.views ?? 0), 0);
-    const clicks = contents.reduce((sum, content) => sum + Number(content.metrics?.clicks ?? 0), 0);
-    const target = Number(data.operationSettings?.weeklyPlatformTargets?.[platform] ?? 0);
-    return {
-      platform,
-      accountConnected: Boolean(account),
-      accountName: account?.name ?? '',
-      contentCount: contents.length,
-      target,
-      views,
-      clicks,
-      status: !account ? '未连接' : contents.length < target ? '需补内容' : clicks === 0 && views > 0 ? '需优化入口' : '正常',
-    };
-  });
-  return {
-    activeJobs,
-    inProduction,
-    pendingPublish,
-    published,
-    pendingMetrics,
-    totals,
-    channels,
-    generatedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
-  };
 }
 
 function mergeScopedData(existing, incoming, session) {
@@ -1163,8 +1107,8 @@ function buildAnalyticsDrill(data, query = {}) {
         const inactiveDays = latestPublish ? Math.max(0, Math.floor((Date.now() - new Date(latestPublish).getTime()) / 86400000)) : undefined;
         const snapshot = summarizeAnalytics(data, { ...normalizedQuery, accountId: account.id, platform: account.platform });
         const publishCount = accountContents.length;
-        const healthScore = Math.max(0, Math.min(100, 100 - (account.status === '已连接' ? 0 : 30) - (inactiveDays && inactiveDays > 14 ? 20 : 0) - (snapshot.clickRate === 0 && snapshot.views > 0 ? 15 : 0)));
-        return { id: account.id, label: `${account.platform}｜${account.name}`, dimension: 'account', snapshot, meta: { platform: account.platform, provider: account.provider, externalId: account.externalId, syncedAt: account.syncedAt, status: account.status, publishCount, latestPublish, inactiveDays, averageViews: publishCount > 0 ? Math.round(snapshot.views / publishCount) : 0, interactionRate: snapshot.interactionRate, clickRate: snapshot.clickRate, healthScore, suggestion: healthScore < 70 ? '建议检查平台 API 连接、发布频次和招聘入口 CTA。' : '账号 API 连接正常，可继续复用高点击内容结构。' } };
+        const healthScore = Math.max(0, Math.min(100, 100 - (account.authStatus === '已授权' ? 0 : 30) - (inactiveDays && inactiveDays > 14 ? 20 : 0) - (snapshot.clickRate === 0 && snapshot.views > 0 ? 15 : 0)));
+        return { id: account.id, label: `${account.platform}｜${account.name}`, dimension: 'account', snapshot, meta: { platform: account.platform, owner: account.owner, positioning: account.positioning, authStatus: account.authStatus, status: account.status, publishingRoles: (account.publishingRoles ?? []).join('、'), publishCount, latestPublish, inactiveDays, averageViews: publishCount > 0 ? Math.round(snapshot.views / publishCount) : 0, interactionRate: snapshot.interactionRate, clickRate: snapshot.clickRate, healthScore, suggestion: healthScore < 70 ? '建议检查授权状态、发布频次和招聘入口 CTA。' : '账号健康度正常，可继续复用高点击内容结构。' } };
       })
       : normalizedQuery.dimension === 'job'
         ? (data.jobs ?? []).map((job) => {

@@ -30,32 +30,46 @@ import { type ApiUser, createAuthUser, createSystemBackup, listAuthUsers, loadRe
 import { buildAnalyticsDrill, formatMetricRate } from './analytics';
 import { buildMvpSeedData, emptyData, generateContent, nextStatus, platformPositioning, platforms, scanRisks } from './data';
 import { evaluateMvpMatrix, mvpReportMarkdown, summarizeMvp } from './mvp';
-import type { AppData, AppSection, AssetItem, BeisenResult, CalendarMilestone, CandidateLead, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, LeadFollowUp, ModelApiConfig, NotificationItem, OperationSettings, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, TaskItem, TopicItem, UserProfile, WorkflowRule } from './types';
+import type { AccountType, AppData, AppSection, AssetItem, BeisenResult, CalendarMilestone, CandidateLead, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, LeadFollowUp, ModelApiConfig, NotificationItem, OperationSettings, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, TaskItem, TopicItem, UserProfile, WorkflowRule } from './types';
 import type { ImportRun, ModelRunLog, PluginRule, PromptTemplate, ReportAction, ReviewMention } from './types';
 import { applyMetricsCsv, buildDataExplanations, buildPlatformStrategy, buildRecommendations, buildReportMarkdown, calculateAccountHealth, calculateRoi, deriveTasks, detectCalendarConflicts, downloadText, evaluateIntegrationReadiness, evaluateModelApiReadiness, exportJson, findDuplicateLead, generateTopicsFromJob, parseBeisenCsv, parseJobCsv, parseLeadCsv, readJsonFile, scoreContentQuality, toCsv } from './utils';
 
 type Section = AppSection;
 
-const navItems: { key: Section; label: string; note: string; icon: React.ComponentType<{ size?: number }> }[] = [
-  { key: '工作台', label: '运营首页', note: '今日任务', icon: Home },
-  { key: '内容运营', label: '内容工厂', note: '生成/审核/排期', icon: Megaphone },
-  { key: '数据分析', label: '渠道数据', note: '效果/归因/复盘', icon: BarChart3 },
-  { key: '账号与平台', label: '连接配置', note: '账号/API/入口', icon: Link },
+const navItems: { key: Section; icon: React.ComponentType<{ size?: number }> }[] = [
+  { key: '工作台', icon: Home },
+  { key: '招聘需求', icon: ClipboardList },
+  { key: '选题库', icon: Sparkles },
+  { key: '内容运营', icon: Megaphone },
+  { key: '排期日历', icon: Target },
+  { key: '线索池', icon: Users },
+  { key: '素材资产', icon: Database },
+  { key: '账号与平台', icon: Users },
+  { key: '导入中心', icon: Database },
+  { key: '数据分析', icon: BarChart3 },
+  { key: '复盘报告', icon: BookOpen },
+  { key: 'AI工作台', icon: Bot },
+  { key: '系统配置', icon: Settings },
 ];
 
 const contentTypes = ['岗位种草', '技术团队内容', '员工故事', '公司/业务介绍', '面试/求职干货', '短视频脚本', '图文笔记', '长文', '校招内容'];
-const publishCheckItems = ['合规已审', '真实账号已同步', '入口已配置'];
 const sectionPermissions: Record<Section, string> = {
   工作台: '工作台查看',
   招聘需求: '岗位查看',
+  选题库: '内容创建',
   内容运营: '内容查看',
+  排期日历: '内容查看',
   线索池: '岗位查看',
+  素材资产: '素材查看',
   账号与平台: '账号查看',
+  导入中心: '数据导入',
   数据分析: '数据查看',
+  复盘报告: '复盘查看',
+  AI工作台: 'AI配置',
   系统配置: '系统配置',
 };
 
-const operatorSections = new Set<Section>(['工作台', '内容运营', '数据分析', '账号与平台']);
+const operatorSections = new Set<Section>(['工作台', '招聘需求', '选题库', '内容运营', '排期日历', '线索池', '素材资产', '数据分析', '复盘报告']);
 const mvpSeedKey = 'hr-assistant-mvp-seeded-v1';
 const dataModeKey = 'hr-assistant-data-mode';
 const currentDataMode = 'real-v2-empty-platform-data';
@@ -241,156 +255,6 @@ function Progress({ current, target }: { current: number; target: number }) {
   );
 }
 
-function OperationsHome({ data, openSection }: { data: AppData; openSection: (section: Section) => void }) {
-  const tasks = useMemo(() => deriveTasks(data).filter((task) => task.type !== '线索待跟进'), [data]);
-  const activeJobs = data.jobs.filter((job) => job.status === '招聘中');
-  const inProduction = data.contents.filter((item) => !['已发布', '数据回收中', '已复盘', '已归档'].includes(item.status)).length;
-  const pendingPublish = data.contents.filter((item) => item.status === '待发布').length;
-  const published = data.contents.filter((item) => ['已发布', '数据回收中', '已复盘'].includes(item.status)).length;
-  const pendingMetrics = data.contents.filter((item) => ['已发布', '数据回收中'].includes(item.status) && Object.values(item.metrics).every((value) => value === 0)).length;
-  const totals = data.contents.reduce((acc, item) => ({
-    views: acc.views + item.metrics.views,
-    interactions: acc.interactions + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares,
-    clicks: acc.clicks + item.metrics.clicks,
-  }), { views: 0, interactions: 0, clicks: 0 });
-  const connectedPlatforms = new Set(data.accounts.filter((account) => account.status === '已连接').map((account) => account.platform));
-  const topTasks = tasks.slice(0, 5);
-  const channelRows = platforms.map((item) => {
-    const contents = data.contents.filter((content) => content.platform === item);
-    const target = data.operationSettings.weeklyPlatformTargets[item] ?? 0;
-    const views = contents.reduce((sum, content) => sum + content.metrics.views, 0);
-    const clicks = contents.reduce((sum, content) => sum + content.metrics.clicks, 0);
-    const account = data.accounts.find((current) => current.platform === item && current.status === '已连接');
-    const status = !account ? '未连接' : contents.length < target ? '需补内容' : clicks === 0 && views > 0 ? '需优化入口' : '正常';
-    return { platform: item, contents: contents.length, target, views, clicks, account, status };
-  });
-  const nextAdvice = [
-    activeJobs.length === 0 ? '先录入一个真实岗位简报，系统才能生成可发布内容。' : '',
-    connectedPlatforms.size === 0 ? '先连接至少一个真实渠道账号，内容才允许进入发布链路。' : '',
-    pendingPublish > 0 ? `有 ${pendingPublish} 条内容待发布，优先完成发布前检查。` : '',
-    pendingMetrics > 0 ? `有 ${pendingMetrics} 条已发内容缺少回收数据，建议同步平台指标。` : '',
-  ].filter(Boolean);
-
-  return (
-    <div className="page-grid ops-home">
-      <section className="command-hero">
-        <div>
-          <span className="eyebrow">招聘内容运营指挥台</span>
-          <h1>招聘渠道内容运营工作台</h1>
-          <p>集中处理岗位内容生成、渠道发布排期、真实账号连接和数据复盘。</p>
-        </div>
-        <div className="hero-actions">
-          <button onClick={() => openSection('内容运营')}><Sparkles size={16} />开始生成内容</button>
-          <button className="secondary" onClick={() => openSection('数据分析')}><BarChart3 size={16} />查看渠道效果</button>
-          <button className="ghost" onClick={() => openSection('账号与平台')}><Link size={16} />连接账号/API</button>
-        </div>
-      </section>
-
-      <div className="stats-row">
-        <StatCard label="招聘中岗位" value={activeJobs.length} note="内容生产输入" icon={ClipboardList} />
-        <StatCard label="生产中内容" value={inProduction} note={`${pendingPublish} 条待发布`} icon={Megaphone} />
-        <StatCard label="已发布内容" value={published} note={`${pendingMetrics} 条待回收数据`} icon={Rocket} />
-        <StatCard label="渠道点击" value={totals.clicks.toLocaleString()} note={`${totals.views.toLocaleString()} 曝光 · ${totals.interactions.toLocaleString()} 互动`} icon={Link} />
-      </div>
-
-      <section className="panel wide workflow-strip">
-        {[
-          { title: '1. 岗位简报', body: '岗位、候选人画像、卖点', target: '内容运营' as Section },
-          { title: '2. 内容生成', body: '按渠道生成、查风险、改标题', target: '内容运营' as Section },
-          { title: '3. 发布排期', body: '绑定真实账号、检查入口', target: '内容运营' as Section },
-          { title: '4. 数据复盘', body: '同步指标、看渠道 ROI', target: '数据分析' as Section },
-        ].map((step) => (
-          <button className="workflow-step" key={step.title} onClick={() => openSection(step.target)}>
-            <strong>{step.title}</strong>
-            <span>{step.body}</span>
-          </button>
-        ))}
-      </section>
-
-      <section className="panel focus-panel">
-        <div className="panel-title"><h2>下一步建议</h2><Bot size={18} /></div>
-        {nextAdvice.length === 0 && <EmptyState title="当前闭环正常" body="继续按排期生产内容，并在发布后同步渠道指标。" />}
-        {nextAdvice.map((item) => <div className="todo-item" key={item}><CheckCircle2 size={16} />{item}</div>)}
-      </section>
-
-      <section className="panel focus-panel">
-        <div className="panel-title"><h2>今日待办</h2><ClipboardList size={18} /></div>
-        {topTasks.length === 0 && <EmptyState title="暂无紧急待办" body="当内容待发布、数据待回收、账号停更时会自动出现。" />}
-        {topTasks.map((task) => (
-          <div className="task-row compact-task" key={task.id}>
-            <div>
-              <strong>{task.title}</strong>
-              <span>{task.body}</span>
-            </div>
-            <div className="row-actions">
-              <Badge tone={task.priority === '高' ? 'danger' : task.priority === '中' ? 'warn' : 'info'}>{task.priority}</Badge>
-              <button className="ghost" onClick={() => openSection(task.targetSection)}>处理</button>
-            </div>
-          </div>
-        ))}
-      </section>
-
-      <section className="panel wide">
-        <div className="panel-title"><h2>渠道状态</h2><BarChart3 size={18} /></div>
-        <div className="channel-grid">
-          {channelRows.map((row) => (
-            <article key={row.platform} className="channel-card">
-              <div className="card-head">
-                <h3>{row.platform}</h3>
-                <Badge tone={row.status === '正常' ? 'good' : row.status === '未连接' ? 'danger' : 'warn'}>{row.status}</Badge>
-              </div>
-              <span>{row.account ? row.account.name : '未连接真实账号'}</span>
-              <div className="mini-metrics">
-                <b>{row.contents}/{row.target}</b><span>本期内容</span>
-                <b>{row.views.toLocaleString()}</b><span>曝光</span>
-                <b>{row.clicks.toLocaleString()}</b><span>点击</span>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function pickAccountRecords(payload: unknown): Record<string, unknown>[] {
-  if (Array.isArray(payload)) return payload.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item));
-  if (!payload || typeof payload !== 'object') return [];
-  const source = payload as Record<string, unknown>;
-  const candidate = source.accounts ?? source.items ?? source.records ?? source.data;
-  if (Array.isArray(candidate)) return candidate.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item));
-  if (candidate && typeof candidate === 'object') return pickAccountRecords(candidate);
-  return [];
-}
-
-function normalizeSyncedAccounts(records: Record<string, unknown>[], integration: IntegrationConfig, fallbackPlatform: Platform): PlatformAccount[] {
-  const syncedAt = new Date().toLocaleString('zh-CN', { hour12: false });
-  return records.map((record, index) => {
-    const platformValue = String(record.platform ?? record.provider ?? fallbackPlatform);
-    const platform = platforms.includes(platformValue as Platform) ? platformValue as Platform : fallbackPlatform;
-    const externalId = String(record.id ?? record.accountId ?? record.externalId ?? record.openId ?? record.uid ?? `${integration.id}-${index}`);
-    const name = String(record.name ?? record.nickname ?? record.username ?? record.displayName ?? externalId);
-    const profileUrl = record.profileUrl ?? record.url ?? record.homepage;
-    const avatarUrl = record.avatarUrl ?? record.avatar ?? record.image;
-    const followerCount = Number(record.followerCount ?? record.followers ?? record.fans ?? 0);
-    const statusValue = String(record.status ?? record.state ?? '已连接');
-    return {
-      id: `${integration.id}:${externalId}`,
-      platform,
-      name,
-      externalId,
-      integrationId: integration.id,
-      provider: integration.name,
-      profileUrl: typeof profileUrl === 'string' ? profileUrl : undefined,
-      avatarUrl: typeof avatarUrl === 'string' ? avatarUrl : undefined,
-      followerCount: Number.isFinite(followerCount) && followerCount > 0 ? followerCount : undefined,
-      status: statusValue.includes('停') || statusValue.toLowerCase() === 'disabled' ? '已停用' : '已连接',
-      syncedAt,
-      raw: record,
-    };
-  });
-}
-
 function LoginScreen({ onLogin, error }: { onLogin: (username: string, password: string) => Promise<void>; error: string }) {
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
@@ -497,7 +361,7 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
         </div>
         <div className="hero-actions">
           <button onClick={() => openSection('内容运营')}><Sparkles size={16} />生成内容</button>
-          <button className="secondary" onClick={() => openSection('内容运营')}><Target size={16} />看排期</button>
+          <button className="secondary" onClick={() => openSection('排期日历')}><Target size={16} />看排期</button>
           <button className="secondary" onClick={() => openSection('账号与平台')}><Users size={16} />看平台</button>
           <button className="ghost" onClick={() => openSection('数据分析')}><BarChart3 size={16} />看数据</button>
         </div>
@@ -601,6 +465,34 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
                 {data.notifications.some((item) => item.id === notice.id) && <button className="ghost" onClick={() => markNoticeRead(notice.id)}>已读</button>}
               </div>
             </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel wide">
+        <div className="panel-title">
+          <h2>运营目标进度</h2>
+          <Target size={18} />
+        </div>
+        <div className="inline-form">
+          <input value={goal.title} onChange={(event) => setGoal({ ...goal, title: event.target.value })} placeholder="目标名称" />
+          <input value={goal.dimension} onChange={(event) => setGoal({ ...goal, dimension: event.target.value })} placeholder="目标维度" />
+          <input value={goal.metric} onChange={(event) => setGoal({ ...goal, metric: event.target.value })} placeholder="指标名称" />
+          <input type="number" value={goal.target} onChange={(event) => setGoal({ ...goal, target: Number(event.target.value) })} placeholder="目标值" />
+          <button onClick={createGoal}><Plus size={16} />保存目标</button>
+        </div>
+        <div className="goal-list">
+          {data.goals.length === 0 && <EmptyState title="暂无真实运营目标" body="请先录入目标或导入真实排期数据，当前进度按 0 计算。" />}
+          {data.goals.map((goal) => (
+            <article key={goal.id} className="goal-item">
+              <div>
+                <strong>{goal.title}</strong>
+                <span>{goal.dimension} · {goal.metric}</span>
+              </div>
+              <Progress current={goal.current} target={goal.target} />
+              <b>{goal.current}/{goal.target}</b>
+              <button className="ghost" onClick={() => removeGoal(goal.id)}>删除</button>
+            </article>
           ))}
         </div>
       </section>
@@ -965,19 +857,6 @@ function mappedValue(row: Record<string, string | number | boolean | undefined>,
 }
 
 function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
-  const [contentTab, setContentTab] = useState<'内容' | '选题' | '排期'>('内容');
-  const [quickJob, setQuickJob] = useState({
-    title: '',
-    family: '岗位族群',
-    city: '',
-    level: '',
-    type: '社招' as JobNeed['type'],
-    persona: '',
-    sellingPoints: '',
-    targetPlatforms: '小红书、脉脉',
-    beisenUrl: '',
-    websiteUrl: '',
-  });
   const [jobId, setJobId] = useState(data.jobs[0]?.id ?? '');
   const [platform, setPlatform] = useState<Platform>('小红书');
   const [draft, setDraft] = useState('');
@@ -1006,13 +885,6 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
     return { platform: item, count, target };
   });
   const scheduleDetail = data.contents.find((item) => item.id === scheduleDetailId);
-  const connectedAccounts = data.accounts.filter((account) => account.status === '已连接');
-  const selectedPlatformAccount = connectedAccounts.find((account) => account.platform === platform);
-  const accountBlockReason = connectedAccounts.length === 0
-    ? '请先在账号与平台同步真实平台账号'
-    : selectedPlatformAccount
-      ? ''
-      : `${platform} 暂无已连接账号，请先同步该平台账号`;
 
   const handleGenerate = async () => {
     if (!selectedJob) return;
@@ -1036,53 +908,9 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
     setDraft(generateContent(selectedJob, platform));
   };
 
-  const createQuickJob = () => {
-    if (!quickJob.title.trim()) return;
-    const targetPlatforms = quickJob.targetPlatforms.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean) as Platform[];
-    const job: JobNeed = {
-      id: `job-${Date.now()}`,
-      title: quickJob.title.trim(),
-      family: quickJob.family.trim() || '未分类',
-      city: quickJob.city.trim() || '待确认',
-      level: quickJob.level.trim() || '待确认',
-      type: quickJob.type,
-      jd: `${quickJob.title.trim()} 招聘内容简报`,
-      persona: quickJob.persona.trim(),
-      sellingPoints: quickJob.sellingPoints.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean),
-      targetPlatforms: targetPlatforms.length > 0 ? targetPlatforms : ['小红书'],
-      status: '招聘中',
-      beisenUrl: quickJob.beisenUrl,
-      websiteUrl: quickJob.websiteUrl,
-    };
-    audit('创建岗位简报', job.title, {
-      ...data,
-      jobs: [job, ...data.jobs],
-      notifications: [
-        makeNotification('岗位简报已创建', `${job.title} 可用于生成渠道内容`, '内容运营', '提醒'),
-        ...data.notifications,
-      ],
-    });
-    setJobId(job.id);
-    setPlatform(job.targetPlatforms[0] ?? '小红书');
-    setQuickJob({ title: '', family: '岗位族群', city: '', level: '', type: '社招', persona: '', sellingPoints: '', targetPlatforms: '小红书、脉脉', beisenUrl: '', websiteUrl: '' });
-  };
-
   const handleCreateTask = async () => {
     if (!selectedJob || !draft.trim()) return;
-    const account = data.accounts.find((acc) => acc.platform === platform && acc.status === '已连接');
-    if (!account) {
-      const message = `${platform} 暂无已连接真实账号，请先到账号与平台同步账号`;
-      setAiStatus(message);
-      audit('阻断内容创建', message, {
-        ...data,
-        notifications: [
-          makeNotification('内容创建被阻断', message, '内容运营', '预警'),
-          ...data.notifications,
-        ],
-      });
-      return;
-    }
-    const accountId = account.id;
+    const accountId = data.accounts.find((acc) => acc.platform === platform)?.id ?? data.accounts[0]?.id ?? '';
     let scanned = scanRisks(draft);
     const riskModel = findModelApi(data, '风险识别');
     if (riskModel) {
@@ -1217,18 +1045,6 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
 
   const publishContent = (id: string) => {
     const target = data.contents.find((item) => item.id === id);
-    if (!target) return;
-    const account = data.accounts.find((item) => item.id === target.accountId && item.status === '已连接');
-    if (!account) {
-      audit('阻断内容发布', `${target.title}：未绑定已连接真实账号`, {
-        ...data,
-        notifications: [
-          makeNotification('内容发布被阻断', `${target.title} 未绑定已连接真实平台账号，请先同步账号后再发布`, '内容运营', '预警'),
-          ...data.notifications,
-        ],
-      });
-      return;
-    }
     const latestScore = data.contentQualityScores.find((score) => score.contentId === id);
     if (latestScore && latestScore.total < data.operationSettings.contentQualityBlockScore) {
       audit('内容质量分阻断发布', `${target?.title ?? id}：${latestScore.total}分`, {
@@ -1245,13 +1061,13 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
       audit('发布检查未通过', target?.title ?? id, {
         ...data,
         notifications: [
-          makeNotification('发布检查未完成', `${target.title} 需要完成合规、真实账号同步、入口配置检查`, '内容运营', '预警'),
+          makeNotification('发布检查未完成', `${target?.title ?? id} 需要完成合规、素材授权、入口配置检查`, '内容运营', '预警'),
           ...data.notifications,
         ],
       });
       return;
     }
-    audit('标记内容已发布', target.title, {
+    audit('标记内容已发布', target?.title ?? id, {
       ...data,
       contents: data.contents.map((item) => item.id === id ? { ...item, status: '已发布', publishedAt: new Date().toISOString().slice(0, 10) } : item),
     });
@@ -1309,86 +1125,16 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
     audit('内容质量评分', `${target.title}：${score.total}分`, { ...data, contentQualityScores: [score, ...data.contentQualityScores] });
   };
 
-  if (contentTab === '选题') {
-    return (
-      <div className="page-grid">
-        <section className="toolbar">
-          <div>
-            <h1>内容运营</h1>
-            <p>选题、内容生成、审核和排期统一在这里完成。</p>
-          </div>
-        </section>
-        <section className="panel wide">
-          <div className="module-tabs">
-            {(['内容', '选题', '排期'] as const).map((item) => (
-              <button key={item} className={contentTab === item ? 'active' : ''} onClick={() => setContentTab(item)}>{item}</button>
-            ))}
-          </div>
-        </section>
-        <section className="panel wide embedded-module">
-          <TopicLibrary data={data} audit={audit} />
-        </section>
-      </div>
-    );
-  }
-
-  if (contentTab === '排期') {
-    return (
-      <div className="page-grid">
-        <section className="toolbar">
-          <div>
-            <h1>内容运营</h1>
-            <p>选题、内容生成、审核和排期统一在这里完成。</p>
-          </div>
-        </section>
-        <section className="panel wide">
-          <div className="module-tabs">
-            {(['内容', '选题', '排期'] as const).map((item) => (
-              <button key={item} className={contentTab === item ? 'active' : ''} onClick={() => setContentTab(item)}>{item}</button>
-            ))}
-          </div>
-        </section>
-        <section className="panel wide embedded-module">
-          <ScheduleCalendar data={data} audit={audit} />
-        </section>
-      </div>
-    );
-  }
-
   return (
     <div className="page-grid">
       <section className="toolbar">
         <div>
-          <h1>内容工厂</h1>
-          <p>从岗位简报到渠道内容、审核、排期和发布检查，一页完成。</p>
+          <h1>内容运营</h1>
+          <p>AI 多平台生成、风险识别、审核状态流转、排期发布一体管理。</p>
         </div>
         <div className="toolbar-actions">
           <button onClick={() => downloadText('内容指标导入模板.csv', 'contentId,title,views,likes,comments,saves,shares,clicks\\n', 'text/csv;charset=utf-8')}><FileText size={16} />下载指标模板</button>
           <div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索内容、平台、类型" /></div>
-        </div>
-      </section>
-      <section className="panel wide">
-        <div className="module-tabs">
-          {(['内容', '选题', '排期'] as const).map((item) => (
-            <button key={item} className={contentTab === item ? 'active' : ''} onClick={() => setContentTab(item)}>{item}</button>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel wide quick-brief">
-        <div className="panel-title"><h2>岗位内容简报</h2><ClipboardList size={18} /></div>
-        <div className="brief-grid">
-          <input value={quickJob.title} onChange={(event) => setQuickJob({ ...quickJob, title: event.target.value })} placeholder="岗位名称，例如 高级前端工程师" />
-          <input value={quickJob.city} onChange={(event) => setQuickJob({ ...quickJob, city: event.target.value })} placeholder="城市" />
-          <input value={quickJob.level} onChange={(event) => setQuickJob({ ...quickJob, level: event.target.value })} placeholder="级别" />
-          <select value={quickJob.type} onChange={(event) => setQuickJob({ ...quickJob, type: event.target.value as JobNeed['type'] })}>
-            <option>社招</option><option>校招</option><option>实习</option><option>职能</option>
-          </select>
-          <input value={quickJob.targetPlatforms} onChange={(event) => setQuickJob({ ...quickJob, targetPlatforms: event.target.value })} placeholder="目标渠道，用顿号分隔" />
-          <input value={quickJob.sellingPoints} onChange={(event) => setQuickJob({ ...quickJob, sellingPoints: event.target.value })} placeholder="岗位卖点，用顿号分隔" />
-          <input value={quickJob.persona} onChange={(event) => setQuickJob({ ...quickJob, persona: event.target.value })} placeholder="候选人画像/关注点" />
-          <input value={quickJob.beisenUrl} onChange={(event) => setQuickJob({ ...quickJob, beisenUrl: event.target.value })} placeholder="北森/ATS 投递链接" />
-          <button onClick={createQuickJob}><Plus size={16} />保存简报</button>
         </div>
       </section>
 
@@ -1411,11 +1157,6 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
           </select>
         </label>
         <div className="platform-note">{platformPositioning[platform]}</div>
-        {selectedPlatformAccount ? (
-          <div className="platform-note"><Link size={16} />已绑定真实账号：{selectedPlatformAccount.name} · {selectedPlatformAccount.provider} · {selectedPlatformAccount.syncedAt}</div>
-        ) : (
-          <div className="platform-note"><AlertTriangle size={16} />{accountBlockReason}</div>
-        )}
         <button onClick={() => void handleGenerate()} disabled={data.jobs.length === 0}><Bot size={16} />生成平台内容</button>
         {aiStatus && <div className="platform-note"><Bot size={16} />{aiStatus}</div>}
         <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="生成或编辑内容初稿" />
@@ -1424,7 +1165,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
           <span>风险等级：<b>{risk.level}</b></span>
           {risk.risks.length > 0 && <small>{risk.risks.join('；')}</small>}
         </div>
-        <button className="full" onClick={() => void handleCreateTask()} disabled={Boolean(accountBlockReason)}><Plus size={16} />保存为内容任务</button>
+        <button className="full" onClick={() => void handleCreateTask()}><Plus size={16} />保存为内容任务</button>
       </section>
 
       <section className="panel wide">
@@ -1476,7 +1217,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
             </div>
             <p>{scheduleDetail.content}</p>
             <div className="checklist-row">
-              {publishCheckItems.map((check) => (
+              {['合规已审', '素材已授权', '入口已配置'].map((check) => (
                 <label key={check}><input type="checkbox" checked={(publishChecks[scheduleDetail.id] ?? []).includes(check)} onChange={() => togglePublishCheck(scheduleDetail.id, check)} />{check}</label>
               ))}
             </div>
@@ -1568,7 +1309,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
                 <details className="version-box">
                   <summary>发布前检查</summary>
                   <div className="checklist-row">
-                    {publishCheckItems.map((check) => (
+                    {['合规已审', '素材已授权', '入口已配置'].map((check) => (
                       <label key={check}><input type="checkbox" checked={(publishChecks[item.id] ?? []).includes(check)} onChange={() => togglePublishCheck(item.id, check)} />{check}</label>
                     ))}
                   </div>
@@ -1814,11 +1555,24 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
   const [entry, setEntry] = useState({ platform: '小红书' as Platform, headline: '', url: '', destination: '北森岗位页' as RecruitmentEntry['destination'] });
   const [integration, setIntegration] = useState({ type: '北森' as IntegrationConfig['type'], name: '', endpoint: '', apiKey: '', extraConfig: '', authMode: 'Token' as IntegrationConfig['authMode'] });
   const [landing, setLanding] = useState({ title: '', slug: '', pageType: '岗位集合页' as LandingPage['pageType'], destinationUrl: '' });
+  const [editingAccountId, setEditingAccountId] = useState('');
   const [editingEntryId, setEditingEntryId] = useState('');
-  const [activePanel, setActivePanel] = useState<'平台总览' | '账号入口' | '账号健康度' | 'API集成' | '落地页' | '同步日志'>('平台总览');
+  const [activePanel, setActivePanel] = useState<'平台总览' | '账号入口' | '账号健康度' | 'API集成' | '落地页'>('平台总览');
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('小红书');
   const [editingIntegrationId, setEditingIntegrationId] = useState('');
   const [landingLeadDrafts, setLandingLeadDrafts] = useState<Record<string, { name: string; contact: string; targetJobId: string; sourcePlatform: Platform | '未知'; note: string }>>({});
+  const [account, setAccount] = useState({
+    platform: '小红书' as Platform,
+    name: '',
+    type: '招聘专用账号' as AccountType,
+    owner: '',
+    positioning: '',
+    publishingRoles: '招聘专员',
+    reviewRule: '默认审核流程',
+    attribution: '招聘团队',
+    authStatus: '未授权' as PlatformAccount['authStatus'],
+    status: '启用' as PlatformAccount['status'],
+  });
   const platformDetail = {
     accounts: data.accounts.filter((item) => item.platform === selectedPlatform),
     entries: data.entries.filter((item) => item.platform === selectedPlatform),
@@ -1830,11 +1584,57 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
   const platformTarget = selectedPlatform === 'B站' || selectedPlatform === '抖音' ? 1 : selectedPlatform === '公众号' || selectedPlatform === '知乎' || selectedPlatform === '技术社区' ? 2 : 3;
   const platformPublished = platformDetail.contents.filter((item) => item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘').length;
   const platformMissing = [
-    platformDetail.accounts.length === 0 ? '未从平台 API 同步真实账号' : '',
+    platformDetail.accounts.length === 0 ? '未配置运营账号' : '',
     platformDetail.entries.length === 0 ? '未配置招聘入口' : '',
     platformIntegrations.length === 0 ? '未配置平台 API' : '',
     platformDetail.contents.length === 0 ? '暂无内容任务' : '',
   ].filter(Boolean);
+
+  const buildAccountPayload = () => ({
+    platform: account.platform,
+    name: account.name,
+    type: account.type,
+    owner: account.owner,
+    positioning: account.positioning,
+    publishingRoles: account.publishingRoles.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean),
+    reviewRule: account.reviewRule,
+    attribution: account.attribution,
+    authStatus: account.authStatus,
+    status: account.status,
+  });
+  const resetAccountForm = () => {
+    setAccount({
+      platform: '小红书',
+      name: '',
+      type: '招聘专用账号',
+      owner: '',
+      positioning: '',
+      publishingRoles: '招聘专员',
+      reviewRule: '默认审核流程',
+      attribution: '招聘团队',
+      authStatus: '未授权',
+      status: '启用',
+    });
+  };
+  const createAccount = () => {
+    if (!account.name.trim()) return;
+    const payload = buildAccountPayload();
+    if (editingAccountId) {
+      const target = data.accounts.find((item) => item.id === editingAccountId);
+      if (!target) return;
+      const next = { ...target, ...payload };
+      audit('编辑平台账号', next.name, { ...data, accounts: data.accounts.map((item) => item.id === editingAccountId ? next : item) });
+      setEditingAccountId('');
+      resetAccountForm();
+      return;
+    }
+    const item: PlatformAccount = {
+      id: `acc-${Date.now()}`,
+      ...payload,
+    };
+    audit('新增平台账号', item.name, { ...data, accounts: [item, ...data.accounts] });
+    resetAccountForm();
+  };
 
   const createEntry = () => {
     if (!entry.headline.trim() || !entry.url.trim()) return;
@@ -1888,19 +1688,9 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
       authMode: 'Token',
       extraConfig: JSON.stringify({
         platform: platformName,
-        scenarios: {
-          平台账号同步: {
-            method: 'GET',
-            endpointPath: '/accounts',
-            resultPath: 'accounts',
-          },
-          平台指标拉取: {
-            method: 'GET',
-            endpointPath: '/metrics',
-            resultPath: 'records',
-            fields: { contentId: 'contentId', title: 'title', views: 'views', likes: 'likes', comments: 'comments', saves: 'saves', shares: 'shares', clicks: 'clicks' },
-          },
-        },
+        method: 'GET',
+        endpointPath: '/metrics',
+        fields: { contentId: 'contentId', title: 'title', views: 'views', likes: 'likes', comments: 'comments', saves: 'saves', shares: 'shares', clicks: 'clicks' },
       }, null, 2),
     });
     setActivePanel('API集成');
@@ -1973,23 +1763,6 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
       ranAt: new Date().toLocaleString('zh-CN', { hour12: false }),
     }, ...nextData.integrationSyncRuns],
   });
-
-  const syncPlatformAccounts = async (id: string) => {
-    const target = data.integrations.find((item) => item.id === id);
-    if (!target || target.type !== '平台API') return;
-    const fallbackPlatform = platforms.find((platform) => target.name.includes(platform) || target.extraConfig?.includes(platform)) ?? selectedPlatform;
-    const result = await runIntegrationSync(target, '平台账号同步', {}, apiToken);
-    const syncedAccounts = result.ok ? normalizeSyncedAccounts(pickAccountRecords(result.data), target, fallbackPlatform) : [];
-    const next = recordSyncRun(target, '平台账号同步', result.ok, result.ok && syncedAccounts.length === 0 ? '接口已连接，但响应中未识别到账号数组' : result.message, syncedAccounts.length, {
-      ...data,
-      accounts: [...data.accounts.filter((item) => item.integrationId !== target.id), ...syncedAccounts],
-      notifications: [
-        makeNotification('真实平台账号同步', `${target.name}：${syncedAccounts.length} 个账号`, '账号与平台', result.ok ? '提醒' : '预警'),
-        ...data.notifications,
-      ],
-    }, result.retryCount ?? 0, '仅保留该集成接口返回的真实账号缓存');
-    audit('同步真实平台账号', `${target.name}：${syncedAccounts.length} 个账号`, next);
-  };
 
   const syncBeisenLeads = async (id: string) => {
     const target = data.integrations.find((item) => item.id === id);
@@ -2173,6 +1946,11 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     }))), 'text/csv;charset=utf-8');
   };
 
+  const removeAccount = (id: string) => {
+    const target = data.accounts.find((item) => item.id === id);
+    audit('删除平台账号', target?.name ?? id, { ...data, accounts: data.accounts.filter((item) => item.id !== id) });
+  };
+
   const removeEntry = (id: string) => {
     const target = data.entries.find((item) => item.id === id);
     audit('删除招聘入口', target?.headline ?? id, { ...data, entries: data.entries.filter((item) => item.id !== id) });
@@ -2186,6 +1964,26 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     const target = data.integrations.find((item) => item.id === id);
     audit('删除集成配置', target?.name ?? id, { ...data, integrations: data.integrations.filter((item) => item.id !== id) });
   };
+  const startEditAccount = (item: PlatformAccount) => {
+    setEditingAccountId(item.id);
+    setAccount({
+      platform: item.platform,
+      name: item.name,
+      type: item.type,
+      owner: item.owner,
+      positioning: item.positioning,
+      publishingRoles: item.publishingRoles.join('、'),
+      reviewRule: item.reviewRule,
+      attribution: item.attribution,
+      authStatus: item.authStatus,
+      status: item.status,
+    });
+  };
+  const patchAccount = (id: string, patch: Partial<PlatformAccount>, action = '更新平台账号') => {
+    const target = data.accounts.find((item) => item.id === id);
+    if (!target) return;
+    audit(action, target.name, { ...data, accounts: data.accounts.map((item) => item.id === id ? { ...item, ...patch } : item) });
+  };
   const startEditEntry = (item: RecruitmentEntry) => {
     setEditingEntryId(item.id);
     setEntry({ platform: item.platform, headline: item.headline, url: item.url, destination: item.destination });
@@ -2196,7 +1994,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
       <section className="toolbar">
         <div>
           <h1>账号与平台</h1>
-          <p>通过 API 集成同步真实平台账号，维护主页招聘入口和数据归属。</p>
+          <p>管理平台账号定位、授权状态、发布权限、主页招聘入口和数据归属。</p>
         </div>
         <div className="toolbar-actions">
           <button onClick={() => exportJson('平台账号与招聘入口.json', { accounts: data.accounts, entries: data.entries, landingPages: data.landingPages })}><FileText size={16} />导出配置</button>
@@ -2205,7 +2003,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
       </section>
       <section className="panel wide">
         <div className="module-tabs">
-	          {(['平台总览', '账号入口', '账号健康度', 'API集成', '落地页', '同步日志'] as const).map((item) => (
+          {(['平台总览', '账号入口', '账号健康度', 'API集成', '落地页'] as const).map((item) => (
             <button key={item} className={activePanel === item ? 'active' : ''} onClick={() => setActivePanel(item)}>{item}</button>
           ))}
         </div>
@@ -2250,43 +2048,85 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
             <article>
               <strong>平台 SOP</strong>
               <span>{platformPositioning[selectedPlatform]}</span>
-              <p>账号只能由平台 API 同步生成；发布前确认接口连接、招聘入口、风险词和数据回收时间。</p>
+              <p>每次发布前确认账号定位、审核规则、招聘入口、风险词和数据回收时间。</p>
             </article>
           </div>
           <div className="card-actions-inline">
-            <button className="secondary" onClick={() => setActivePanel('账号入口')}>查看真实账号</button>
+            <button className="secondary" onClick={() => { setAccount({ ...account, platform: selectedPlatform, positioning: platformPositioning[selectedPlatform] }); setActivePanel('账号入口'); }}>配置该平台账号</button>
             <button className="ghost" onClick={() => applyPlatformApiPreset(selectedPlatform)}>配置该平台 API</button>
           </div>
         </div>
       </section>}
       {activePanel === '账号入口' && <section className="panel wide">
-        <div className="panel-title"><h2>真实平台账号</h2><Users size={18} /></div>
-        <div className="platform-note"><ShieldCheck size={16} />这里不支持手工新增或虚拟账号。账号只能来自“API集成”的平台账号同步结果。</div>
+        <div className="panel-title"><h2>新增平台账号</h2><Users size={18} /></div>
+        <div className="inline-form">
+          <select value={account.platform} onChange={(event) => setAccount({ ...account, platform: event.target.value as Platform })}>
+            {platforms.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <input value={account.name} onChange={(event) => setAccount({ ...account, name: event.target.value })} placeholder="账号名称" />
+          <select value={account.type} onChange={(event) => setAccount({ ...account, type: event.target.value as AccountType })}>
+            <option>招聘专用账号</option>
+            <option>HR个人IP账号</option>
+            <option>技术负责人账号</option>
+            <option>校招账号</option>
+          </select>
+          <input value={account.owner} onChange={(event) => setAccount({ ...account, owner: event.target.value })} placeholder="负责人" />
+          <button onClick={createAccount}><Plus size={16} />{editingAccountId ? '保存编辑' : '保存账号'}</button>
+          {editingAccountId && <button className="secondary" onClick={() => { setEditingAccountId(''); resetAccountForm(); }}>取消</button>}
+        </div>
+        <input value={account.positioning} onChange={(event) => setAccount({ ...account, positioning: event.target.value })} placeholder="账号定位，例如：岗位种草、校招答疑、技术观点" />
+        <div className="inline-form compact-edit">
+          <input value={account.publishingRoles} onChange={(event) => setAccount({ ...account, publishingRoles: event.target.value })} placeholder="发布权限角色，用顿号分隔" />
+          <input value={account.reviewRule} onChange={(event) => setAccount({ ...account, reviewRule: event.target.value })} placeholder="审核规则，例如：技术负责人+品牌合规" />
+          <input value={account.attribution} onChange={(event) => setAccount({ ...account, attribution: event.target.value })} placeholder="数据归属，例如：招聘团队/校招项目" />
+          <select value={account.authStatus} onChange={(event) => setAccount({ ...account, authStatus: event.target.value as PlatformAccount['authStatus'] })}>
+            <option>未授权</option>
+            <option>已授权</option>
+            <option>授权过期</option>
+          </select>
+          <select value={account.status} onChange={(event) => setAccount({ ...account, status: event.target.value as PlatformAccount['status'] })}>
+            <option>启用</option>
+            <option>停用</option>
+          </select>
+        </div>
+      </section>}
+      {activePanel === '账号入口' && <section className="panel wide">
         <table>
           <thead>
             <tr>
               <th>账号</th>
-              <th>外部账号ID</th>
-              <th>接口来源</th>
-              <th>粉丝/关注</th>
+              <th>定位</th>
+              <th>负责人</th>
+              <th>发布权限</th>
+              <th>授权</th>
+              <th>归属</th>
               <th>状态</th>
-              <th>最近同步</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
             {data.accounts.length === 0 && (
               <tr>
-                <td colSpan={6}><EmptyState title="暂无真实平台账号" body="请先在 API 集成中配置平台接口，然后点击同步账号。" /></td>
+                <td colSpan={8}><EmptyState title="暂无真实平台账号" body="请录入实际运营账号，数据归属和发布权限会基于账号配置计算。" /></td>
               </tr>
             )}
             {data.accounts.map((account) => (
               <tr key={account.id}>
-                <td><strong>{account.platform}｜{account.name}</strong>{account.profileUrl && <span>{account.profileUrl}</span>}</td>
-                <td>{account.externalId}</td>
-                <td>{account.provider}</td>
-                <td>{account.followerCount?.toLocaleString() ?? '-'}</td>
-                <td><Badge tone={account.status === '已连接' ? 'good' : account.status === '连接失败' ? 'danger' : 'neutral'}>{account.status}</Badge></td>
-                <td>{account.syncedAt}</td>
+                <td><strong>{account.platform}｜{account.name}</strong><span>{account.type}</span></td>
+                <td>{account.positioning}</td>
+                <td>{account.owner}</td>
+                <td>{account.publishingRoles.join(' / ')}</td>
+                <td><Badge tone={account.authStatus === '已授权' ? 'good' : account.authStatus === '授权过期' ? 'danger' : 'warn'}>{account.authStatus}</Badge></td>
+                <td>{account.attribution}</td>
+                <td><Badge tone={account.status === '启用' ? 'good' : 'neutral'}>{account.status}</Badge></td>
+                <td>
+                  <div className="row-actions">
+                    <button className="ghost" onClick={() => startEditAccount(account)}>编辑</button>
+                    <button className="ghost" onClick={() => patchAccount(account.id, { status: account.status === '启用' ? '停用' : '启用' }, '切换平台账号状态')}>{account.status === '启用' ? '停用' : '启用'}</button>
+                    <button className="ghost" onClick={() => patchAccount(account.id, { authStatus: account.authStatus === '已授权' ? '授权过期' : '已授权' }, '更新平台账号授权')}>{account.authStatus === '已授权' ? '设为过期' : '设为授权'}</button>
+                    <button className="ghost" onClick={() => removeAccount(account.id)}>删除</button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -2331,17 +2171,17 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
           {data.accounts.map((account) => {
             const health = calculateAccountHealth(account.id, data);
             return (
-	              <article key={account.id}>
-	                <strong>{account.platform}｜{account.name}</strong>
-	                <span>{account.provider} · {account.externalId}</span>
-	                <Badge tone={health.level === '健康' ? 'good' : health.level === '需关注' ? 'warn' : 'danger'}>{health.level}</Badge>
+              <article key={account.id}>
+                <strong>{account.platform}｜{account.name}</strong>
+                <span>{account.positioning}</span>
+                <Badge tone={health.level === '健康' ? 'good' : health.level === '需关注' ? 'warn' : 'danger'}>{health.level}</Badge>
                 <div className="metric-mini-grid">
                   <span>发布 <b>{health.publishCount}</b></span>
                   <span>均曝 <b>{health.averageViews}</b></span>
                   <span>互动率 <b>{(health.averageInteractionRate * 100).toFixed(1)}%</b></span>
                   <span>点击率 <b>{(health.averageClickRate * 100).toFixed(1)}%</b></span>
                   <span>停更 <b>{health.inactiveDays >= 999 ? '无发布' : `${health.inactiveDays}天`}</b></span>
-	                  <span>连接 <b>{health.positioningMatchScore}%</b></span>
+                  <span>定位 <b>{health.positioningMatchScore}%</b></span>
                 </div>
                 {health.suggestions.length === 0 ? <p>账号运营状态正常。</p> : health.suggestions.map((suggestion) => <p key={suggestion}>{suggestion}</p>)}
               </article>
@@ -2352,7 +2192,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
       {activePanel === 'API集成' && <section className="panel wide">
         <div className="panel-title"><h2>平台与系统集成配置</h2><RefreshCw size={18} /></div>
         <div className="usage-steps">
-	          <div><b>1</b><span>选择平台模板或北森类型</span></div>
+          <div><b>1</b><span>选择平台模板或北森/企微/飞书/BI 类型</span></div>
           <div><b>2</b><span>填写接口地址、Token、鉴权方式和字段映射</span></div>
           <div><b>3</b><span>测试连接，通过后执行指标拉取或消息同步</span></div>
         </div>
@@ -2361,6 +2201,9 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
           <select value={integration.type} onChange={(event) => setIntegration({ ...integration, type: event.target.value as IntegrationConfig['type'] })}>
             <option>北森</option>
             <option>平台API</option>
+            <option>企业微信</option>
+            <option>飞书</option>
+            <option>BI</option>
           </select>
           <input value={integration.name} onChange={(event) => setIntegration({ ...integration, name: event.target.value })} placeholder="集成名称" />
           <input value={integration.endpoint} onChange={(event) => setIntegration({ ...integration, endpoint: event.target.value })} placeholder="接口地址 / Webhook" />
@@ -2380,7 +2223,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
         </div>
         <textarea className="small-textarea" value={integration.extraConfig} onChange={(event) => setIntegration({ ...integration, extraConfig: event.target.value })} placeholder={'扩展配置 JSON，例如：{"tenantId":"xxx","appId":"xxx","fields":{"name":"candidateName"}}'} />
         <div className="entry-grid">
-	          {data.integrations.length === 0 && <EmptyState title="暂无真实集成配置" body="配置北森或平台 API 后，系统会记录连接状态。" />}
+          {data.integrations.length === 0 && <EmptyState title="暂无真实集成配置" body="配置北森、平台 API、企微/飞书或 BI 后，系统会记录连接状态。" />}
           {data.integrations.map((item) => (
             <article key={item.id}>
               <strong>{item.type}｜{item.name}</strong>
@@ -2403,9 +2246,9 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
               })()}
               <div className="card-actions-inline">
                 <button className="ghost" onClick={() => void testIntegration(item.id)}>测试连接</button>
-                {item.type === '平台API' && <button className="ghost" onClick={() => void syncPlatformAccounts(item.id)}>同步账号</button>}
                 {item.type === '北森' && <button className="ghost" onClick={() => void syncBeisenLeads(item.id)}>同步线索</button>}
                 {item.type === '平台API' && <button className="ghost" onClick={() => void pullPlatformMetrics(item.id)}>拉取指标</button>}
+                {(item.type === '企业微信' || item.type === '飞书') && <button className="ghost" onClick={() => void sendNotificationDigest(item.id)}>发送摘要</button>}
                 <button className="ghost" onClick={() => startEditIntegration(item)}>编辑</button>
                 <button className="ghost" onClick={() => removeIntegration(item.id)}>删除</button>
               </div>
@@ -2420,16 +2263,6 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
             ))}
           </details>
         )}
-      </section>}
-      {activePanel === '同步日志' && <section className="panel wide">
-        <div className="panel-title"><h2>同步运行记录</h2><RefreshCw size={18} /></div>
-        {data.integrationSyncRuns.length === 0 && <EmptyState title="暂无同步记录" body="测试连接、同步账号、拉取指标或同步北森线索后会生成记录。" />}
-        {data.integrationSyncRuns.map((run) => (
-          <div className="compact-row" key={run.id}>
-            <div><strong>{run.syncType} · {run.status}</strong><span>{run.message} · 记录 {run.recordCount} · 重试 {run.retryCount ?? 0} 次 · {run.detail || '无详情'}</span></div>
-            <Badge tone={run.status === '成功' ? 'good' : 'danger'}>{run.ranAt}</Badge>
-          </div>
-        ))}
       </section>}
       {activePanel === '落地页' && <section className="panel wide">
         <div className="panel-title"><h2>招聘落地页</h2><FileText size={18} /></div>
@@ -2516,7 +2349,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
   );
 }
 
-function Analytics({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
+function Analytics({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
   const [metricsCsv, setMetricsCsv] = useState('');
   const [beisenCsv, setBeisenCsv] = useState('');
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | '全部'>('全部');
@@ -2526,7 +2359,7 @@ function Analytics({ data, audit, apiToken }: { data: AppData; audit: (action: s
   const [resolvedQualityIds, setResolvedQualityIds] = useState<string[]>([]);
   const [detailPage, setDetailPage] = useState(1);
   const [detailPageSize, setDetailPageSize] = useState(20);
-  const [analyticsView, setAnalyticsView] = useState<'总览' | '漏斗归因' | '平台账号' | '内容岗位' | '质量解释' | '复盘'>('总览');
+  const [analyticsView, setAnalyticsView] = useState<'总览' | '漏斗归因' | '平台账号' | '内容岗位' | '质量解释' | '导入配置'>('总览');
   const analyticsQuery = useMemo(() => ({
     dimension: drill?.type === '账号' ? 'account' as const : drill?.type === '岗位' ? 'job' as const : drill?.type === '漏斗' ? 'funnel' as const : 'platform' as const,
     platform: selectedPlatform,
@@ -2588,7 +2421,7 @@ function Analytics({ data, audit, apiToken }: { data: AppData; audit: (action: s
       const interactions = items.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
       return { account, items, views, clicks, interactions };
     })
-    .filter((item) => item.items.length > 0 || item.account.status === '已连接');
+    .filter((item) => item.items.length > 0 || item.account.status === '启用');
   const selectedDrillContent = drill?.type === '内容' ? data.contents.find((item) => item.id === drill.id) : undefined;
   const selectedDrillJob = drill?.type === '岗位' ? data.jobs.find((item) => item.id === drill.id) : undefined;
   const selectedDrillAccount = drill?.type === '账号' ? data.accounts.find((item) => item.id === drill.id) : undefined;
@@ -2722,7 +2555,7 @@ function Analytics({ data, audit, apiToken }: { data: AppData; audit: (action: s
     平台账号: '比较平台和账号贡献，判断资源应该投向哪里。',
     内容岗位: '查看高低表现内容、岗位族群和内容类型贡献。',
     质量解释: '处理数据质量、异常归因和系统解释。',
-    复盘: '基于真实指标生成复盘报告和行动项。',
+    导入配置: '导入平台指标、北森回流和成本数据。',
   };
 
   return (
@@ -2744,7 +2577,7 @@ function Analytics({ data, audit, apiToken }: { data: AppData; audit: (action: s
           <span>{analyticsViewDescriptions[analyticsView]}</span>
         </div>
         <div className="module-tabs">
-          {(['总览', '漏斗归因', '平台账号', '内容岗位', '质量解释', '复盘'] as const).map((view) => (
+          {(['总览', '漏斗归因', '平台账号', '内容岗位', '质量解释', '导入配置'] as const).map((view) => (
             <button key={view} className={analyticsView === view ? 'active' : ''} onClick={() => setAnalyticsView(view)}>{view}</button>
           ))}
         </div>
@@ -2912,9 +2745,9 @@ function Analytics({ data, audit, apiToken }: { data: AppData; audit: (action: s
           {selectedDrillAccount && (
             <div className="template-grid">
               <div className="template-chip">账号<small>{selectedDrillAccount.platform}｜{selectedDrillAccount.name}</small></div>
-              <div className="template-chip">来源<small>{selectedDrillAccount.provider}</small></div>
+              <div className="template-chip">定位<small>{selectedDrillAccount.positioning || '未填写'}</small></div>
               <div className="template-chip">内容<small>{data.contents.filter((item) => item.accountId === selectedDrillAccount.id).length} 条</small></div>
-              <div className="template-chip">同步状态<small>{selectedDrillAccount.status} · {selectedDrillAccount.syncedAt}</small></div>
+              <div className="template-chip">授权<small>{selectedDrillAccount.authStatus}</small></div>
             </div>
           )}
           <p>{platformConclusion}</p>
@@ -2928,7 +2761,7 @@ function Analytics({ data, audit, apiToken }: { data: AppData; audit: (action: s
           <div className="template-chip">当前查询<small>{analyticsResult.query.dimension} · {analyticsResult.query.platform || '全部平台'} · {analyticsResult.generatedAt}</small></div>
           <div className="template-chip">分页明细<small>{analyticsResult.pagination?.total ?? 0} 条 · 每页 {analyticsResult.pagination?.pageSize ?? 20}</small></div>
           <div className="template-chip">质量问题<small>{visibleQualityIssues.length} 条待处理 · 已处理 {resolvedQualityIds.length} 条</small></div>
-          <div className="template-chip">数据来源<small>平台指标 / 北森回流 / 成本录入 / API账号同步</small></div>
+          <div className="template-chip">数据来源<small>平台指标 / 北森回流 / 成本录入 / 账号配置</small></div>
         </div>
         {visibleQualityIssues.length === 0 && <EmptyState title="暂无数据质量问题" body="当前筛选范围内未发现缺字段、无法归因、指标异常或同步失败。" />}
         <div className="entry-grid">
@@ -3021,9 +2854,34 @@ function Analytics({ data, audit, apiToken }: { data: AppData; audit: (action: s
         )}
       </section>
       </>}
-      {analyticsView === '复盘' && <section className="panel wide embedded-module">
-        <Reports data={data} audit={audit} apiToken={apiToken} />
-      </section>}
+      {analyticsView === '导入配置' && <>
+      <section className="panel wide">
+        <div className="panel-title"><h2>平台指标导入</h2><Database size={18} /></div>
+        <p className="helper">支持字段：contentId/title、views、likes、comments、saves、shares、clicks，也支持中文表头。未导入时看板指标为 0。</p>
+        <textarea className="small-textarea" value={metricsCsv} onChange={(event) => setMetricsCsv(event.target.value)} placeholder="contentId,views,likes,comments,saves,shares,clicks&#10;ct-xxx,1000,20,3,8,2,15" />
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>北森结果回流</h2><RefreshCw size={18} /></div>
+        <p className="helper">支持字段：jobId、sourcePlatform、sourceContentId、candidateCode、stage。stage 可为：已投递、有效简历、初筛通过、已约面、已面试、Offer、已入职。</p>
+        <textarea className="small-textarea" value={beisenCsv} onChange={(event) => setBeisenCsv(event.target.value)} placeholder="jobId,sourcePlatform,sourceContentId,candidateCode,stage&#10;job-xxx,小红书,ct-xxx,C001,已投递" />
+        <button className="full" onClick={importBeisen}><Database size={16} />导入北森结果</button>
+      </section>
+      <section className="panel">
+        <div className="panel-title"><h2>成本录入</h2><Target size={18} /></div>
+        <div className="form-grid single">
+          <select value={cost.targetType} onChange={(event) => setCost({ ...cost, targetType: event.target.value as CostRecord['targetType'] })}>
+            <option>内容</option>
+            <option>平台</option>
+            <option>岗位族群</option>
+          </select>
+          <input value={cost.targetId} onChange={(event) => setCost({ ...cost, targetId: event.target.value })} placeholder="对象 ID，可空表示全部" />
+          <input type="number" value={cost.laborCost} onChange={(event) => setCost({ ...cost, laborCost: Number(event.target.value) })} placeholder="人工成本" />
+          <input type="number" value={cost.mediaCost} onChange={(event) => setCost({ ...cost, mediaCost: Number(event.target.value) })} placeholder="投放成本" />
+          <input type="number" value={cost.productionCost} onChange={(event) => setCost({ ...cost, productionCost: Number(event.target.value) })} placeholder="制作成本" />
+        </div>
+        <button className="full" onClick={createCost}><Plus size={16} />保存成本</button>
+      </section>
+      </>}
       {analyticsView === '总览' && <>
       <section className="panel">
         <div className="panel-title"><h2>真实 ROI</h2><PieChart size={18} /></div>
@@ -3092,12 +2950,12 @@ function Analytics({ data, audit, apiToken }: { data: AppData; audit: (action: s
       {analyticsView === '平台账号' && <>
       <section className="panel wide">
         <div className="panel-title"><h2>账号效果下钻</h2><Users size={18} /></div>
-        {selectedAccountStats.length === 0 && <EmptyState title="暂无账号效果数据" body="从平台 API 同步真实账号并绑定内容后，可按账号查看发布频次和效果。" />}
+        {selectedAccountStats.length === 0 && <EmptyState title="暂无账号效果数据" body="配置账号并绑定内容后，可按账号查看发布频次和效果。" />}
         <div className="entry-grid">
           {selectedAccountStats.map(({ account, items, views, clicks, interactions }) => (
             <article key={account.id}>
               <strong>{account.platform}｜{account.name}</strong>
-              <span>{account.provider} · {items.length} 条内容</span>
+              <span>{account.positioning || '未填写定位'} · {items.length} 条内容</span>
               <div className="metric-mini-grid">
                 <span>曝光 <b>{views}</b></span>
                 <span>互动 <b>{interactions}</b></span>
@@ -3160,25 +3018,13 @@ function TopicLibrary({ data, audit }: { data: AppData; audit: (action: string, 
   const convertTopicToContent = (item: TopicItem) => {
     const job = data.jobs.find((current) => current.id === item.targetJobId) ?? data.jobs[0];
     if (!job) return;
-    const targetPlatform = item.platform === '全部' ? job.targetPlatforms[0] ?? '小红书' : item.platform;
-    const account = data.accounts.find((current) => current.platform === targetPlatform && current.status === '已连接');
-    if (!account) {
-      audit('阻断选题转内容', `${targetPlatform} 暂无已连接真实账号`, {
-        ...data,
-        notifications: [
-          makeNotification('选题转内容被阻断', `${item.title} 需要先同步 ${targetPlatform} 真实平台账号`, '内容运营', '预警'),
-          ...data.notifications,
-        ],
-      });
-      return;
-    }
     const risk = scanRisks(item.inspiration);
     const content: ContentTask = {
       id: `content-${Date.now()}`,
-      title: `${targetPlatform}｜${item.title}`,
+      title: `${item.platform === '全部' ? job.targetPlatforms[0] ?? '小红书' : item.platform}｜${item.title}`,
       jobId: job.id,
-      platform: targetPlatform,
-      accountId: account.id,
+      platform: item.platform === '全部' ? job.targetPlatforms[0] ?? '小红书' : item.platform,
+      accountId: data.accounts.find((account) => account.platform === (item.platform === '全部' ? job.targetPlatforms[0] : item.platform))?.id ?? '',
       type: item.type,
       status: '草稿',
       owner: item.owner,
@@ -3535,7 +3381,7 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
   const duplicateChecks = rowObjects
     .map((object, index) => {
       if (source === '岗位' && data.jobs.some((job) => job.title === object.title && job.city === object.city)) return `第 ${index + 2} 行疑似重复岗位：${object.title}`;
-      if (source === '账号') return `第 ${index + 2} 行账号导入已关闭：请使用 API 集成同步真实平台账号`;
+      if (source === '账号' && data.accounts.some((account) => account.platform === object.platform && account.name === object.name)) return `第 ${index + 2} 行疑似重复账号：${object.platform}/${object.name}`;
       if (source === '素材' && data.assets.some((asset) => asset.name === object.name && asset.category === object.category)) return `第 ${index + 2} 行疑似重复素材：${object.category}/${object.name}`;
       if (source === '北森结果' && data.beisenResults.some((result) => result.candidateCode === object.candidateCode && result.jobId === object.jobId && result.stage === object.stage)) return `第 ${index + 2} 行疑似重复北森结果：${object.candidateCode}/${object.jobId}/${object.stage}`;
       return '';
@@ -3557,7 +3403,7 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
     岗位: 'title,family,city,level,type,jd,persona,sellingPoints,targetPlatforms,beisenUrl,websiteUrl\n',
     内容指标: 'contentId,title,views,likes,comments,saves,shares,clicks\n',
     北森结果: 'jobId,sourcePlatform,sourceContentId,candidateCode,stage\n',
-    账号: '账号导入已关闭，请通过 API 集成同步真实平台账号\n',
+    账号: 'platform,name,type,owner,positioning\n',
     素材: 'name,category,owner,scope,authorization,expiresAt\n',
   };
   const runImport = () => {
@@ -3584,8 +3430,24 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
         next = { ...next, beisenResults: [...results, ...next.beisenResults] };
       }
       if (source === '账号') {
-        setLastImportMessage('账号 CSV 导入已关闭，请在账号与平台的 API 集成中同步真实平台账号');
-        return;
+        const accounts = allRows.rows.map((row) => {
+          const object = rowObject(allRows.headers, row);
+          return {
+            id: `acc-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            platform: (object.platform || '小红书') as Platform,
+            name: object.name || '未命名账号',
+            type: (object.type || '招聘专用账号') as AccountType,
+            owner: object.owner || '',
+            positioning: object.positioning || '',
+            publishingRoles: ['招聘专员'],
+            reviewRule: '默认审核流程',
+            attribution: '招聘团队',
+            authStatus: '未授权' as const,
+            status: '启用' as const,
+          };
+        });
+        recordCount = accounts.length;
+        next = { ...next, accounts: [...accounts, ...next.accounts] };
       }
       if (source === '素材') {
         const assets = allRows.rows.map((row) => {
@@ -3634,7 +3496,7 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
       </section>
       <section className="panel wide">
         <div className="module-tabs">
-          {(['岗位', '内容指标', '北森结果', '素材'] as ImportRun['source'][]).map((item) => (
+          {(['岗位', '内容指标', '北森结果', '账号', '素材'] as ImportRun['source'][]).map((item) => (
             <button key={item} className={source === item ? 'active' : ''} onClick={() => setSource(item)}>{item}</button>
           ))}
         </div>
@@ -4487,8 +4349,8 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
           <button className="secondary" onClick={resetData}>清空本地数据</button>
         </div>
       </section>
-	      {false && <section className="panel wide">
-	        <div className="panel-title"><h2>MVP 验收矩阵</h2><ShieldCheck size={18} /></div>
+      <section className="panel wide">
+        <div className="panel-title"><h2>MVP 验收矩阵</h2><ShieldCheck size={18} /></div>
         <div className="stats-row compact-stats analytics-stats">
           <StatCard label="模块总数" value={mvpSummary.total} note="覆盖全部业务模块" icon={Database} />
           <StatCard label="已达标" value={mvpSummary.passed} note={`${mvpSummary.passRate}% 达标率`} icon={CheckCircle2} />
@@ -4517,7 +4379,7 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
             ))}
           </tbody>
         </table>
-	      </section>}
+      </section>
       <section className="panel">
         <div className="panel-title"><h2>角色权限矩阵</h2><Users size={18} /></div>
 	        <div className="form-grid single">
@@ -4732,18 +4594,23 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>生产集成字段映射</h2><Link size={18} /></div>
-	        <p className="helper">用于把北森和平台 API 的真实字段映射到系统标准字段。保存后可一键写入对应集成的扩展配置。</p>
+        <p className="helper">用于把北森、平台 API、BI 的真实字段映射到系统标准字段。保存后可一键写入对应集成的扩展配置。</p>
         <div className="inline-form">
           <input value={mapping.name} onChange={(event) => setMapping({ ...mapping, name: event.target.value })} placeholder="映射名称" />
           <select value={mapping.integrationType} onChange={(event) => setMapping({ ...mapping, integrationType: event.target.value as IntegrationMapping['integrationType'] })}>
             <option>北森</option>
             <option>平台API</option>
+            <option>企业微信</option>
+            <option>飞书</option>
+            <option>BI</option>
           </select>
           <select value={mapping.scenario} onChange={(event) => setMapping({ ...mapping, scenario: event.target.value as IntegrationMapping['scenario'] })}>
             <option>北森线索同步</option>
             <option>北森结果回流</option>
             <option>平台指标拉取</option>
-	            <option>其他</option>
+            <option>BI同步</option>
+            <option>消息发送</option>
+            <option>其他</option>
           </select>
           <select value={mapping.method} onChange={(event) => setMapping({ ...mapping, method: event.target.value as IntegrationMapping['method'] })}>
             <option>GET</option>
@@ -4770,8 +4637,8 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
           ))}
         </div>
       </section>
-	      {false && <section className="panel wide">
-	        <div className="panel-title"><h2>平台插件采集规则</h2><Database size={18} /></div>
+      <section className="panel wide">
+        <div className="panel-title"><h2>平台插件采集规则</h2><Database size={18} /></div>
         <p className="helper">用于浏览器插件或人工采集时识别平台页面字段。真实平台规则可由运营按 URL 和 CSS 选择器持续维护。</p>
         <div className="inline-form">
           <select value={pluginRule.platform} onChange={(event) => setPluginRule({ ...pluginRule, platform: event.target.value as Platform })}>
@@ -4793,8 +4660,8 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
             </article>
           ))}
         </div>
-	      </section>}
-	      {false && <section className="panel wide">
+      </section>
+      <section className="panel wide">
         <div className="panel-title"><h2>隐私合规与上线台账</h2><ShieldCheck size={18} /></div>
         <div className="inline-form">
           <input value={policy.title} onChange={(event) => setPolicy({ ...policy, title: event.target.value })} placeholder="制度/文案名称" />
@@ -4850,13 +4717,7 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
             </article>
           ))}
         </div>
-	      </section>}
-	      <section className="panel wide embedded-module">
-	        <div className="panel-title"><h2>异常补录</h2><Database size={18} /></div>
-	        <ImportCenter data={data} audit={(action, target, nextData) => {
-	          if (nextData) update(nextData);
-	        }} />
-	      </section>
+      </section>
       <section className="panel wide">
         <div className="panel-title"><h2>系统健康与备份</h2><Database size={18} /></div>
         <div className="toolbar-actions">
@@ -4890,75 +4751,13 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
           </tbody>
         </table>
       </section>
-	      {false && <section className="panel wide">
-	        <div className="panel-title"><h2>待配置资源与上线事项</h2><ClipboardList size={18} /></div>
+      <section className="panel wide">
+        <div className="panel-title"><h2>待配置资源与上线事项</h2><ClipboardList size={18} /></div>
         <div className="todo-grid">
           {remainingItems.map((item) => (
             <div className="todo-item" key={item}><CheckCircle2 size={16} />{item}</div>
           ))}
         </div>
-	      </section>}
-    </div>
-  );
-}
-
-function ContentModule({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
-  const [view, setView] = useState<'内容工厂' | '岗位库'>('内容工厂');
-  return (
-    <div className="page-grid">
-      <section className="panel wide">
-        <div className="module-tabs">
-          {(['内容工厂', '岗位库'] as const).map((item) => (
-            <button key={item} className={view === item ? 'active' : ''} onClick={() => setView(item)}>{item}</button>
-          ))}
-        </div>
-      </section>
-      <section className="wide embedded-module">
-        {view === '内容工厂' ? <ContentOps data={data} audit={audit} apiToken={apiToken} /> : <Jobs data={data} audit={audit} />}
-      </section>
-    </div>
-  );
-}
-
-function DataModule({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
-  const [view, setView] = useState<'渠道分析' | '线索池'>('渠道分析');
-  return (
-    <div className="page-grid">
-      <section className="panel wide">
-        <div className="module-tabs">
-          {(['渠道分析', '线索池'] as const).map((item) => (
-            <button key={item} className={view === item ? 'active' : ''} onClick={() => setView(item)}>{item}</button>
-          ))}
-        </div>
-      </section>
-      <section className="wide embedded-module">
-        {view === '渠道分析' ? <Analytics data={data} audit={audit} apiToken={apiToken} /> : <LeadPool data={data} audit={audit} />}
-      </section>
-    </div>
-  );
-}
-
-function ConnectionModule({ data, update, audit, resetData, apiToken }: {
-  data: AppData;
-  update: (data: AppData) => void;
-  audit: (action: string, target: string, nextData?: AppData) => void;
-  resetData: () => void;
-  apiToken?: string;
-}) {
-  const [view, setView] = useState<'账号与API' | '系统配置'>('账号与API');
-  return (
-    <div className="page-grid">
-      <section className="panel wide">
-        <div className="module-tabs">
-          {(['账号与API', '系统配置'] as const).map((item) => (
-            <button key={item} className={view === item ? 'active' : ''} onClick={() => setView(item)}>{item}</button>
-          ))}
-        </div>
-      </section>
-      <section className="wide embedded-module">
-        {view === '账号与API'
-          ? <Accounts data={data} audit={audit} apiToken={apiToken} />
-          : <SettingsPage data={data} update={update} resetData={resetData} apiToken={apiToken} />}
       </section>
     </div>
   );
@@ -4973,22 +4772,34 @@ function renderSection(
   openSection: (section: Section) => void,
   apiToken?: string,
 ) {
-	switch (section) {
-	    case '工作台':
-	      return <OperationsHome data={data} openSection={openSection} />;
-	    case '招聘需求':
-	      return <Jobs data={data} audit={audit} />;
-	    case '内容运营':
-	      return <ContentModule data={data} audit={audit} apiToken={apiToken} />;
-	    case '线索池':
-	      return <LeadPool data={data} audit={audit} />;
-	    case '账号与平台':
-	      return <ConnectionModule data={data} update={update} audit={audit} resetData={resetData} apiToken={apiToken} />;
-	    case '数据分析':
-	      return <DataModule data={data} audit={audit} apiToken={apiToken} />;
-	    case '系统配置':
-	      return <SettingsPage data={data} update={update} resetData={resetData} apiToken={apiToken} />;
-	  }
+  switch (section) {
+    case '工作台':
+      return <Dashboard data={data} audit={audit} openSection={openSection} />;
+    case '招聘需求':
+      return <Jobs data={data} audit={audit} />;
+    case '选题库':
+      return <TopicLibrary data={data} audit={audit} />;
+    case '内容运营':
+      return <ContentOps data={data} audit={audit} apiToken={apiToken} />;
+    case '排期日历':
+      return <ScheduleCalendar data={data} audit={audit} />;
+    case '线索池':
+      return <LeadPool data={data} audit={audit} />;
+    case '素材资产':
+      return <Assets data={data} audit={audit} apiToken={apiToken} />;
+    case '账号与平台':
+      return <Accounts data={data} audit={audit} apiToken={apiToken} />;
+    case '导入中心':
+      return <ImportCenter data={data} audit={audit} />;
+    case '数据分析':
+      return <Analytics data={data} audit={audit} />;
+    case '复盘报告':
+      return <Reports data={data} audit={audit} apiToken={apiToken} />;
+    case 'AI工作台':
+      return <AiWorkbench data={data} audit={audit} apiToken={apiToken} />;
+    case '系统配置':
+      return <SettingsPage data={data} update={update} resetData={resetData} apiToken={apiToken} />;
+  }
 }
 
 function canAccessSection(section: Section, data: AppData, apiUser: ApiUser | null) {
@@ -5001,9 +4812,10 @@ function canAccessSection(section: Section, data: AppData, apiUser: ApiUser | nu
 
 export function App() {
   const [section, setSection] = useState<Section>('工作台');
+  const [navMode, setNavMode] = useState<'我的工作' | '全部模块'>('我的工作');
   const { data, update, audit, resetData, storageMode, apiUser, apiToken, authRequired, authError, login, logout } = useAppData();
   const permittedNavItems = navItems.filter(({ key }) => canAccessSection(key, data, apiUser));
-  const focusedNavItems = permittedNavItems.filter(({ key }) => operatorSections.has(key));
+  const focusedNavItems = navMode === '我的工作' ? permittedNavItems.filter(({ key }) => operatorSections.has(key)) : permittedNavItems;
   const visibleNavItems = focusedNavItems.length > 0 ? focusedNavItems : permittedNavItems;
   const activeSection = visibleNavItems.some(({ key }) => key === section) && canAccessSection(section, data, apiUser) ? section : visibleNavItems[0]?.key ?? '工作台';
   const myTasks = deriveTasks(data).filter((task) => !apiUser || task.owner === apiUser.name || task.owner === apiUser.username || task.owner === '未分配' || task.owner === '招聘专员' || apiUser.role === '系统管理员');
@@ -5017,26 +4829,31 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <div><Sparkles size={22} /></div>
-          <span>招聘运营助手<small>内容运营工作台</small></span>
+          <span>招聘运营助手<small>我的运营台</small></span>
         </div>
         <div className="sidebar-summary">
           <strong>{apiUser?.name ?? '当前用户'}</strong>
-          <span>{apiUser?.role ?? '本地视图'} · {myTasks.length} 项内容运营待办</span>
+          <span>{apiUser?.role ?? '本地视图'} · {myTasks.length} 项待办</span>
+        </div>
+        <div className="sidebar-segment">
+          {(['我的工作', '全部模块'] as const).map((mode) => (
+            <button key={mode} className={navMode === mode ? 'active' : ''} onClick={() => setNavMode(mode)}>{mode}</button>
+          ))}
         </div>
         <nav>
-          {visibleNavItems.map(({ key, label, note, icon: Icon }) => (
+          {visibleNavItems.map(({ key, icon: Icon }) => (
             <button key={key} className={activeSection === key ? 'active' : ''} onClick={() => setSection(key)}>
               <Icon size={18} />
-              <span>{label}<small>{note}</small></span>
+              {key}
             </button>
           ))}
         </nav>
         <div className="sidebar-footer">
-          <Badge tone="good">核心闭环版</Badge>
+          <Badge tone="good">一期闭环版</Badge>
           <Badge tone={storageMode === '本地API' ? 'good' : 'warn'}>{storageMode}</Badge>
           {apiUser && <small>{apiUser.name} · {apiUser.role}</small>}
           {apiUser && <button className="ghost" onClick={logout}>退出登录</button>}
-          <small>只保留内容生产、渠道数据和真实账号连接。</small>
+          <small>{navMode === '我的工作' ? '仅显示招聘运营日常模块' : '显示配置与管理模块'}</small>
         </div>
       </aside>
       <main>

@@ -3,11 +3,19 @@ export type Platform = '小红书' | '脉脉' | 'B站' | '公众号' | '抖音' 
 export type AppSection =
   | '工作台'
   | '招聘需求'
+  | '选题库'
   | '内容运营'
+  | '排期日历'
   | '线索池'
+  | '素材资产'
   | '账号与平台'
+  | '导入中心'
   | '数据分析'
+  | '复盘报告'
+  | 'AI工作台'
   | '系统配置';
+
+export type AccountType = '招聘专用账号' | 'HR个人IP账号' | '技术负责人账号' | '校招账号';
 
 export type ContentStatus =
   | '草稿'
@@ -146,15 +154,14 @@ export interface PlatformAccount {
   id: string;
   platform: Platform;
   name: string;
-  externalId: string;
-  integrationId: string;
-  provider: string;
-  profileUrl?: string;
-  avatarUrl?: string;
-  followerCount?: number;
-  status: '已连接' | '连接失败' | '已停用';
-  syncedAt: string;
-  raw?: Record<string, unknown>;
+  type: AccountType;
+  positioning: string;
+  owner: string;
+  publishingRoles: string[];
+  reviewRule: string;
+  attribution: string;
+  authStatus: '已授权' | '未授权' | '授权过期';
+  status: '启用' | '停用';
 }
 
 export interface ContentTask {
@@ -276,7 +283,7 @@ export interface IntegrationConfig {
 export interface IntegrationSyncRun {
   id: string;
   integrationId: string;
-  syncType: '北森线索同步' | '北森结果回流' | '平台指标拉取' | '平台账号同步' | 'BI同步' | '消息发送' | '其他';
+  syncType: '北森线索同步' | '北森结果回流' | '平台指标拉取' | 'BI同步' | '消息发送' | '其他';
   status: '成功' | '失败';
   message: string;
   recordCount: number;
