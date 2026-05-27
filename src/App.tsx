@@ -47,6 +47,7 @@ const navItems: { key: Section; icon: React.ComponentType<{ size?: number }> }[]
 ];
 
 const contentTypes = ['岗位种草', '技术团队内容', '员工故事', '公司/业务介绍', '面试/求职干货', '短视频脚本', '图文笔记', '长文', '校招内容'];
+const publishCheckItems = ['合规已审', '真实账号已同步', '入口已配置'];
 const sectionPermissions: Record<Section, string> = {
   工作台: '工作台查看',
   招聘需求: '岗位查看',
@@ -884,6 +885,13 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
     return { platform: item, count, target };
   });
   const scheduleDetail = data.contents.find((item) => item.id === scheduleDetailId);
+  const connectedAccounts = data.accounts.filter((account) => account.status === '已连接');
+  const selectedPlatformAccount = connectedAccounts.find((account) => account.platform === platform);
+  const accountBlockReason = connectedAccounts.length === 0
+    ? '请先在账号与平台同步真实平台账号'
+    : selectedPlatformAccount
+      ? ''
+      : `${platform} 暂无已连接账号，请先同步该平台账号`;
 
   const handleGenerate = async () => {
     if (!selectedJob) return;
@@ -909,7 +917,20 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
 
   const handleCreateTask = async () => {
     if (!selectedJob || !draft.trim()) return;
-    const accountId = data.accounts.find((acc) => acc.platform === platform)?.id ?? data.accounts[0]?.id ?? '';
+    const account = data.accounts.find((acc) => acc.platform === platform && acc.status === '已连接');
+    if (!account) {
+      const message = `${platform} 暂无已连接真实账号，请先到账号与平台同步账号`;
+      setAiStatus(message);
+      audit('阻断内容创建', message, {
+        ...data,
+        notifications: [
+          makeNotification('内容创建被阻断', message, '内容运营', '预警'),
+          ...data.notifications,
+        ],
+      });
+      return;
+    }
+    const accountId = account.id;
     let scanned = scanRisks(draft);
     const riskModel = findModelApi(data, '风险识别');
     if (riskModel) {
@@ -1044,6 +1065,18 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
 
   const publishContent = (id: string) => {
     const target = data.contents.find((item) => item.id === id);
+    if (!target) return;
+    const account = data.accounts.find((item) => item.id === target.accountId && item.status === '已连接');
+    if (!account) {
+      audit('阻断内容发布', `${target.title}：未绑定已连接真实账号`, {
+        ...data,
+        notifications: [
+          makeNotification('内容发布被阻断', `${target.title} 未绑定已连接真实平台账号，请先同步账号后再发布`, '内容运营', '预警'),
+          ...data.notifications,
+        ],
+      });
+      return;
+    }
     const latestScore = data.contentQualityScores.find((score) => score.contentId === id);
     if (latestScore && latestScore.total < data.operationSettings.contentQualityBlockScore) {
       audit('内容质量分阻断发布', `${target?.title ?? id}：${latestScore.total}分`, {
@@ -1060,13 +1093,13 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
       audit('发布检查未通过', target?.title ?? id, {
         ...data,
         notifications: [
-          makeNotification('发布检查未完成', `${target?.title ?? id} 需要完成合规、素材授权、入口配置检查`, '内容运营', '预警'),
+          makeNotification('发布检查未完成', `${target.title} 需要完成合规、真实账号同步、入口配置检查`, '内容运营', '预警'),
           ...data.notifications,
         ],
       });
       return;
     }
-    audit('标记内容已发布', target?.title ?? id, {
+    audit('标记内容已发布', target.title, {
       ...data,
       contents: data.contents.map((item) => item.id === id ? { ...item, status: '已发布', publishedAt: new Date().toISOString().slice(0, 10) } : item),
     });
@@ -1209,6 +1242,11 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
           </select>
         </label>
         <div className="platform-note">{platformPositioning[platform]}</div>
+        {selectedPlatformAccount ? (
+          <div className="platform-note"><Link size={16} />已绑定真实账号：{selectedPlatformAccount.name} · {selectedPlatformAccount.provider} · {selectedPlatformAccount.syncedAt}</div>
+        ) : (
+          <div className="platform-note"><AlertTriangle size={16} />{accountBlockReason}</div>
+        )}
         <button onClick={() => void handleGenerate()} disabled={data.jobs.length === 0}><Bot size={16} />生成平台内容</button>
         {aiStatus && <div className="platform-note"><Bot size={16} />{aiStatus}</div>}
         <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="生成或编辑内容初稿" />
@@ -1217,7 +1255,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
           <span>风险等级：<b>{risk.level}</b></span>
           {risk.risks.length > 0 && <small>{risk.risks.join('；')}</small>}
         </div>
-        <button className="full" onClick={() => void handleCreateTask()}><Plus size={16} />保存为内容任务</button>
+        <button className="full" onClick={() => void handleCreateTask()} disabled={Boolean(accountBlockReason)}><Plus size={16} />保存为内容任务</button>
       </section>
 
       <section className="panel wide">
@@ -1269,7 +1307,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
             </div>
             <p>{scheduleDetail.content}</p>
             <div className="checklist-row">
-              {['合规已审', '素材已授权', '入口已配置'].map((check) => (
+              {publishCheckItems.map((check) => (
                 <label key={check}><input type="checkbox" checked={(publishChecks[scheduleDetail.id] ?? []).includes(check)} onChange={() => togglePublishCheck(scheduleDetail.id, check)} />{check}</label>
               ))}
             </div>
@@ -1361,7 +1399,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
                 <details className="version-box">
                   <summary>发布前检查</summary>
                   <div className="checklist-row">
-                    {['合规已审', '素材已授权', '入口已配置'].map((check) => (
+                    {publishCheckItems.map((check) => (
                       <label key={check}><input type="checkbox" checked={(publishChecks[item.id] ?? []).includes(check)} onChange={() => togglePublishCheck(item.id, check)} />{check}</label>
                     ))}
                   </div>
@@ -2953,13 +2991,25 @@ function TopicLibrary({ data, audit }: { data: AppData; audit: (action: string, 
   const convertTopicToContent = (item: TopicItem) => {
     const job = data.jobs.find((current) => current.id === item.targetJobId) ?? data.jobs[0];
     if (!job) return;
+    const targetPlatform = item.platform === '全部' ? job.targetPlatforms[0] ?? '小红书' : item.platform;
+    const account = data.accounts.find((current) => current.platform === targetPlatform && current.status === '已连接');
+    if (!account) {
+      audit('阻断选题转内容', `${targetPlatform} 暂无已连接真实账号`, {
+        ...data,
+        notifications: [
+          makeNotification('选题转内容被阻断', `${item.title} 需要先同步 ${targetPlatform} 真实平台账号`, '内容运营', '预警'),
+          ...data.notifications,
+        ],
+      });
+      return;
+    }
     const risk = scanRisks(item.inspiration);
     const content: ContentTask = {
       id: `content-${Date.now()}`,
-      title: `${item.platform === '全部' ? job.targetPlatforms[0] ?? '小红书' : item.platform}｜${item.title}`,
+      title: `${targetPlatform}｜${item.title}`,
       jobId: job.id,
-      platform: item.platform === '全部' ? job.targetPlatforms[0] ?? '小红书' : item.platform,
-      accountId: data.accounts.find((account) => account.platform === (item.platform === '全部' ? job.targetPlatforms[0] : item.platform))?.id ?? '',
+      platform: targetPlatform,
+      accountId: account.id,
       type: item.type,
       status: '草稿',
       owner: item.owner,

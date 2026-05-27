@@ -346,7 +346,9 @@ export function calculateAccountHealth(accountId: string, data: AppData): Accoun
 }
 
 export function detectCalendarConflicts(content: ContentTask, data: AppData) {
-  const conflicts: { type: '账号过载' | '频次不足' | '高风险未审' | '入口未配置' | '素材未授权'; message: string; level: '提醒' | '预警' | '阻断' }[] = [];
+  const conflicts: { type: '账号过载' | '账号未同步' | '频次不足' | '高风险未审' | '入口未配置' | '素材未授权'; message: string; level: '提醒' | '预警' | '阻断' }[] = [];
+  const connectedAccount = data.accounts.find((account) => account.id === content.accountId && account.platform === content.platform && account.status === '已连接');
+  if (!connectedAccount) conflicts.push({ type: '账号未同步', message: `${content.platform} 未绑定已连接真实平台账号`, level: '阻断' });
   const sameDay = data.contents.filter((item) => item.id !== content.id && item.accountId === content.accountId && item.dueDate === content.dueDate);
   if (sameDay.length >= data.operationSettings.dailyAccountPublishLimit) conflicts.push({ type: '账号过载', message: `同账号同日发布内容超过 ${data.operationSettings.dailyAccountPublishLimit} 条`, level: '预警' });
   const weekCount = data.contents.filter((item) => item.platform === content.platform && sameWeek(item.dueDate, content.dueDate)).length;
