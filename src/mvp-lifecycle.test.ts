@@ -86,11 +86,11 @@ describe('真实数据生命周期闭环', () => {
   it('runs create/update/delete lifecycle for platform account and asset data', () => {
     const base = buildMvpSeedData(emptyData);
     const account: PlatformAccount = { ...base.accounts[0], id: 'life-account', name: '生命周期账号' };
-    const accountLifecycle = createUpdateDelete(base.accounts, account, { ...account, authStatus: '已授权' });
+    const accountLifecycle = createUpdateDelete(base.accounts, account, { ...account, status: '已停用' });
     const asset: AssetItem = { ...base.assets[0], id: 'life-asset', name: '生命周期素材' };
     const assetLifecycle = createUpdateDelete(base.assets, asset, { ...asset, authorization: '已授权', usageCount: 1 });
 
-    expect(accountLifecycle.afterUpdate.find((item) => item.id === 'life-account')?.authStatus).toBe('已授权');
+    expect(accountLifecycle.afterUpdate.find((item) => item.id === 'life-account')?.status).toBe('已停用');
     expect(accountLifecycle.afterDelete.some((item) => item.id === 'life-account')).toBe(false);
     expect(assetLifecycle.afterUpdate.find((item) => item.id === 'life-asset')?.usageCount).toBe(1);
     expect(assetLifecycle.afterDelete.some((item) => item.id === 'life-asset')).toBe(false);

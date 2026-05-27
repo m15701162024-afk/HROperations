@@ -831,7 +831,7 @@ function filterDataForSession(data, session) {
   const contentIds = new Set(contents.map((content) => content.id));
   const jobIds = new Set(contents.map((content) => content.jobId).filter(Boolean));
   const accountIds = new Set(contents.map((content) => content.accountId).filter(Boolean));
-  const accounts = (data.accounts ?? []).filter((account) => accountIds.has(account.id) || userKeys.has(account.owner));
+  const accounts = (data.accounts ?? []).filter((account) => accountIds.has(account.id));
   accounts.forEach((account) => accountIds.add(account.id));
   const jobs = (data.jobs ?? []).filter((job) => jobIds.has(job.id));
   jobs.forEach((job) => jobIds.add(job.id));
@@ -1107,8 +1107,8 @@ function buildAnalyticsDrill(data, query = {}) {
         const inactiveDays = latestPublish ? Math.max(0, Math.floor((Date.now() - new Date(latestPublish).getTime()) / 86400000)) : undefined;
         const snapshot = summarizeAnalytics(data, { ...normalizedQuery, accountId: account.id, platform: account.platform });
         const publishCount = accountContents.length;
-        const healthScore = Math.max(0, Math.min(100, 100 - (account.authStatus === '已授权' ? 0 : 30) - (inactiveDays && inactiveDays > 14 ? 20 : 0) - (snapshot.clickRate === 0 && snapshot.views > 0 ? 15 : 0)));
-        return { id: account.id, label: `${account.platform}｜${account.name}`, dimension: 'account', snapshot, meta: { platform: account.platform, owner: account.owner, positioning: account.positioning, authStatus: account.authStatus, status: account.status, publishingRoles: (account.publishingRoles ?? []).join('、'), publishCount, latestPublish, inactiveDays, averageViews: publishCount > 0 ? Math.round(snapshot.views / publishCount) : 0, interactionRate: snapshot.interactionRate, clickRate: snapshot.clickRate, healthScore, suggestion: healthScore < 70 ? '建议检查授权状态、发布频次和招聘入口 CTA。' : '账号健康度正常，可继续复用高点击内容结构。' } };
+        const healthScore = Math.max(0, Math.min(100, 100 - (account.status === '已连接' ? 0 : 30) - (inactiveDays && inactiveDays > 14 ? 20 : 0) - (snapshot.clickRate === 0 && snapshot.views > 0 ? 15 : 0)));
+        return { id: account.id, label: `${account.platform}｜${account.name}`, dimension: 'account', snapshot, meta: { platform: account.platform, provider: account.provider, externalId: account.externalId, syncedAt: account.syncedAt, status: account.status, publishCount, latestPublish, inactiveDays, averageViews: publishCount > 0 ? Math.round(snapshot.views / publishCount) : 0, interactionRate: snapshot.interactionRate, clickRate: snapshot.clickRate, healthScore, suggestion: healthScore < 70 ? '建议检查平台 API 连接、发布频次和招聘入口 CTA。' : '账号 API 连接正常，可继续复用高点击内容结构。' } };
       })
       : normalizedQuery.dimension === 'job'
         ? (data.jobs ?? []).map((job) => {

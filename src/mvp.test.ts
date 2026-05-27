@@ -6,7 +6,7 @@ describe('MVP 验收矩阵', () => {
   it('evaluates every business module against the eight MVP criteria', () => {
     const results = evaluateMvpMatrix(emptyData);
 
-    expect(results.length).toBeGreaterThanOrEqual(12);
+    expect(results.map((item) => item.module)).toEqual(['工作台', '招聘需求', '内容运营', '线索池', '账号与平台', '数据分析', '系统配置']);
     expect(results.every((item) => Object.keys(item.criteria).length === 8)).toBe(true);
     expect(results.find((item) => item.module === '数据分析')?.status).toBe('达标');
   });

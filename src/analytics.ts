@@ -153,7 +153,7 @@ export function buildAccountBreakdowns(data: AppData, query: DrillQuery): DrillB
       const snapshot = summarizeMetrics(data, { ...query, accountId: account.id, platform: account.platform });
       const publishCount = accountContents.length;
       const avgViews = publishCount > 0 ? Math.round(snapshot.views / publishCount) : 0;
-      const healthScore = Math.max(0, Math.min(100, 100 - (account.authStatus === '已授权' ? 0 : 30) - (inactiveDays && inactiveDays > 14 ? 20 : 0) - (snapshot.clickRate === 0 && snapshot.views > 0 ? 15 : 0)));
+      const healthScore = Math.max(0, Math.min(100, 100 - (account.status === '已连接' ? 0 : 30) - (inactiveDays && inactiveDays > 14 ? 20 : 0) - (snapshot.clickRate === 0 && snapshot.views > 0 ? 15 : 0)));
       return {
         id: account.id,
         label: `${account.platform}｜${account.name}`,
@@ -161,11 +161,10 @@ export function buildAccountBreakdowns(data: AppData, query: DrillQuery): DrillB
         snapshot,
         meta: {
           platform: account.platform,
-          owner: account.owner,
-          positioning: account.positioning,
-          authStatus: account.authStatus,
+          provider: account.provider,
+          externalId: account.externalId,
+          syncedAt: account.syncedAt,
           status: account.status,
-          publishingRoles: account.publishingRoles.join('、'),
           publishCount,
           latestPublish,
           inactiveDays,
@@ -173,7 +172,7 @@ export function buildAccountBreakdowns(data: AppData, query: DrillQuery): DrillB
           interactionRate: snapshot.interactionRate,
           clickRate: snapshot.clickRate,
           healthScore,
-          suggestion: healthScore < 70 ? '建议检查授权状态、发布频次和招聘入口 CTA。' : '账号健康度正常，可继续复用高点击内容结构。',
+          suggestion: healthScore < 70 ? '建议检查平台 API 连接、发布频次和招聘入口 CTA。' : '账号 API 连接正常，可继续复用高点击内容结构。',
         },
       };
     });

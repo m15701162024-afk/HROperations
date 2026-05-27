@@ -150,22 +150,19 @@ describe('招聘运营助手', () => {
     expect(screen.queryByText('生命周期测试招聘需求-已更新')).not.toBeInTheDocument();
   });
 
-  it('runs asset create/update/delete lifecycle from the GUI', async () => {
+  it('keeps slim navigation and moves planning into content operations', async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: /素材资产/ }));
-    await user.type(screen.getByPlaceholderText('素材名称'), '生命周期测试素材');
-    await user.click(screen.getByRole('button', { name: '保存' }));
+    expect(screen.queryByRole('button', { name: /素材资产/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /选题库/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /排期日历/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /导入中心/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /复盘报告/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /AI工作台/ })).not.toBeInTheDocument();
 
-    const row = screen.getAllByText('生命周期测试素材')
-      .map((item) => item.closest('.asset-row'))
-      .find(Boolean);
-    expect(row).not.toBeNull();
-    await user.selectOptions(within(row as HTMLElement).getByDisplayValue('待审核'), '已授权');
-    expect(within(row as HTMLElement).getByDisplayValue('已授权')).toBeInTheDocument();
-
-    await user.click(within(row as HTMLElement).getByRole('button', { name: '删除' }));
-    expect(screen.queryByText('生命周期测试素材')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /内容运营/ }));
+    expect(screen.getByRole('button', { name: '选题' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '排期' })).toBeInTheDocument();
   });
 });

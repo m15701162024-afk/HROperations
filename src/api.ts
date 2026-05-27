@@ -232,11 +232,24 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 export function normalizeAppData(data: Partial<AppData>): AppData {
+  const mapSection = (section: unknown): AppData['tasks'][number]['targetSection'] => {
+    const sectionMap: Record<string, AppData['tasks'][number]['targetSection']> = {
+      选题库: '内容运营',
+      排期日历: '内容运营',
+      素材资产: '内容运营',
+      导入中心: '系统配置',
+      复盘报告: '数据分析',
+      AI工作台: '系统配置',
+    };
+    const value = String(section ?? '');
+    return sectionMap[value] ?? (['工作台', '招聘需求', '内容运营', '账号与平台', '线索池', '数据分析', '系统配置'].includes(value) ? value as AppData['tasks'][number]['targetSection'] : '工作台');
+  };
+  const accounts = (data.accounts ?? []).filter((account) => account.externalId && account.integrationId);
   return {
     ...emptyData,
     ...data,
     jobs: data.jobs ?? [],
-    accounts: data.accounts ?? [],
+    accounts,
     contents: data.contents ?? [],
     contentVersions: data.contentVersions ?? [],
     reviewComments: data.reviewComments ?? [],
@@ -255,7 +268,7 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     workflowRules: data.workflowRules ?? [],
     sensitiveRules: data.sensitiveRules ?? [],
     costs: data.costs ?? [],
-    notifications: data.notifications ?? [],
+    notifications: (data.notifications ?? []).map((item) => ({ ...item, targetSection: mapSection(item.targetSection) })),
     auditLogs: data.auditLogs ?? [],
     integrationMappings: data.integrationMappings ?? [],
     compliancePolicies: data.compliancePolicies ?? [],
@@ -265,7 +278,7 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     promptTemplates: data.promptTemplates ?? [],
     modelRunLogs: data.modelRunLogs ?? [],
     pluginRules: data.pluginRules ?? [],
-    tasks: data.tasks ?? [],
+    tasks: (data.tasks ?? []).map((item) => ({ ...item, targetSection: mapSection(item.targetSection) })),
     taskCompletions: data.taskCompletions ?? [],
     candidateLeads: data.candidateLeads ?? [],
     leadFollowUps: data.leadFollowUps ?? [],

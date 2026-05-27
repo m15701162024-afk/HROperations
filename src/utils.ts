@@ -223,7 +223,7 @@ export function deriveTasks(data: AppData): TaskItem[] {
 
   data.contents.forEach((content) => {
     if ((content.dueDate === today || content.publishedAt === today) && !['已发布', '数据回收中', '已复盘', '已归档'].includes(content.status)) {
-      push({ id: `task-publish-${content.id}`, type: '待发布', title: `今日待发布：${content.title}`, body: `${content.platform} 内容排期在今天`, owner: content.owner, priority: '高', targetSection: '排期日历', targetId: content.id, dueDate: content.dueDate });
+      push({ id: `task-publish-${content.id}`, type: '待发布', title: `今日待发布：${content.title}`, body: `${content.platform} 内容排期在今天`, owner: content.owner, priority: '高', targetSection: '内容运营', targetId: content.id, dueDate: content.dueDate });
     }
     if (content.status === '待专业审核' || content.status === '待品牌合规审核') {
       push({ id: `task-review-${content.id}`, type: '待审核', title: `待审核：${content.title}`, body: `${content.status}，审核人 ${content.reviewer || '未指定'}`, owner: content.reviewer || content.owner, priority: content.riskLevel === '高' ? '高' : '中', targetSection: '内容运营', targetId: content.id, dueDate: content.dueDate });
@@ -243,7 +243,7 @@ export function deriveTasks(data: AppData): TaskItem[] {
 
   data.assets.forEach((asset) => {
     if (asset.expiresAt && Math.ceil((new Date(asset.expiresAt).getTime() - Date.now()) / 86400000) <= 30) {
-      push({ id: `task-asset-${asset.id}`, type: '素材授权到期', title: `素材授权即将到期：${asset.name}`, body: `有效期至 ${asset.expiresAt}`, owner: asset.owner, priority: '中', targetSection: '素材资产', targetId: asset.id, dueDate: asset.expiresAt });
+      push({ id: `task-asset-${asset.id}`, type: '素材授权到期', title: `素材授权即将到期：${asset.name}`, body: `有效期至 ${asset.expiresAt}`, owner: asset.owner, priority: '中', targetSection: '内容运营', targetId: asset.id, dueDate: asset.expiresAt });
     }
   });
 
@@ -253,7 +253,7 @@ export function deriveTasks(data: AppData): TaskItem[] {
     }
   });
 
-  data.accounts.filter((account) => account.status === '启用').forEach((account) => {
+  data.accounts.filter((account) => account.status === '已连接').forEach((account) => {
     const latest = data.contents
       .filter((content) => content.accountId === account.id && (content.publishedAt || content.dueDate))
       .map((content) => content.publishedAt || content.dueDate)
@@ -261,7 +261,7 @@ export function deriveTasks(data: AppData): TaskItem[] {
       .at(-1);
     const inactiveDays = latest ? Math.floor((Date.now() - new Date(latest).getTime()) / 86400000) : 999;
     if (inactiveDays >= settings.accountInactiveWarningDays) {
-      push({ id: `task-account-${account.id}`, type: '账号停更', title: `账号停更提醒：${account.name}`, body: `${account.platform} 已 ${inactiveDays} 天无发布`, owner: account.owner, priority: inactiveDays >= settings.accountInactiveDangerDays ? '高' : '中', targetSection: '账号与平台', targetId: account.id, dueDate: today });
+      push({ id: `task-account-${account.id}`, type: '账号停更', title: `账号停更提醒：${account.name}`, body: `${account.platform} 已 ${inactiveDays} 天无发布`, owner: '招聘运营', priority: inactiveDays >= settings.accountInactiveDangerDays ? '高' : '中', targetSection: '账号与平台', targetId: account.id, dueDate: today });
     }
   });
 
@@ -319,13 +319,12 @@ export function calculateAccountHealth(accountId: string, data: AppData): Accoun
   const latest = published.map((item) => item.publishedAt || item.dueDate).sort().at(-1);
   const inactiveDays = latest ? Math.max(0, Math.floor((Date.now() - new Date(latest).getTime()) / 86400000)) : 999;
   const highRiskRatio = contents.length ? contents.filter((item) => item.riskLevel === '高').length / contents.length : 0;
-  const positioningWords = (account?.positioning ?? '').split(/[、,，/]/).filter(Boolean);
-  const positioningMatchScore = contents.length ? Math.round((contents.filter((content) => positioningWords.some((word) => content.title.includes(word) || content.content.includes(word))).length / contents.length) * 100) : 0;
-  const level: AccountHealthSnapshot['level'] = inactiveDays >= 30 || highRiskRatio > 0.35 ? '风险' : inactiveDays >= 14 || positioningMatchScore < 30 ? '需关注' : '健康';
+  const positioningMatchScore = account?.status === '已连接' ? 100 : 0;
+  const level: AccountHealthSnapshot['level'] = account?.status !== '已连接' || inactiveDays >= 30 || highRiskRatio > 0.35 ? '风险' : inactiveDays >= 14 ? '需关注' : '健康';
   const suggestions = [
     inactiveDays >= 14 ? `账号已 ${inactiveDays} 天未发布，建议补充排期。` : '',
     highRiskRatio > 0.25 ? '高风险内容占比偏高，建议加强审核规则。' : '',
-    positioningMatchScore < 40 ? '内容与账号定位匹配度偏低，建议收敛选题。' : '',
+    account?.status !== '已连接' ? '账号未保持平台 API 连接，请重新同步真实账号。' : '',
     clicks === 0 && views > 0 ? '有曝光但无点击，建议强化 CTA 和招聘入口。' : '',
   ].filter(Boolean);
   return {
@@ -453,7 +452,7 @@ export function buildRecommendations(data: AppData) {
   return [
     best.metrics.clicks > 0 ? `优先复用「${best.title}」的选题结构，目前点击最高，为 ${best.metrics.clicks}。` : '已有内容但缺少真实点击，请先导入平台指标。',
     bestPlatform ? `${bestPlatform} 已产生最多北森回流结果，可优先配置对应岗位族群内容。` : '尚未导入北森结果，暂不判断真实渠道质量。',
-    data.accounts.length === 0 ? '请补充真实平台账号，用于数据归属、权限和复盘。' : '账号归属已具备基础数据，可继续完善发布权限和审核规则。',
+    data.accounts.length === 0 ? '请通过平台 API 同步真实账号，用于数据归属和复盘。' : '账号归属来自平台 API，可继续完善内容绑定和指标同步。',
   ];
 }
 

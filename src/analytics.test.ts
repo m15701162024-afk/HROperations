@@ -22,14 +22,11 @@ const baseData: AppData = {
     id: 'acc-1',
     platform: '小红书',
     name: '招聘号',
-    type: '招聘专用账号',
-    positioning: '岗位种草',
-    owner: '招聘运营',
-    publishingRoles: ['招聘专员'],
-    reviewRule: '默认',
-    attribution: '招聘团队',
-    authStatus: '已授权',
-    status: '启用',
+    externalId: 'real-acc-1',
+    integrationId: 'integration-xhs',
+    provider: '小红书 API',
+    status: '已连接',
+    syncedAt: '2026-05-26 10:00',
   }],
   contents: [{
     id: 'ct-1',
@@ -174,7 +171,7 @@ describe('analytics drill service', () => {
 
   it('returns acceptance metadata for account, content, job and funnel drilldowns', () => {
     const account = buildAnalyticsDrill(baseData, { dimension: 'account', platform: '小红书' }).breakdowns[0];
-    expect(account.meta?.positioning).toBe('岗位种草');
+    expect(account.meta?.provider).toBe('小红书 API');
     expect(account.meta?.publishCount).toBe(1);
     expect(account.meta?.healthScore).toBeTypeOf('number');
 
