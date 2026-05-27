@@ -36,14 +36,11 @@ import { applyMetricsCsv, buildDataExplanations, buildPlatformStrategy, buildRec
 
 type Section = AppSection;
 
-const navItems: { key: Section; icon: React.ComponentType<{ size?: number }> }[] = [
-  { key: '工作台', icon: Home },
-  { key: '招聘需求', icon: ClipboardList },
-  { key: '内容运营', icon: Megaphone },
-  { key: '线索池', icon: Users },
-  { key: '账号与平台', icon: Users },
-  { key: '数据分析', icon: BarChart3 },
-  { key: '系统配置', icon: Settings },
+const navItems: { key: Section; label: string; note: string; icon: React.ComponentType<{ size?: number }> }[] = [
+  { key: '工作台', label: '运营首页', note: '今日任务', icon: Home },
+  { key: '内容运营', label: '内容工厂', note: '生成/审核/排期', icon: Megaphone },
+  { key: '数据分析', label: '渠道数据', note: '效果/归因/复盘', icon: BarChart3 },
+  { key: '账号与平台', label: '连接配置', note: '账号/API/入口', icon: Link },
 ];
 
 const contentTypes = ['岗位种草', '技术团队内容', '员工故事', '公司/业务介绍', '面试/求职干货', '短视频脚本', '图文笔记', '长文', '校招内容'];
@@ -58,7 +55,7 @@ const sectionPermissions: Record<Section, string> = {
   系统配置: '系统配置',
 };
 
-const operatorSections = new Set<Section>(['工作台', '招聘需求', '内容运营', '线索池', '数据分析']);
+const operatorSections = new Set<Section>(['工作台', '内容运营', '数据分析', '账号与平台']);
 const mvpSeedKey = 'hr-assistant-mvp-seeded-v1';
 const dataModeKey = 'hr-assistant-data-mode';
 const currentDataMode = 'real-v2-empty-platform-data';
@@ -240,6 +237,118 @@ function Progress({ current, target }: { current: number; target: number }) {
   return (
     <div className="progress" aria-label={`完成度 ${percent}%`}>
       <span style={{ width: `${percent}%` }} />
+    </div>
+  );
+}
+
+function OperationsHome({ data, openSection }: { data: AppData; openSection: (section: Section) => void }) {
+  const tasks = useMemo(() => deriveTasks(data).filter((task) => task.type !== '线索待跟进'), [data]);
+  const activeJobs = data.jobs.filter((job) => job.status === '招聘中');
+  const inProduction = data.contents.filter((item) => !['已发布', '数据回收中', '已复盘', '已归档'].includes(item.status)).length;
+  const pendingPublish = data.contents.filter((item) => item.status === '待发布').length;
+  const published = data.contents.filter((item) => ['已发布', '数据回收中', '已复盘'].includes(item.status)).length;
+  const pendingMetrics = data.contents.filter((item) => ['已发布', '数据回收中'].includes(item.status) && Object.values(item.metrics).every((value) => value === 0)).length;
+  const totals = data.contents.reduce((acc, item) => ({
+    views: acc.views + item.metrics.views,
+    interactions: acc.interactions + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares,
+    clicks: acc.clicks + item.metrics.clicks,
+  }), { views: 0, interactions: 0, clicks: 0 });
+  const connectedPlatforms = new Set(data.accounts.filter((account) => account.status === '已连接').map((account) => account.platform));
+  const topTasks = tasks.slice(0, 5);
+  const channelRows = platforms.map((item) => {
+    const contents = data.contents.filter((content) => content.platform === item);
+    const target = data.operationSettings.weeklyPlatformTargets[item] ?? 0;
+    const views = contents.reduce((sum, content) => sum + content.metrics.views, 0);
+    const clicks = contents.reduce((sum, content) => sum + content.metrics.clicks, 0);
+    const account = data.accounts.find((current) => current.platform === item && current.status === '已连接');
+    const status = !account ? '未连接' : contents.length < target ? '需补内容' : clicks === 0 && views > 0 ? '需优化入口' : '正常';
+    return { platform: item, contents: contents.length, target, views, clicks, account, status };
+  });
+  const nextAdvice = [
+    activeJobs.length === 0 ? '先录入一个真实岗位简报，系统才能生成可发布内容。' : '',
+    connectedPlatforms.size === 0 ? '先连接至少一个真实渠道账号，内容才允许进入发布链路。' : '',
+    pendingPublish > 0 ? `有 ${pendingPublish} 条内容待发布，优先完成发布前检查。` : '',
+    pendingMetrics > 0 ? `有 ${pendingMetrics} 条已发内容缺少回收数据，建议同步平台指标。` : '',
+  ].filter(Boolean);
+
+  return (
+    <div className="page-grid ops-home">
+      <section className="command-hero">
+        <div>
+          <span className="eyebrow">招聘内容运营指挥台</span>
+          <h1>今天先把内容发出去，再用数据决定明天做什么。</h1>
+          <p>围绕岗位简报、渠道账号、内容排期和效果复盘四件事组织工作，减少来回切模块和人工判断。</p>
+        </div>
+        <div className="hero-actions">
+          <button onClick={() => openSection('内容运营')}><Sparkles size={16} />开始生成内容</button>
+          <button className="secondary" onClick={() => openSection('数据分析')}><BarChart3 size={16} />查看渠道效果</button>
+          <button className="ghost" onClick={() => openSection('账号与平台')}><Link size={16} />连接账号/API</button>
+        </div>
+      </section>
+
+      <div className="stats-row">
+        <StatCard label="招聘中岗位" value={activeJobs.length} note="内容生产输入" icon={ClipboardList} />
+        <StatCard label="生产中内容" value={inProduction} note={`${pendingPublish} 条待发布`} icon={Megaphone} />
+        <StatCard label="已发布内容" value={published} note={`${pendingMetrics} 条待回收数据`} icon={Rocket} />
+        <StatCard label="渠道点击" value={totals.clicks.toLocaleString()} note={`${totals.views.toLocaleString()} 曝光 · ${totals.interactions.toLocaleString()} 互动`} icon={Link} />
+      </div>
+
+      <section className="panel wide workflow-strip">
+        {[
+          { title: '1. 岗位简报', body: '岗位、候选人画像、卖点', target: '内容运营' as Section },
+          { title: '2. 内容生成', body: '按渠道生成、查风险、改标题', target: '内容运营' as Section },
+          { title: '3. 发布排期', body: '绑定真实账号、检查入口', target: '内容运营' as Section },
+          { title: '4. 数据复盘', body: '同步指标、看渠道 ROI', target: '数据分析' as Section },
+        ].map((step) => (
+          <button className="workflow-step" key={step.title} onClick={() => openSection(step.target)}>
+            <strong>{step.title}</strong>
+            <span>{step.body}</span>
+          </button>
+        ))}
+      </section>
+
+      <section className="panel focus-panel">
+        <div className="panel-title"><h2>下一步建议</h2><Bot size={18} /></div>
+        {nextAdvice.length === 0 && <EmptyState title="当前闭环正常" body="继续按排期生产内容，并在发布后同步渠道指标。" />}
+        {nextAdvice.map((item) => <div className="todo-item" key={item}><CheckCircle2 size={16} />{item}</div>)}
+      </section>
+
+      <section className="panel focus-panel">
+        <div className="panel-title"><h2>今日待办</h2><ClipboardList size={18} /></div>
+        {topTasks.length === 0 && <EmptyState title="暂无紧急待办" body="当内容待发布、数据待回收、账号停更时会自动出现。" />}
+        {topTasks.map((task) => (
+          <div className="task-row compact-task" key={task.id}>
+            <div>
+              <strong>{task.title}</strong>
+              <span>{task.body}</span>
+            </div>
+            <div className="row-actions">
+              <Badge tone={task.priority === '高' ? 'danger' : task.priority === '中' ? 'warn' : 'info'}>{task.priority}</Badge>
+              <button className="ghost" onClick={() => openSection(task.targetSection)}>处理</button>
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <section className="panel wide">
+        <div className="panel-title"><h2>渠道状态</h2><BarChart3 size={18} /></div>
+        <div className="channel-grid">
+          {channelRows.map((row) => (
+            <article key={row.platform} className="channel-card">
+              <div className="card-head">
+                <h3>{row.platform}</h3>
+                <Badge tone={row.status === '正常' ? 'good' : row.status === '未连接' ? 'danger' : 'warn'}>{row.status}</Badge>
+              </div>
+              <span>{row.account ? row.account.name : '未连接真实账号'}</span>
+              <div className="mini-metrics">
+                <b>{row.contents}/{row.target}</b><span>本期内容</span>
+                <b>{row.views.toLocaleString()}</b><span>曝光</span>
+                <b>{row.clicks.toLocaleString()}</b><span>点击</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -857,6 +966,18 @@ function mappedValue(row: Record<string, string | number | boolean | undefined>,
 
 function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
   const [contentTab, setContentTab] = useState<'内容' | '选题' | '排期'>('内容');
+  const [quickJob, setQuickJob] = useState({
+    title: '',
+    family: '岗位族群',
+    city: '',
+    level: '',
+    type: '社招' as JobNeed['type'],
+    persona: '',
+    sellingPoints: '',
+    targetPlatforms: '小红书、脉脉',
+    beisenUrl: '',
+    websiteUrl: '',
+  });
   const [jobId, setJobId] = useState(data.jobs[0]?.id ?? '');
   const [platform, setPlatform] = useState<Platform>('小红书');
   const [draft, setDraft] = useState('');
@@ -913,6 +1034,37 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
       setAiStatus('未配置内容生成模型，使用本地模板');
     }
     setDraft(generateContent(selectedJob, platform));
+  };
+
+  const createQuickJob = () => {
+    if (!quickJob.title.trim()) return;
+    const targetPlatforms = quickJob.targetPlatforms.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean) as Platform[];
+    const job: JobNeed = {
+      id: `job-${Date.now()}`,
+      title: quickJob.title.trim(),
+      family: quickJob.family.trim() || '未分类',
+      city: quickJob.city.trim() || '待确认',
+      level: quickJob.level.trim() || '待确认',
+      type: quickJob.type,
+      jd: `${quickJob.title.trim()} 招聘内容简报`,
+      persona: quickJob.persona.trim(),
+      sellingPoints: quickJob.sellingPoints.split(/[、,，/]/).map((item) => item.trim()).filter(Boolean),
+      targetPlatforms: targetPlatforms.length > 0 ? targetPlatforms : ['小红书'],
+      status: '招聘中',
+      beisenUrl: quickJob.beisenUrl,
+      websiteUrl: quickJob.websiteUrl,
+    };
+    audit('创建岗位简报', job.title, {
+      ...data,
+      jobs: [job, ...data.jobs],
+      notifications: [
+        makeNotification('岗位简报已创建', `${job.title} 可用于生成渠道内容`, '内容运营', '提醒'),
+        ...data.notifications,
+      ],
+    });
+    setJobId(job.id);
+    setPlatform(job.targetPlatforms[0] ?? '小红书');
+    setQuickJob({ title: '', family: '岗位族群', city: '', level: '', type: '社招', persona: '', sellingPoints: '', targetPlatforms: '小红书、脉脉', beisenUrl: '', websiteUrl: '' });
   };
 
   const handleCreateTask = async () => {
@@ -1207,8 +1359,8 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
     <div className="page-grid">
       <section className="toolbar">
         <div>
-          <h1>内容运营</h1>
-          <p>AI 多平台生成、风险识别、审核状态流转、排期发布一体管理。</p>
+          <h1>内容工厂</h1>
+          <p>从岗位简报到渠道内容、审核、排期和发布检查，一页完成。</p>
         </div>
         <div className="toolbar-actions">
           <button onClick={() => downloadText('内容指标导入模板.csv', 'contentId,title,views,likes,comments,saves,shares,clicks\\n', 'text/csv;charset=utf-8')}><FileText size={16} />下载指标模板</button>
@@ -1220,6 +1372,23 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
           {(['内容', '选题', '排期'] as const).map((item) => (
             <button key={item} className={contentTab === item ? 'active' : ''} onClick={() => setContentTab(item)}>{item}</button>
           ))}
+        </div>
+      </section>
+
+      <section className="panel wide quick-brief">
+        <div className="panel-title"><h2>岗位内容简报</h2><ClipboardList size={18} /></div>
+        <div className="brief-grid">
+          <input value={quickJob.title} onChange={(event) => setQuickJob({ ...quickJob, title: event.target.value })} placeholder="岗位名称，例如 高级前端工程师" />
+          <input value={quickJob.city} onChange={(event) => setQuickJob({ ...quickJob, city: event.target.value })} placeholder="城市" />
+          <input value={quickJob.level} onChange={(event) => setQuickJob({ ...quickJob, level: event.target.value })} placeholder="级别" />
+          <select value={quickJob.type} onChange={(event) => setQuickJob({ ...quickJob, type: event.target.value as JobNeed['type'] })}>
+            <option>社招</option><option>校招</option><option>实习</option><option>职能</option>
+          </select>
+          <input value={quickJob.targetPlatforms} onChange={(event) => setQuickJob({ ...quickJob, targetPlatforms: event.target.value })} placeholder="目标渠道，用顿号分隔" />
+          <input value={quickJob.sellingPoints} onChange={(event) => setQuickJob({ ...quickJob, sellingPoints: event.target.value })} placeholder="岗位卖点，用顿号分隔" />
+          <input value={quickJob.persona} onChange={(event) => setQuickJob({ ...quickJob, persona: event.target.value })} placeholder="候选人画像/关注点" />
+          <input value={quickJob.beisenUrl} onChange={(event) => setQuickJob({ ...quickJob, beisenUrl: event.target.value })} placeholder="北森/ATS 投递链接" />
+          <button onClick={createQuickJob}><Plus size={16} />保存简报</button>
         </div>
       </section>
 
@@ -4744,7 +4913,7 @@ function renderSection(
 ) {
 	switch (section) {
 	    case '工作台':
-	      return <Dashboard data={data} audit={audit} openSection={openSection} />;
+	      return <OperationsHome data={data} openSection={openSection} />;
 	    case '招聘需求':
 	      return <Jobs data={data} audit={audit} />;
 	    case '内容运营':
@@ -4770,10 +4939,9 @@ function canAccessSection(section: Section, data: AppData, apiUser: ApiUser | nu
 
 export function App() {
   const [section, setSection] = useState<Section>('工作台');
-  const [navMode, setNavMode] = useState<'我的工作' | '全部模块'>('我的工作');
   const { data, update, audit, resetData, storageMode, apiUser, apiToken, authRequired, authError, login, logout } = useAppData();
   const permittedNavItems = navItems.filter(({ key }) => canAccessSection(key, data, apiUser));
-  const focusedNavItems = navMode === '我的工作' ? permittedNavItems.filter(({ key }) => operatorSections.has(key)) : permittedNavItems;
+  const focusedNavItems = permittedNavItems.filter(({ key }) => operatorSections.has(key));
   const visibleNavItems = focusedNavItems.length > 0 ? focusedNavItems : permittedNavItems;
   const activeSection = visibleNavItems.some(({ key }) => key === section) && canAccessSection(section, data, apiUser) ? section : visibleNavItems[0]?.key ?? '工作台';
   const myTasks = deriveTasks(data).filter((task) => !apiUser || task.owner === apiUser.name || task.owner === apiUser.username || task.owner === '未分配' || task.owner === '招聘专员' || apiUser.role === '系统管理员');
@@ -4787,31 +4955,26 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <div><Sparkles size={22} /></div>
-          <span>招聘运营助手<small>我的运营台</small></span>
+          <span>招聘运营助手<small>内容运营工作台</small></span>
         </div>
         <div className="sidebar-summary">
           <strong>{apiUser?.name ?? '当前用户'}</strong>
-          <span>{apiUser?.role ?? '本地视图'} · {myTasks.length} 项待办</span>
-        </div>
-        <div className="sidebar-segment">
-          {(['我的工作', '全部模块'] as const).map((mode) => (
-            <button key={mode} className={navMode === mode ? 'active' : ''} onClick={() => setNavMode(mode)}>{mode}</button>
-          ))}
+          <span>{apiUser?.role ?? '本地视图'} · {myTasks.length} 项内容运营待办</span>
         </div>
         <nav>
-          {visibleNavItems.map(({ key, icon: Icon }) => (
+          {visibleNavItems.map(({ key, label, note, icon: Icon }) => (
             <button key={key} className={activeSection === key ? 'active' : ''} onClick={() => setSection(key)}>
               <Icon size={18} />
-              {key}
+              <span>{label}<small>{note}</small></span>
             </button>
           ))}
         </nav>
         <div className="sidebar-footer">
-          <Badge tone="good">一期闭环版</Badge>
+          <Badge tone="good">核心闭环版</Badge>
           <Badge tone={storageMode === '本地API' ? 'good' : 'warn'}>{storageMode}</Badge>
           {apiUser && <small>{apiUser.name} · {apiUser.role}</small>}
           {apiUser && <button className="ghost" onClick={logout}>退出登录</button>}
-          <small>{navMode === '我的工作' ? '仅显示招聘运营日常模块' : '显示配置与管理模块'}</small>
+          <small>只保留内容生产、渠道数据和真实账号连接。</small>
         </div>
       </aside>
       <main>

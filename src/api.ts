@@ -25,6 +25,26 @@ export type RemoteLoadResult =
   | { status: 'unauthorized' }
   | { status: 'ok'; data: AppData; user?: ApiUser };
 
+export interface OpsSummary {
+  activeJobs: number;
+  inProduction: number;
+  pendingPublish: number;
+  published: number;
+  pendingMetrics: number;
+  totals: { views: number; interactions: number; clicks: number };
+  channels: Array<{
+    platform: string;
+    accountConnected: boolean;
+    accountName: string;
+    contentCount: number;
+    target: number;
+    views: number;
+    clicks: number;
+    status: string;
+  }>;
+  generatedAt: string;
+}
+
 export async function loginLocalApi(username: string, password: string) {
   const payload = await requestJson<{ token: string; user: ApiUser }>(`${API_BASE}/api/login`, 'POST', undefined, { username, password });
   return payload;
@@ -50,6 +70,10 @@ export async function saveRemoteData(data: AppData, token?: string) {
   } catch {
     return false;
   }
+}
+
+export async function loadOpsSummary(token?: string) {
+  return await requestJson<OpsSummary>(`${API_BASE}/api/ops/summary`, 'GET', token);
 }
 
 export async function testIntegrationConfig(integration: IntegrationConfig, token?: string) {

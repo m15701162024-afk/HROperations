@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, beforeEach } from 'vitest';
 import { App } from './App';
@@ -81,10 +81,10 @@ describe('招聘运营助手', () => {
   it('renders the main dashboard metrics', () => {
     render(<App />);
 
-    expect(screen.getByText('今日招聘运营概览')).toBeInTheDocument();
-    expect(screen.getByText('内容发布数量')).toBeInTheDocument();
-    expect(screen.getByText('招聘入口点击')).toBeInTheDocument();
-    expect(screen.getByText('我的工作')).toBeInTheDocument();
+    expect(screen.getByText('招聘内容运营指挥台')).toBeInTheDocument();
+    expect(screen.getByText('招聘中岗位')).toBeInTheDocument();
+    expect(screen.getByText('渠道点击')).toBeInTheDocument();
+    expect(screen.getByText('内容工厂')).toBeInTheDocument();
     expect(screen.queryByText('补齐MVP样例数据')).not.toBeInTheDocument();
   });
 
@@ -94,7 +94,7 @@ describe('招聘运营助手', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: /内容运营/ }));
+    await user.click(screen.getByRole('button', { name: /内容工厂/ }));
     await user.click(screen.getByRole('button', { name: /生成平台内容/ }));
 
     expect(screen.getByText('请先在账号与平台同步真实平台账号')).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe('招聘运营助手', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: /内容运营/ }));
+    await user.click(screen.getByRole('button', { name: /内容工厂/ }));
     await user.click(screen.getByRole('button', { name: /生成平台内容/ }));
     expect(screen.getByDisplayValue(/内容初稿/)).toBeInTheDocument();
 
@@ -132,62 +132,32 @@ describe('招聘运营助手', () => {
     expect(result.risks.length).toBeGreaterThan(1);
   });
 
-  it('runs candidate lead create/update/delete lifecycle from the GUI', async () => {
+  it('creates a job brief inside the content factory', async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: /线索池/ }));
-    await user.type(screen.getByPlaceholderText('姓名/昵称'), '生命周期候选人');
-    await user.type(screen.getByPlaceholderText('联系方式'), 'life-ui@example.com');
-    await user.click(screen.getByRole('button', { name: /保存线索/ }));
-
-    const row = screen.getByText('生命周期候选人').closest('tr');
-    expect(row).not.toBeNull();
-    await user.selectOptions(within(row as HTMLElement).getByDisplayValue('待联系'), '已联系');
-    expect(within(row as HTMLElement).getByDisplayValue('已联系')).toBeInTheDocument();
-
-    await user.click(within(row as HTMLElement).getByRole('button', { name: '删除' }));
-    expect(screen.queryByText('生命周期候选人')).not.toBeInTheDocument();
-  });
-
-  it('runs recruitment demand create/update/delete lifecycle from the GUI', async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    await user.click(screen.getByRole('button', { name: /招聘需求/ }));
-    await user.type(screen.getByPlaceholderText('岗位名称'), '生命周期测试招聘需求');
-    await user.type(screen.getByPlaceholderText('JD / 岗位描述'), '负责招聘运营平台真实业务闭环。');
-    await user.type(screen.getByPlaceholderText('候选人画像：年限、能力、关注点、求职顾虑'), '3-8 年运营或产品背景');
+    await user.click(screen.getByRole('button', { name: /内容工厂/ }));
+    await user.type(screen.getByPlaceholderText('岗位名称，例如 高级前端工程师'), '生命周期测试招聘需求');
+    await user.type(screen.getByPlaceholderText('候选人画像/关注点'), '3-8 年运营或产品背景');
     await user.type(screen.getByPlaceholderText('岗位卖点，用顿号分隔'), '真实业务、增长空间');
-    await user.click(screen.getByRole('button', { name: /保存岗位/ }));
+    await user.click(screen.getByRole('button', { name: /保存简报/ }));
 
-    await user.click(screen.getByRole('button', { name: '岗位库' }));
-    let row = screen.getByText('生命周期测试招聘需求').closest('tr');
-    expect(row).not.toBeNull();
-    await user.click(within(row as HTMLElement).getByRole('button', { name: '编辑' }));
-    await user.clear(screen.getByPlaceholderText('岗位名称'));
-    await user.type(screen.getByPlaceholderText('岗位名称'), '生命周期测试招聘需求-已更新');
-    await user.click(screen.getByRole('button', { name: /保存编辑/ }));
-
-    await user.click(screen.getByRole('button', { name: '岗位库' }));
-    row = screen.getByText('生命周期测试招聘需求-已更新').closest('tr');
-    expect(row).not.toBeNull();
-    await user.click(within(row as HTMLElement).getByRole('button', { name: '删除' }));
-    expect(screen.queryByText('生命周期测试招聘需求-已更新')).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue('生命周期测试招聘需求')).toBeInTheDocument();
   });
 
   it('keeps slim navigation and moves planning into content operations', async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(screen.queryByRole('button', { name: /素材资产/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /选题库/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /排期日历/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /导入中心/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /复盘报告/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /AI工作台/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /招聘需求/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /线索池/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /系统配置/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /运营首页/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /内容工厂/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /渠道数据/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /连接配置/ })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /内容运营/ }));
+    await user.click(screen.getByRole('button', { name: /内容工厂/ }));
     expect(screen.getByRole('button', { name: '选题' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '排期' })).toBeInTheDocument();
   });
