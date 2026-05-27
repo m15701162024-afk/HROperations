@@ -4811,7 +4811,8 @@ type ModuleScene = {
 
 function ModuleSceneDetails({ scene }: { scene: ModuleScene }) {
   return (
-    <div className="module-scene-details">
+    <details className="module-scene-details">
+      <summary>操作能力与数据指标</summary>
       <div>
         <strong>操作能力</strong>
         <div className="module-chips">
@@ -4824,7 +4825,7 @@ function ModuleSceneDetails({ scene }: { scene: ModuleScene }) {
           {scene.indicators.map((item) => <span key={item}>{item}</span>)}
         </div>
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -4903,7 +4904,7 @@ function ContentFactoryModule({ section, data, audit, apiToken, apiUser }: { sec
         <div className="module-tabs">
           {visibleScenes.map((scene) => (
             <button key={scene.id} className={activeScene.id === scene.id ? 'active' : ''} onClick={() => setActive(scene.id)}>
-              {scene.label}<small>{scene.note}</small>
+              {scene.label}
             </button>
           ))}
         </div>
@@ -4983,7 +4984,7 @@ function ChannelDataModule({ section, data, audit, apiToken, apiUser }: { sectio
         <div className="module-tabs">
           {visibleScenes.map((scene) => (
             <button key={scene.id} className={activeScene.id === scene.id ? 'active' : ''} onClick={() => setActive(scene.id)}>
-              {scene.label}<small>{scene.note}</small>
+              {scene.label}
             </button>
           ))}
         </div>
@@ -5061,7 +5062,7 @@ function ConnectionConfigModule({ section, data, update, audit, resetData, apiTo
         <div className="module-tabs">
           {visibleScenes.map((scene) => (
             <button key={scene.id} className={activeScene.id === scene.id ? 'active' : ''} onClick={() => setActive(scene.id)}>
-              {scene.label}<small>{scene.note}</small>
+              {scene.label}
             </button>
           ))}
         </div>
@@ -5142,10 +5143,10 @@ export function App() {
           <span>{apiUser?.role ?? '本地视图'} · {myTasks.length} 项待办</span>
         </div>
         <nav>
-          {visibleNavItems.map(({ key, label, note, icon: Icon }) => (
+          {visibleNavItems.map(({ key, label, icon: Icon }) => (
             <button key={key} className={activeNavSection === key ? 'active' : ''} onClick={() => setSection(key)}>
               <Icon size={18} />
-              <span>{label}<small>{note}</small></span>
+              <span>{label}</span>
             </button>
           ))}
         </nav>

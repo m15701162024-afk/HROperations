@@ -282,9 +282,9 @@ button:disabled {
   gap: 10px;
   color: #5f666b;
   background: transparent;
-  padding: 8px 10px;
+  padding: 0 10px;
   min-width: 0;
-  min-height: 52px;
+  min-height: 40px;
   border: 1px solid transparent;
   font-weight: 500;
 }
@@ -992,8 +992,6 @@ textarea {
 .module-tabs button {
   width: auto;
   min-height: 32px;
-  display: grid;
-  gap: 2px;
   color: #5f666b;
   background: transparent;
   border: 1px solid transparent;
@@ -1018,8 +1016,8 @@ textarea {
 
 .module-hub {
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 10px;
+  padding: 12px;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1028,10 +1026,24 @@ textarea {
 
 .module-hub h1 {
   margin: 4px 0 0;
-  font-size: 24px;
+  font-size: 22px;
 }
 
 .module-scene-details {
+  padding: 8px 10px;
+  background: #f7f6f2;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.module-scene-details summary {
+  cursor: pointer;
+  color: #4f5c66;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.module-scene-details[open] {
   display: grid;
   gap: 10px;
 }
