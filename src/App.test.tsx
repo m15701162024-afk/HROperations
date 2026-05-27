@@ -115,7 +115,7 @@ describe('招聘运营助手', () => {
     render(<App />);
 
     await user.click(screen.getByRole('button', { name: /渠道数据/ }));
-    await user.click(screen.getByRole('button', { name: /线索池/ }));
+    await user.click(screen.getByRole('button', { name: /线索转化/ }));
     await user.type(screen.getByPlaceholderText('姓名/昵称'), '生命周期候选人');
     await user.type(screen.getByPlaceholderText('联系方式'), 'life-ui@example.com');
     await user.click(screen.getByRole('button', { name: /保存线索/ }));
@@ -134,7 +134,7 @@ describe('招聘运营助手', () => {
     render(<App />);
 
     await user.click(screen.getByRole('button', { name: /内容工厂/ }));
-    await user.click(screen.getByRole('button', { name: /岗位需求/ }));
+    await user.click(screen.getByRole('button', { name: /岗位经营/ }));
     await user.type(screen.getByPlaceholderText('岗位名称'), '生命周期测试招聘需求');
     await user.type(screen.getByPlaceholderText('JD / 岗位描述'), '负责招聘运营平台真实业务闭环。');
     await user.type(screen.getByPlaceholderText('候选人画像：年限、能力、关注点、求职顾虑'), '3-8 年运营或产品背景');
@@ -161,7 +161,7 @@ describe('招聘运营助手', () => {
     render(<App />);
 
     await user.click(screen.getByRole('button', { name: /内容工厂/ }));
-    await user.click(screen.getByRole('button', { name: /素材资产/ }));
+    await user.click(screen.getByRole('button', { name: /素材管理/ }));
     await user.type(screen.getByPlaceholderText('素材名称'), '生命周期测试素材');
     await user.click(screen.getByRole('button', { name: '保存' }));
 

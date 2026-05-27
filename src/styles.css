@@ -1031,13 +1031,25 @@ textarea {
   font-size: 24px;
 }
 
-.module-indicators {
+.module-scene-details {
+  display: grid;
+  gap: 10px;
+}
+
+.module-scene-details strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.module-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.module-indicators span {
+.module-chips span {
   padding: 5px 8px;
   color: #4f5c66;
   background: #f7f6f2;

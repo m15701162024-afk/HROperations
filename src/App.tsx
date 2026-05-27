@@ -4800,37 +4800,98 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
   );
 }
 
-type ModuleTab = { key: Section; label: string; note: string };
+type ModuleScene = {
+  id: string;
+  section: Section;
+  label: string;
+  note: string;
+  abilities: string[];
+  indicators: string[];
+};
 
-function ModuleIndicatorStrip({ section }: { section: Section }) {
+function ModuleSceneDetails({ scene }: { scene: ModuleScene }) {
   return (
-    <div className="module-indicators">
-      {sectionDataIndicators[section].map((item) => <span key={item}>{item}</span>)}
+    <div className="module-scene-details">
+      <div>
+        <strong>操作能力</strong>
+        <div className="module-chips">
+          {scene.abilities.map((item) => <span key={item}>{item}</span>)}
+        </div>
+      </div>
+      <div>
+        <strong>数据指标</strong>
+        <div className="module-chips">
+          {scene.indicators.map((item) => <span key={item}>{item}</span>)}
+        </div>
+      </div>
     </div>
   );
 }
 
-function visibleTabsFor(tabs: ModuleTab[], data: AppData, apiUser: ApiUser | null) {
-  const visible = tabs.filter((tab) => canAccessSection(tab.key, data, apiUser));
-  return visible.length > 0 ? visible : tabs.slice(0, 1);
+function visibleScenesFor(scenes: ModuleScene[], data: AppData, apiUser: ApiUser | null) {
+  const visible = scenes.filter((scene) => canAccessSection(scene.section, data, apiUser));
+  return visible.length > 0 ? visible : scenes.slice(0, 1);
 }
 
 function ContentFactoryModule({ section, data, audit, apiToken, apiUser }: { section: Section; data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string; apiUser: ApiUser | null }) {
-  const tabs: ModuleTab[] = [
-    { key: '内容运营' as Section, label: '内容生产', note: '生成、审核、发布' },
-    { key: '招聘需求' as Section, label: '岗位需求', note: '岗位源头与入口' },
-    { key: '选题库' as Section, label: '选题库', note: '渠道选题储备' },
-    { key: '排期日历' as Section, label: '排期日历', note: '发布节奏' },
-    { key: '素材资产' as Section, label: '素材资产', note: '案例、图片、授权' },
-    { key: 'AI工作台' as Section, label: 'AI工作台', note: '提示词与模型任务' },
+  const scenes: ModuleScene[] = [
+    {
+      id: 'job-ops',
+      section: '招聘需求',
+      label: '岗位经营',
+      note: '岗位源头、入口、状态',
+      abilities: ['岗位录入', '岗位编辑', '批量导入', '状态管理', '北森/官网入口维护'],
+      indicators: sectionDataIndicators.招聘需求,
+    },
+    {
+      id: 'topic-planning',
+      section: '选题库',
+      label: '选题策划',
+      note: '岗位转选题',
+      abilities: ['岗位生成选题', '渠道选题储备', '选题转内容', '平台选题管理'],
+      indicators: sectionDataIndicators.选题库,
+    },
+    {
+      id: 'content-production',
+      section: '内容运营',
+      label: '内容生产',
+      note: '生成、审核、发布',
+      abilities: ['多平台内容生成', '风险扫描', '内容任务创建', '版本修订', '审核流转', '发布前检查'],
+      indicators: sectionDataIndicators.内容运营,
+    },
+    {
+      id: 'publish-calendar',
+      section: '排期日历',
+      label: '发布排期',
+      note: '节奏和冲突',
+      abilities: ['内容排期查看', '平台/账号筛选', '排期日期调整', '发布冲突检查'],
+      indicators: sectionDataIndicators.排期日历,
+    },
+    {
+      id: 'asset-management',
+      section: '素材资产',
+      label: '素材管理',
+      note: '案例、图片、授权',
+      abilities: ['素材库', '授权记录', '素材上传', '采集表', '模板案例库'],
+      indicators: sectionDataIndicators.素材资产,
+    },
+    {
+      id: 'ai-assist',
+      section: 'AI工作台',
+      label: '智能辅助',
+      note: '提示词与模型任务',
+      abilities: ['提示词模板', '模型任务执行', '模型运行记录', '生成内容辅助'],
+      indicators: sectionDataIndicators.AI工作台,
+    },
   ];
-  const visibleTabs = visibleTabsFor(tabs, data, apiUser);
-  const initial = visibleTabs.some((tab) => tab.key === section) ? section : visibleTabs[0].key;
-  const [active, setActive] = useState<Section>(initial);
+  const visibleScenes = visibleScenesFor(scenes, data, apiUser);
+  const initial = visibleScenes.find((scene) => scene.section === section)?.id ?? visibleScenes[0].id;
+  const [active, setActive] = useState(initial);
+  const activeScene = visibleScenes.find((scene) => scene.id === active) ?? visibleScenes[0];
 
   useEffect(() => {
-    setActive(visibleTabs.some((tab) => tab.key === section) ? section : visibleTabs[0].key);
-  }, [section, visibleTabs.map((tab) => tab.key).join('|')]);
+    setActive(visibleScenes.find((scene) => scene.section === section)?.id ?? visibleScenes[0].id);
+  }, [section, visibleScenes.map((scene) => scene.id).join('|')]);
 
   return (
     <div className="page-grid">
@@ -4840,40 +4901,77 @@ function ContentFactoryModule({ section, data, audit, apiToken, apiUser }: { sec
           <h1>把岗位需求变成可发布的渠道内容</h1>
         </div>
         <div className="module-tabs">
-          {visibleTabs.map((tab) => (
-            <button key={tab.key} className={active === tab.key ? 'active' : ''} onClick={() => setActive(tab.key)}>
-              {tab.label}<small>{tab.note}</small>
+          {visibleScenes.map((scene) => (
+            <button key={scene.id} className={activeScene.id === scene.id ? 'active' : ''} onClick={() => setActive(scene.id)}>
+              {scene.label}<small>{scene.note}</small>
             </button>
           ))}
         </div>
-        <ModuleIndicatorStrip section={active} />
+        <ModuleSceneDetails scene={activeScene} />
       </section>
       <div className="wide embedded-module">
-        {active === '内容运营' && <ContentOps data={data} audit={audit} apiToken={apiToken} />}
-        {active === '招聘需求' && <Jobs data={data} audit={audit} />}
-        {active === '选题库' && <TopicLibrary data={data} audit={audit} />}
-        {active === '排期日历' && <ScheduleCalendar data={data} audit={audit} />}
-        {active === '素材资产' && <Assets data={data} audit={audit} apiToken={apiToken} />}
-        {active === 'AI工作台' && <AiWorkbench data={data} audit={audit} apiToken={apiToken} />}
+        {activeScene.section === '内容运营' && <ContentOps data={data} audit={audit} apiToken={apiToken} />}
+        {activeScene.section === '招聘需求' && <Jobs data={data} audit={audit} />}
+        {activeScene.section === '选题库' && <TopicLibrary data={data} audit={audit} />}
+        {activeScene.section === '排期日历' && <ScheduleCalendar data={data} audit={audit} />}
+        {activeScene.section === '素材资产' && <Assets data={data} audit={audit} apiToken={apiToken} />}
+        {activeScene.section === 'AI工作台' && <AiWorkbench data={data} audit={audit} apiToken={apiToken} />}
       </div>
     </div>
   );
 }
 
 function ChannelDataModule({ section, data, audit, apiToken, apiUser }: { section: Section; data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string; apiUser: ApiUser | null }) {
-  const tabs: ModuleTab[] = [
-    { key: '数据分析' as Section, label: '渠道分析', note: '漏斗、归因、ROI' },
-    { key: '导入中心' as Section, label: '导入中心', note: '平台指标与字段映射' },
-    { key: '线索池' as Section, label: '线索池', note: '候选人线索跟进' },
-    { key: '复盘报告' as Section, label: '复盘报告', note: '周报与改进动作' },
+  const scenes: ModuleScene[] = [
+    {
+      id: 'data-ingestion',
+      section: '导入中心',
+      label: '数据接入',
+      note: '导入、映射、预检',
+      abilities: ['CSV 导入', '字段映射', '数据预检', '重复识别', '未归因识别'],
+      indicators: sectionDataIndicators.导入中心,
+    },
+    {
+      id: 'channel-performance',
+      section: '数据分析',
+      label: '渠道表现',
+      note: '平台、账号、内容效果',
+      abilities: ['平台效果分析', '账号效果分析', '内容/岗位下钻', 'ROI 分析'],
+      indicators: ['曝光', '互动', '点击', 'ROI', '数据质量问题'],
+    },
+    {
+      id: 'conversion-attribution',
+      section: '数据分析',
+      label: '转化归因',
+      note: '漏斗和北森结果',
+      abilities: ['漏斗归因', '北森结果关联', '岗位归因', '内容归因'],
+      indicators: ['投递', '有效简历', '面试', 'Offer', '入职'],
+    },
+    {
+      id: 'lead-conversion',
+      section: '线索池',
+      label: '线索转化',
+      note: '线索跟进和转北森',
+      abilities: ['线索录入', '线索导入', '重复识别', '负责人分配', '批量转北森'],
+      indicators: sectionDataIndicators.线索池,
+    },
+    {
+      id: 'review-decision',
+      section: '复盘报告',
+      label: '复盘决策',
+      note: '报告和行动项',
+      abilities: ['周报/月报生成', '机会风险建议', '行动项管理', '高表现内容特征提炼'],
+      indicators: sectionDataIndicators.复盘报告,
+    },
   ];
-  const visibleTabs = visibleTabsFor(tabs, data, apiUser);
-  const initial = visibleTabs.some((tab) => tab.key === section) ? section : visibleTabs[0].key;
-  const [active, setActive] = useState<Section>(initial);
+  const visibleScenes = visibleScenesFor(scenes, data, apiUser);
+  const initial = visibleScenes.find((scene) => scene.section === section)?.id ?? visibleScenes[0].id;
+  const [active, setActive] = useState(initial);
+  const activeScene = visibleScenes.find((scene) => scene.id === active) ?? visibleScenes[0];
 
   useEffect(() => {
-    setActive(visibleTabs.some((tab) => tab.key === section) ? section : visibleTabs[0].key);
-  }, [section, visibleTabs.map((tab) => tab.key).join('|')]);
+    setActive(visibleScenes.find((scene) => scene.section === section)?.id ?? visibleScenes[0].id);
+  }, [section, visibleScenes.map((scene) => scene.id).join('|')]);
 
   return (
     <div className="page-grid">
@@ -4883,19 +4981,19 @@ function ChannelDataModule({ section, data, audit, apiToken, apiUser }: { sectio
           <h1>用渠道数据决定下一轮运营动作</h1>
         </div>
         <div className="module-tabs">
-          {visibleTabs.map((tab) => (
-            <button key={tab.key} className={active === tab.key ? 'active' : ''} onClick={() => setActive(tab.key)}>
-              {tab.label}<small>{tab.note}</small>
+          {visibleScenes.map((scene) => (
+            <button key={scene.id} className={activeScene.id === scene.id ? 'active' : ''} onClick={() => setActive(scene.id)}>
+              {scene.label}<small>{scene.note}</small>
             </button>
           ))}
         </div>
-        <ModuleIndicatorStrip section={active} />
+        <ModuleSceneDetails scene={activeScene} />
       </section>
       <div className="wide embedded-module">
-        {active === '数据分析' && <Analytics data={data} audit={audit} />}
-        {active === '导入中心' && <ImportCenter data={data} audit={audit} />}
-        {active === '线索池' && <LeadPool data={data} audit={audit} />}
-        {active === '复盘报告' && <Reports data={data} audit={audit} apiToken={apiToken} />}
+        {activeScene.section === '数据分析' && <Analytics data={data} audit={audit} />}
+        {activeScene.section === '导入中心' && <ImportCenter data={data} audit={audit} />}
+        {activeScene.section === '线索池' && <LeadPool data={data} audit={audit} />}
+        {activeScene.section === '复盘报告' && <Reports data={data} audit={audit} apiToken={apiToken} />}
       </div>
     </div>
   );
@@ -4910,17 +5008,48 @@ function ConnectionConfigModule({ section, data, update, audit, resetData, apiTo
   apiToken?: string;
   apiUser: ApiUser | null;
 }) {
-  const tabs: ModuleTab[] = [
-    { key: '账号与平台' as Section, label: '账号与API', note: '平台账号、授权、同步' },
-    { key: '系统配置' as Section, label: '系统配置', note: '权限、流程、策略' },
+  const scenes: ModuleScene[] = [
+    {
+      id: 'platform-connection',
+      section: '账号与平台',
+      label: '平台连接',
+      note: '账号、授权、健康',
+      abilities: ['平台账号管理', '授权状态维护', '账号健康检查', '同步日志查看'],
+      indicators: ['平台账号数', '授权状态', '账号健康分', '同步成功率'],
+    },
+    {
+      id: 'recruitment-entry',
+      section: '账号与平台',
+      label: '招聘入口',
+      note: '入口和落地页',
+      abilities: ['招聘入口配置', '落地页管理', '访问点击统计', '留资回收'],
+      indicators: ['招聘入口点击', '落地页访问', '落地页点击', '落地页留资'],
+    },
+    {
+      id: 'external-integration',
+      section: '账号与平台',
+      label: '外部集成',
+      note: '平台、北森、通知、模型',
+      abilities: ['北森集成', '企业微信集成', '飞书集成', '平台 API 配置', '大模型 API 测试'],
+      indicators: ['集成数量', '连接状态', '同步成功率', '失败原因'],
+    },
+    {
+      id: 'system-governance',
+      section: '系统配置',
+      label: '系统治理',
+      note: '权限、流程、策略',
+      abilities: ['角色权限', '用户管理', '审核流程', '敏感词规则', '运营参数', '系统健康和备份'],
+      indicators: sectionDataIndicators.系统配置,
+    },
   ];
-  const visibleTabs = visibleTabsFor(tabs, data, apiUser);
-  const initial = visibleTabs.some((tab) => tab.key === section) ? section : visibleTabs[0].key;
-  const [active, setActive] = useState<Section>(initial);
+  const visibleScenes = visibleScenesFor(scenes, data, apiUser);
+  const initial = visibleScenes.find((scene) => scene.section === section)?.id ?? visibleScenes[0].id;
+  const [active, setActive] = useState(initial);
+  const activeScene = visibleScenes.find((scene) => scene.id === active) ?? visibleScenes[0];
 
   useEffect(() => {
-    setActive(visibleTabs.some((tab) => tab.key === section) ? section : visibleTabs[0].key);
-  }, [section, visibleTabs.map((tab) => tab.key).join('|')]);
+    setActive(visibleScenes.find((scene) => scene.section === section)?.id ?? visibleScenes[0].id);
+  }, [section, visibleScenes.map((scene) => scene.id).join('|')]);
 
   return (
     <div className="page-grid">
@@ -4930,17 +5059,17 @@ function ConnectionConfigModule({ section, data, update, audit, resetData, apiTo
           <h1>管理真实平台账号、接口和系统规则</h1>
         </div>
         <div className="module-tabs">
-          {visibleTabs.map((tab) => (
-            <button key={tab.key} className={active === tab.key ? 'active' : ''} onClick={() => setActive(tab.key)}>
-              {tab.label}<small>{tab.note}</small>
+          {visibleScenes.map((scene) => (
+            <button key={scene.id} className={activeScene.id === scene.id ? 'active' : ''} onClick={() => setActive(scene.id)}>
+              {scene.label}<small>{scene.note}</small>
             </button>
           ))}
         </div>
-        <ModuleIndicatorStrip section={active} />
+        <ModuleSceneDetails scene={activeScene} />
       </section>
       <div className="wide embedded-module">
-        {active === '账号与平台' && <Accounts data={data} audit={audit} apiToken={apiToken} />}
-        {active === '系统配置' && <SettingsPage data={data} update={update} resetData={resetData} apiToken={apiToken} />}
+        {activeScene.section === '账号与平台' && <Accounts data={data} audit={audit} apiToken={apiToken} />}
+        {activeScene.section === '系统配置' && <SettingsPage data={data} update={update} resetData={resetData} apiToken={apiToken} />}
       </div>
     </div>
   );
