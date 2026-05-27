@@ -1,5 +1,5 @@
 import { platformPositioning, platforms } from './data';
-import type { AccountHealthSnapshot, AppData, BeisenResult, CandidateLead, ContentQualityScore, ContentTask, DataExplanation, JobNeed, Platform, TaskItem, TopicItem } from './types';
+import type { AccountHealthSnapshot, AppData, BeisenResult, CandidateLead, ContentQualityScore, ContentTask, DataExplanation, IntegrationConfig, JobNeed, ModelApiConfig, Platform, TaskItem, TopicItem } from './types';
 
 export function downloadText(filename: string, text: string, type = 'text/plain;charset=utf-8') {
   const blob = new Blob([text], { type });
@@ -15,6 +15,58 @@ export function downloadText(filename: string, text: string, type = 'text/plain;
 
 export function exportJson(filename: string, data: unknown) {
   downloadText(filename, JSON.stringify(data, null, 2), 'application/json;charset=utf-8');
+}
+
+export interface ExternalReadiness {
+  status: '已闭环' | '待复验' | '需补配置';
+  score: number;
+  checks: Array<{ label: string; passed: boolean; detail: string }>;
+  nextAction: string;
+}
+
+export function evaluateIntegrationReadiness(config: IntegrationConfig): ExternalReadiness {
+  const extra = safeParseJson(config.extraConfig);
+  const needsSecret = config.authMode === 'Token' || config.authMode === 'OAuth';
+  const checks = [
+    { label: '接口地址', passed: Boolean(config.endpoint), detail: config.endpoint || '未填写接口地址或 Webhook' },
+    { label: '鉴权方式', passed: config.authMode !== '未配置', detail: config.authMode },
+    { label: '密钥凭证', passed: !needsSecret || Boolean(config.apiKey), detail: needsSecret ? (config.apiKey ? 'Token 已保存' : 'Token 未保存') : '当前鉴权方式不强制 Token' },
+    { label: '扩展配置', passed: config.type !== '平台API' || Boolean(extra), detail: config.extraConfig ? '已保存 JSON 配置' : '未填写字段、路径或分页配置' },
+    { label: '连接测试', passed: config.status === '已连接' || Boolean(config.lastSyncAt), detail: config.lastMessage || config.status },
+  ];
+  return summarizeExternalReadiness(checks);
+}
+
+export function evaluateModelApiReadiness(config: ModelApiConfig): ExternalReadiness {
+  const checks = [
+    { label: 'Base URL', passed: Boolean(config.baseUrl), detail: config.baseUrl || '未填写 Base URL' },
+    { label: 'API Key', passed: Boolean(config.apiKey), detail: config.apiKey ? 'Token 已保存' : 'Token 未保存' },
+    { label: '模型名称', passed: Boolean(config.model), detail: config.model || '未填写模型名称' },
+    { label: '业务用途', passed: config.enabledFor.length > 0, detail: config.enabledFor.join('、') || '未选择用途' },
+    { label: '连接测试', passed: config.status === '已连接' || Boolean(config.lastTestAt), detail: config.lastMessage || config.status },
+  ];
+  return summarizeExternalReadiness(checks);
+}
+
+function summarizeExternalReadiness(checks: ExternalReadiness['checks']): ExternalReadiness {
+  const passed = checks.filter((item) => item.passed).length;
+  const score = Math.round((passed / checks.length) * 100);
+  const missing = checks.filter((item) => !item.passed).map((item) => item.label);
+  return {
+    status: passed === checks.length ? '已闭环' : passed >= checks.length - 1 ? '待复验' : '需补配置',
+    score,
+    checks,
+    nextAction: missing.length ? `补齐：${missing.join('、')}` : '配置、测试、异常说明和复验记录已闭环',
+  };
+}
+
+function safeParseJson(raw?: string) {
+  if (!raw?.trim()) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
 }
 
 export function readJsonFile<T>(file: File): Promise<T> {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildAnalyticsDrill } from './analytics';
 import { emptyData, scanRisks } from './data';
 import type { AppData, ContentTask, JobNeed, PlatformAccount } from './types';
-import { applyMetricsCsv, buildReportMarkdown, calculateAccountHealth, deriveTasks, detectCalendarConflicts, findDuplicateLead, generateTopicsFromJob, parseJobCsv, parseLeadCsv, scoreContentQuality } from './utils';
+import { applyMetricsCsv, buildReportMarkdown, calculateAccountHealth, deriveTasks, detectCalendarConflicts, evaluateIntegrationReadiness, evaluateModelApiReadiness, findDuplicateLead, generateTopicsFromJob, parseJobCsv, parseLeadCsv, scoreContentQuality } from './utils';
 
 const job: JobNeed = {
   id: 'job-mvp',
@@ -93,5 +93,26 @@ const scenarios: Array<[string, () => boolean]> = [
 describe('模块主流程 MVP 自动化验收', () => {
   it.each(scenarios)('%s 至少有一条主流程测试', (_moduleName, run) => {
     expect(run()).toBe(true);
+  });
+
+  it('keeps external platform and model API MVP readiness measurable in product', () => {
+    const fixture = dataFixture();
+    const integrationReadiness = evaluateIntegrationReadiness({
+      ...fixture.integrations[0],
+      status: '已连接',
+      lastSyncAt: '2026-05-27 10:00:00',
+      lastMessage: '连接测试通过',
+    });
+    const modelReadiness = evaluateModelApiReadiness({
+      ...fixture.modelApis[0],
+      status: '已连接',
+      lastTestAt: '2026-05-27 10:00:00',
+      lastMessage: 'DeepSeek API 连接测试通过',
+    });
+
+    expect(integrationReadiness.status).toBe('已闭环');
+    expect(integrationReadiness.score).toBe(100);
+    expect(modelReadiness.status).toBe('已闭环');
+    expect(modelReadiness.score).toBe(100);
   });
 });

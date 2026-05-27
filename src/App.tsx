@@ -32,7 +32,7 @@ import { buildMvpSeedData, emptyData, generateContent, nextStatus, platformPosit
 import { evaluateMvpMatrix, mvpReportMarkdown, summarizeMvp } from './mvp';
 import type { AccountType, AppData, AppSection, AssetItem, BeisenResult, CalendarMilestone, CandidateLead, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, LeadFollowUp, ModelApiConfig, NotificationItem, OperationSettings, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, TaskItem, TopicItem, UserProfile, WorkflowRule } from './types';
 import type { ImportRun, ModelRunLog, PluginRule, PromptTemplate, ReportAction, ReviewMention } from './types';
-import { applyMetricsCsv, buildDataExplanations, buildPlatformStrategy, buildRecommendations, buildReportMarkdown, calculateAccountHealth, calculateRoi, deriveTasks, detectCalendarConflicts, downloadText, exportJson, findDuplicateLead, generateTopicsFromJob, parseBeisenCsv, parseJobCsv, parseLeadCsv, readJsonFile, scoreContentQuality, toCsv } from './utils';
+import { applyMetricsCsv, buildDataExplanations, buildPlatformStrategy, buildRecommendations, buildReportMarkdown, calculateAccountHealth, calculateRoi, deriveTasks, detectCalendarConflicts, downloadText, evaluateIntegrationReadiness, evaluateModelApiReadiness, exportJson, findDuplicateLead, generateTopicsFromJob, parseBeisenCsv, parseJobCsv, parseLeadCsv, readJsonFile, scoreContentQuality, toCsv } from './utils';
 
 type Section = AppSection;
 
@@ -1718,6 +1718,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
         ...item,
         status: result.status,
         lastSyncAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+        lastMessage: result.message,
       } : item),
       notifications: [
         makeNotification('集成连接测试', `${target.name}：${result.message}`, '账号与平台', result.ok ? '提醒' : '预警'),
@@ -2241,6 +2242,20 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
               <span>{item.authMode} · {item.endpoint || '未填写接口地址'} · {item.apiKey ? '已配置密钥' : '未配置密钥'}</span>
               {item.lastMessage && <span>最近结果：{item.lastMessage}</span>}
               <Badge tone={item.status === '已连接' ? 'good' : item.status === '连接失败' ? 'danger' : 'warn'}>{item.status}</Badge>
+              {(() => {
+                const readiness = evaluateIntegrationReadiness(item);
+                return (
+                  <div className="mvp-readiness">
+                    <strong>MVP闭环 {readiness.score}% · {readiness.status}</strong>
+                    <span>{readiness.nextAction}</span>
+                    <div>
+                      {readiness.checks.map((check) => (
+                        <small key={check.label} className={check.passed ? 'ok' : 'warn'}>{check.label}</small>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="card-actions-inline">
                 <button className="ghost" onClick={() => void testIntegration(item.id)}>测试连接</button>
                 {item.type === '北森' && <button className="ghost" onClick={() => void syncBeisenLeads(item.id)}>同步线索</button>}
@@ -3820,7 +3835,7 @@ function AiWorkbench({ data, audit, apiToken }: { data: AppData; audit: (action:
     const result = await testModelApiConfig(target, apiToken);
     audit('测试统一大模型配置', `${target.name}：${result.message}`, {
       ...data,
-      modelApis: data.modelApis.map((item) => item.id === id ? { ...item, status: result.status, lastTestAt: nowText() } : item),
+      modelApis: data.modelApis.map((item) => item.id === id ? { ...item, status: result.status, lastTestAt: nowText(), lastMessage: result.message } : item),
       notifications: [makeNotification('大模型连接测试', `${target.name}：${result.message}`, 'AI工作台', result.ok ? '提醒' : '预警'), ...data.notifications],
     });
   };
@@ -3974,6 +3989,21 @@ function AiWorkbench({ data, audit, apiToken }: { data: AppData; audit: (action:
               <span>用途：{item.enabledFor.join('、')}</span>
               <Badge tone={item.status === '已连接' ? 'good' : item.status === '连接失败' ? 'danger' : 'warn'}>{item.status}</Badge>
               {item.lastTestAt && <span>最近测试：{item.lastTestAt}</span>}
+              {item.lastMessage && <span>最近结果：{item.lastMessage}</span>}
+              {(() => {
+                const readiness = evaluateModelApiReadiness(item);
+                return (
+                  <div className="mvp-readiness">
+                    <strong>MVP闭环 {readiness.score}% · {readiness.status}</strong>
+                    <span>{readiness.nextAction}</span>
+                    <div>
+                      {readiness.checks.map((check) => (
+                        <small key={check.label} className={check.passed ? 'ok' : 'warn'}>{check.label}</small>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="card-actions-inline">
                 <button className="ghost" onClick={() => void testWorkbenchModelApi(item.id)}>测试连接</button>
                 <button className="ghost" onClick={() => removeWorkbenchModelApi(item.id)}>删除</button>
@@ -4276,6 +4306,7 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
         ...item,
         status: result.status,
         lastTestAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+        lastMessage: result.message,
       } : item),
       notifications: [
         makeNotification('大模型 API 测试', `${target.name}：${result.message}`, '系统配置', result.ok ? '提醒' : '预警'),
@@ -4519,6 +4550,21 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
               <span>密钥：{item.apiKey ? '已配置' : '未配置'}</span>
               <Badge tone={item.status === '已连接' ? 'good' : item.status === '连接失败' ? 'danger' : 'warn'}>{item.status}</Badge>
               {item.lastTestAt && <span>最近测试：{item.lastTestAt}</span>}
+              {item.lastMessage && <span>最近结果：{item.lastMessage}</span>}
+              {(() => {
+                const readiness = evaluateModelApiReadiness(item);
+                return (
+                  <div className="mvp-readiness">
+                    <strong>MVP闭环 {readiness.score}% · {readiness.status}</strong>
+                    <span>{readiness.nextAction}</span>
+                    <div>
+                      {readiness.checks.map((check) => (
+                        <small key={check.label} className={check.passed ? 'ok' : 'warn'}>{check.label}</small>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="card-actions-inline">
                 <button className="ghost" onClick={() => void testModelApi(item.id)}>测试连接</button>
                 <button className="ghost" onClick={() => removeModelApi(item.id)}>删除</button>

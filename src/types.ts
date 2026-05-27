@@ -307,6 +307,7 @@ export interface ModelApiConfig {
   enabledFor: Array<'内容生成' | '风险识别' | '复盘建议' | '标题推荐'>;
   status: '未配置' | '待验证' | '已连接' | '连接失败';
   lastTestAt?: string;
+  lastMessage?: string;
 }
 
 export interface LandingPage {
