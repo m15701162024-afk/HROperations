@@ -71,15 +71,16 @@ const sectionPermissions: Record<Section, string> = {
 
 const operatorSections = new Set<Section>(['工作台', '招聘需求', '选题库', '内容运营', '排期日历', '线索池', '素材资产', '数据分析', '复盘报告']);
 const mvpSeedKey = 'hr-assistant-mvp-seeded-v1';
+const dataModeKey = 'hr-assistant-data-mode';
+const currentDataMode = 'real-v2-empty-platform-data';
 
 function isLegacyDemoData(data: Partial<AppData>) {
-  if (localStorage.getItem(mvpSeedKey) === 'true') return false;
   const demoJobIds = new Set(['job-1', 'job-2', 'job-3']);
   const demoContentIds = new Set(['ct-1', 'ct-2', 'ct-3']);
   return Boolean(
     data.jobs?.some((job) => demoJobIds.has(job.id))
     || data.contents?.some((content) => demoContentIds.has(content.id))
-    || data.auditLogs?.some((log) => log.action === '初始化种子数据'),
+    || data.auditLogs?.some((log) => log.action === '初始化种子数据' || log.action === '补齐MVP样例数据'),
   );
 }
 
@@ -91,31 +92,22 @@ function useAppData() {
   const [apiToken, setApiToken] = useState(() => localStorage.getItem('hr-assistant-api-token') ?? '');
   const saveQueue = useRef(Promise.resolve(false));
   const [data, setData] = useState<AppData>(() => {
-    const mode = localStorage.getItem('hr-assistant-data-mode');
-    if (mode !== 'real-v1') {
-      const seeded = buildMvpSeedData(emptyData);
-      localStorage.setItem(mvpSeedKey, 'true');
-      localStorage.setItem('hr-assistant-data-mode', 'real-v1');
-      localStorage.setItem('hr-assistant-data', JSON.stringify(seeded));
-      return seeded;
+    const mode = localStorage.getItem(dataModeKey);
+    if (mode !== currentDataMode) {
+      localStorage.removeItem(mvpSeedKey);
+      localStorage.setItem(dataModeKey, currentDataMode);
+      localStorage.setItem('hr-assistant-data', JSON.stringify(emptyData));
+      return emptyData;
     }
     const stored = localStorage.getItem('hr-assistant-data');
-    if (!stored) return buildMvpSeedData(emptyData);
+    if (!stored) return emptyData;
     const parsed = JSON.parse(stored) as Partial<AppData>;
     if (isLegacyDemoData(parsed)) {
-      const seeded = buildMvpSeedData(emptyData);
-      localStorage.setItem(mvpSeedKey, 'true');
-      localStorage.setItem('hr-assistant-data', JSON.stringify(seeded));
-      return seeded;
+      localStorage.removeItem(mvpSeedKey);
+      localStorage.setItem('hr-assistant-data', JSON.stringify(emptyData));
+      return emptyData;
     }
-    const normalized = normalizeAppData(parsed);
-    if (localStorage.getItem(mvpSeedKey) !== 'true') {
-      const seeded = buildMvpSeedData(normalized);
-      localStorage.setItem(mvpSeedKey, 'true');
-      localStorage.setItem('hr-assistant-data', JSON.stringify(seeded));
-      return seeded;
-    }
-    return normalized;
+    return normalizeAppData(parsed);
   });
 
   useEffect(() => {
@@ -128,17 +120,13 @@ function useAppData() {
         return;
       }
       if (remote.status !== 'ok') return;
-      const shouldSeed = localStorage.getItem(mvpSeedKey) !== 'true';
-      const nextData = shouldSeed ? buildMvpSeedData(remote.data) : remote.data;
-      if (shouldSeed) {
-        localStorage.setItem(mvpSeedKey, 'true');
-        void saveRemoteData(nextData, apiToken);
-      }
+      const nextData = isLegacyDemoData(remote.data) ? emptyData : remote.data;
+      if (nextData === emptyData) void saveRemoteData(nextData, apiToken);
       setData(nextData);
       setApiUser(remote.user ?? null);
       setAuthRequired(false);
       setStorageMode('本地API');
-      localStorage.setItem('hr-assistant-data-mode', 'real-v1');
+      localStorage.setItem(dataModeKey, currentDataMode);
       localStorage.setItem('hr-assistant-data', JSON.stringify(nextData));
     });
     return () => {
@@ -148,7 +136,7 @@ function useAppData() {
 
   const update = (next: AppData) => {
     setData(next);
-    localStorage.setItem('hr-assistant-data-mode', 'real-v1');
+    localStorage.setItem(dataModeKey, currentDataMode);
     localStorage.setItem('hr-assistant-data', JSON.stringify(next));
     saveQueue.current = saveQueue.current.then(() => saveRemoteData(next, apiToken), () => saveRemoteData(next, apiToken));
     void saveQueue.current.then((saved) => {
@@ -4825,7 +4813,7 @@ function canAccessSection(section: Section, data: AppData, apiUser: ApiUser | nu
 export function App() {
   const [section, setSection] = useState<Section>('工作台');
   const [navMode, setNavMode] = useState<'我的工作' | '全部模块'>('我的工作');
-  const { data, update, audit, resetData, seedMvpData, storageMode, apiUser, apiToken, authRequired, authError, login, logout } = useAppData();
+  const { data, update, audit, resetData, storageMode, apiUser, apiToken, authRequired, authError, login, logout } = useAppData();
   const permittedNavItems = navItems.filter(({ key }) => canAccessSection(key, data, apiUser));
   const focusedNavItems = navMode === '我的工作' ? permittedNavItems.filter(({ key }) => operatorSections.has(key)) : permittedNavItems;
   const visibleNavItems = focusedNavItems.length > 0 ? focusedNavItems : permittedNavItems;
@@ -4864,7 +4852,6 @@ export function App() {
           <Badge tone="good">一期闭环版</Badge>
           <Badge tone={storageMode === '本地API' ? 'good' : 'warn'}>{storageMode}</Badge>
           {apiUser && <small>{apiUser.name} · {apiUser.role}</small>}
-          <button className="ghost" onClick={seedMvpData}>补齐MVP样例数据</button>
           {apiUser && <button className="ghost" onClick={logout}>退出登录</button>}
           <small>{navMode === '我的工作' ? '仅显示招聘运营日常模块' : '显示配置与管理模块'}</small>
         </div>

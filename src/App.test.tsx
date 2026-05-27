@@ -17,7 +17,7 @@ describe('招聘运营助手', () => {
     expect(screen.getByText('内容发布数量')).toBeInTheDocument();
     expect(screen.getByText('招聘入口点击')).toBeInTheDocument();
     expect(screen.getByText('我的工作')).toBeInTheDocument();
-    expect(screen.getByText('补齐MVP样例数据')).toBeInTheDocument();
+    expect(screen.queryByText('补齐MVP样例数据')).not.toBeInTheDocument();
   });
 
   it('generates content and creates a new content task', async () => {
@@ -86,7 +86,7 @@ describe('招聘运营助手', () => {
         weeklyPlatformTargets: {},
       },
     };
-    localStorage.setItem('hr-assistant-data-mode', 'real-v1');
+    localStorage.setItem('hr-assistant-data-mode', 'real-v2-empty-platform-data');
     localStorage.setItem('hr-assistant-data', JSON.stringify(realData));
     const user = userEvent.setup();
     render(<App />);
