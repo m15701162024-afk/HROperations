@@ -350,8 +350,8 @@ function OperationsHome({ data, apiToken, openSection }: { data: AppData; apiTok
       <section className="command-hero">
         <div>
           <span className="eyebrow">招聘内容运营指挥台</span>
-          <h1>今天先把内容发出去，再用数据决定明天做什么。</h1>
-          <p>围绕岗位简报、渠道账号、内容排期和效果复盘四件事组织工作，减少来回切模块和人工判断。</p>
+          <h1>招聘渠道内容运营工作台</h1>
+          <p>集中处理岗位内容生成、渠道发布排期、真实账号连接和数据复盘。</p>
         </div>
         <div className="hero-actions">
           <button onClick={() => openSection('内容运营')}><Sparkles size={16} />开始生成内容</button>
