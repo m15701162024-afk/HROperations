@@ -16,7 +16,11 @@ describe('招聘运营助手', () => {
     expect(screen.getByText('今日招聘运营概览')).toBeInTheDocument();
     expect(screen.getByText('内容发布数量')).toBeInTheDocument();
     expect(screen.getByText('招聘入口点击')).toBeInTheDocument();
-    expect(screen.getByText('我的工作')).toBeInTheDocument();
+    expect(screen.getByText('运营首页')).toBeInTheDocument();
+    expect(screen.getByText('内容工厂')).toBeInTheDocument();
+    expect(screen.getByText('渠道数据')).toBeInTheDocument();
+    expect(screen.getByText('连接配置')).toBeInTheDocument();
+    expect(screen.queryByText('招聘需求')).not.toBeInTheDocument();
     expect(screen.queryByText('补齐MVP样例数据')).not.toBeInTheDocument();
   });
 
@@ -91,7 +95,7 @@ describe('招聘运营助手', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: /内容运营/ }));
+    await user.click(screen.getByRole('button', { name: /内容工厂/ }));
     await user.click(screen.getByRole('button', { name: /生成平台内容/ }));
     expect(screen.getByDisplayValue(/内容初稿/)).toBeInTheDocument();
 
@@ -110,6 +114,7 @@ describe('招聘运营助手', () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await user.click(screen.getByRole('button', { name: /渠道数据/ }));
     await user.click(screen.getByRole('button', { name: /线索池/ }));
     await user.type(screen.getByPlaceholderText('姓名/昵称'), '生命周期候选人');
     await user.type(screen.getByPlaceholderText('联系方式'), 'life-ui@example.com');
@@ -128,7 +133,8 @@ describe('招聘运营助手', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: /招聘需求/ }));
+    await user.click(screen.getByRole('button', { name: /内容工厂/ }));
+    await user.click(screen.getByRole('button', { name: /岗位需求/ }));
     await user.type(screen.getByPlaceholderText('岗位名称'), '生命周期测试招聘需求');
     await user.type(screen.getByPlaceholderText('JD / 岗位描述'), '负责招聘运营平台真实业务闭环。');
     await user.type(screen.getByPlaceholderText('候选人画像：年限、能力、关注点、求职顾虑'), '3-8 年运营或产品背景');
@@ -154,6 +160,7 @@ describe('招聘运营助手', () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await user.click(screen.getByRole('button', { name: /内容工厂/ }));
     await user.click(screen.getByRole('button', { name: /素材资产/ }));
     await user.type(screen.getByPlaceholderText('素材名称'), '生命周期测试素材');
     await user.click(screen.getByRole('button', { name: '保存' }));

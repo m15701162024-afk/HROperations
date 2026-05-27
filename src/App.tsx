@@ -36,20 +36,11 @@ import { applyMetricsCsv, buildDataExplanations, buildPlatformStrategy, buildRec
 
 type Section = AppSection;
 
-const navItems: { key: Section; icon: React.ComponentType<{ size?: number }> }[] = [
-  { key: '工作台', icon: Home },
-  { key: '招聘需求', icon: ClipboardList },
-  { key: '选题库', icon: Sparkles },
-  { key: '内容运营', icon: Megaphone },
-  { key: '排期日历', icon: Target },
-  { key: '线索池', icon: Users },
-  { key: '素材资产', icon: Database },
-  { key: '账号与平台', icon: Users },
-  { key: '导入中心', icon: Database },
-  { key: '数据分析', icon: BarChart3 },
-  { key: '复盘报告', icon: BookOpen },
-  { key: 'AI工作台', icon: Bot },
-  { key: '系统配置', icon: Settings },
+const navItems: { key: Section; label: string; note: string; icon: React.ComponentType<{ size?: number }> }[] = [
+  { key: '工作台', label: '运营首页', note: '今日待办', icon: Home },
+  { key: '内容运营', label: '内容工厂', note: '岗位/选题/内容/排期', icon: Megaphone },
+  { key: '数据分析', label: '渠道数据', note: '导入/线索/分析/复盘', icon: BarChart3 },
+  { key: '账号与平台', label: '连接配置', note: '账号/API/系统', icon: Link },
 ];
 
 const contentTypes = ['岗位种草', '技术团队内容', '员工故事', '公司/业务介绍', '面试/求职干货', '短视频脚本', '图文笔记', '长文', '校招内容'];
@@ -69,7 +60,37 @@ const sectionPermissions: Record<Section, string> = {
   系统配置: '系统配置',
 };
 
-const operatorSections = new Set<Section>(['工作台', '招聘需求', '选题库', '内容运营', '排期日历', '线索池', '素材资产', '数据分析', '复盘报告']);
+const moduleSections: Record<Section, Section[]> = {
+  工作台: ['工作台'],
+  招聘需求: ['招聘需求'],
+  选题库: ['选题库'],
+  内容运营: ['内容运营', '招聘需求', '选题库', '排期日历', '素材资产', 'AI工作台'],
+  排期日历: ['排期日历'],
+  线索池: ['线索池'],
+  素材资产: ['素材资产'],
+  账号与平台: ['账号与平台', '系统配置'],
+  导入中心: ['导入中心'],
+  数据分析: ['数据分析', '导入中心', '线索池', '复盘报告'],
+  复盘报告: ['复盘报告'],
+  AI工作台: ['AI工作台'],
+  系统配置: ['系统配置'],
+};
+
+const sectionParent: Record<Section, Section> = {
+  工作台: '工作台',
+  招聘需求: '内容运营',
+  选题库: '内容运营',
+  内容运营: '内容运营',
+  排期日历: '内容运营',
+  线索池: '数据分析',
+  素材资产: '内容运营',
+  账号与平台: '账号与平台',
+  导入中心: '数据分析',
+  数据分析: '数据分析',
+  复盘报告: '数据分析',
+  AI工作台: '内容运营',
+  系统配置: '账号与平台',
+};
 const mvpSeedKey = 'hr-assistant-mvp-seeded-v1';
 const dataModeKey = 'hr-assistant-data-mode';
 const currentDataMode = 'real-v2-empty-platform-data';
@@ -461,7 +482,7 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
               <div><strong>{notice.title}</strong><span>{notice.body}</span></div>
               <div className="row-actions">
                 <Badge tone={notice.level === '预警' ? 'danger' : notice.level === '待办' ? 'warn' : 'info'}>{notice.level}</Badge>
-                {navItems.some((item) => item.key === notice.targetSection) && <button className="ghost" onClick={() => openSection(notice.targetSection as Section)}>处理</button>}
+                {notice.targetSection in sectionPermissions && <button className="ghost" onClick={() => openSection(notice.targetSection as Section)}>处理</button>}
                 {data.notifications.some((item) => item.id === notice.id) && <button className="ghost" onClick={() => markNoticeRead(notice.id)}>已读</button>}
               </div>
             </div>
@@ -4763,6 +4784,130 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
   );
 }
 
+function ContentFactoryModule({ section, data, audit, apiToken }: { section: Section; data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
+  const tabs = [
+    { key: '内容运营' as Section, label: '内容生产', note: '生成、审核、发布' },
+    { key: '招聘需求' as Section, label: '岗位需求', note: '岗位源头与入口' },
+    { key: '选题库' as Section, label: '选题库', note: '渠道选题储备' },
+    { key: '排期日历' as Section, label: '排期日历', note: '发布节奏' },
+    { key: '素材资产' as Section, label: '素材资产', note: '案例、图片、授权' },
+    { key: 'AI工作台' as Section, label: 'AI工作台', note: '提示词与模型任务' },
+  ];
+  const initial = tabs.some((tab) => tab.key === section) ? section : '内容运营';
+  const [active, setActive] = useState<Section>(initial);
+
+  useEffect(() => {
+    if (tabs.some((tab) => tab.key === section)) setActive(section);
+  }, [section]);
+
+  return (
+    <div className="page-grid">
+      <section className="module-hub wide">
+        <div>
+          <span className="eyebrow">内容工厂</span>
+          <h1>把岗位需求变成可发布的渠道内容</h1>
+        </div>
+        <div className="module-tabs">
+          {tabs.map((tab) => (
+            <button key={tab.key} className={active === tab.key ? 'active' : ''} onClick={() => setActive(tab.key)}>
+              {tab.label}<small>{tab.note}</small>
+            </button>
+          ))}
+        </div>
+      </section>
+      <div className="wide embedded-module">
+        {active === '内容运营' && <ContentOps data={data} audit={audit} apiToken={apiToken} />}
+        {active === '招聘需求' && <Jobs data={data} audit={audit} />}
+        {active === '选题库' && <TopicLibrary data={data} audit={audit} />}
+        {active === '排期日历' && <ScheduleCalendar data={data} audit={audit} />}
+        {active === '素材资产' && <Assets data={data} audit={audit} apiToken={apiToken} />}
+        {active === 'AI工作台' && <AiWorkbench data={data} audit={audit} apiToken={apiToken} />}
+      </div>
+    </div>
+  );
+}
+
+function ChannelDataModule({ section, data, audit, apiToken }: { section: Section; data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; apiToken?: string }) {
+  const tabs = [
+    { key: '数据分析' as Section, label: '渠道分析', note: '漏斗、归因、ROI' },
+    { key: '导入中心' as Section, label: '导入中心', note: '平台指标与字段映射' },
+    { key: '线索池' as Section, label: '线索池', note: '候选人线索跟进' },
+    { key: '复盘报告' as Section, label: '复盘报告', note: '周报与改进动作' },
+  ];
+  const initial = tabs.some((tab) => tab.key === section) ? section : '数据分析';
+  const [active, setActive] = useState<Section>(initial);
+
+  useEffect(() => {
+    if (tabs.some((tab) => tab.key === section)) setActive(section);
+  }, [section]);
+
+  return (
+    <div className="page-grid">
+      <section className="module-hub wide">
+        <div>
+          <span className="eyebrow">渠道数据</span>
+          <h1>用渠道数据决定下一轮运营动作</h1>
+        </div>
+        <div className="module-tabs">
+          {tabs.map((tab) => (
+            <button key={tab.key} className={active === tab.key ? 'active' : ''} onClick={() => setActive(tab.key)}>
+              {tab.label}<small>{tab.note}</small>
+            </button>
+          ))}
+        </div>
+      </section>
+      <div className="wide embedded-module">
+        {active === '数据分析' && <Analytics data={data} audit={audit} />}
+        {active === '导入中心' && <ImportCenter data={data} audit={audit} />}
+        {active === '线索池' && <LeadPool data={data} audit={audit} />}
+        {active === '复盘报告' && <Reports data={data} audit={audit} apiToken={apiToken} />}
+      </div>
+    </div>
+  );
+}
+
+function ConnectionConfigModule({ section, data, update, audit, resetData, apiToken }: {
+  section: Section;
+  data: AppData;
+  update: (data: AppData) => void;
+  audit: (action: string, target: string, nextData?: AppData) => void;
+  resetData: () => void;
+  apiToken?: string;
+}) {
+  const tabs = [
+    { key: '账号与平台' as Section, label: '账号与API', note: '平台账号、授权、同步' },
+    { key: '系统配置' as Section, label: '系统配置', note: '权限、流程、策略' },
+  ];
+  const initial = tabs.some((tab) => tab.key === section) ? section : '账号与平台';
+  const [active, setActive] = useState<Section>(initial);
+
+  useEffect(() => {
+    if (tabs.some((tab) => tab.key === section)) setActive(section);
+  }, [section]);
+
+  return (
+    <div className="page-grid">
+      <section className="module-hub wide">
+        <div>
+          <span className="eyebrow">连接配置</span>
+          <h1>管理真实平台账号、接口和系统规则</h1>
+        </div>
+        <div className="module-tabs">
+          {tabs.map((tab) => (
+            <button key={tab.key} className={active === tab.key ? 'active' : ''} onClick={() => setActive(tab.key)}>
+              {tab.label}<small>{tab.note}</small>
+            </button>
+          ))}
+        </div>
+      </section>
+      <div className="wide embedded-module">
+        {active === '账号与平台' && <Accounts data={data} audit={audit} apiToken={apiToken} />}
+        {active === '系统配置' && <SettingsPage data={data} update={update} resetData={resetData} apiToken={apiToken} />}
+      </div>
+    </div>
+  );
+}
+
 function renderSection(
   section: Section,
   data: AppData,
@@ -4776,29 +4921,20 @@ function renderSection(
     case '工作台':
       return <Dashboard data={data} audit={audit} openSection={openSection} />;
     case '招聘需求':
-      return <Jobs data={data} audit={audit} />;
     case '选题库':
-      return <TopicLibrary data={data} audit={audit} />;
     case '内容运营':
-      return <ContentOps data={data} audit={audit} apiToken={apiToken} />;
     case '排期日历':
-      return <ScheduleCalendar data={data} audit={audit} />;
-    case '线索池':
-      return <LeadPool data={data} audit={audit} />;
     case '素材资产':
-      return <Assets data={data} audit={audit} apiToken={apiToken} />;
-    case '账号与平台':
-      return <Accounts data={data} audit={audit} apiToken={apiToken} />;
-    case '导入中心':
-      return <ImportCenter data={data} audit={audit} />;
-    case '数据分析':
-      return <Analytics data={data} audit={audit} />;
-    case '复盘报告':
-      return <Reports data={data} audit={audit} apiToken={apiToken} />;
     case 'AI工作台':
-      return <AiWorkbench data={data} audit={audit} apiToken={apiToken} />;
+      return <ContentFactoryModule section={section} data={data} audit={audit} apiToken={apiToken} />;
+    case '导入中心':
+    case '线索池':
+    case '数据分析':
+    case '复盘报告':
+      return <ChannelDataModule section={section} data={data} audit={audit} apiToken={apiToken} />;
+    case '账号与平台':
     case '系统配置':
-      return <SettingsPage data={data} update={update} resetData={resetData} apiToken={apiToken} />;
+      return <ConnectionConfigModule section={section} data={data} update={update} audit={audit} resetData={resetData} apiToken={apiToken} />;
   }
 }
 
@@ -4806,18 +4942,20 @@ function canAccessSection(section: Section, data: AppData, apiUser: ApiUser | nu
   if (!apiUser || apiUser.role === '系统管理员' || apiUser.role === '管理员') return true;
   const role = data.roles.find((item) => item.name === apiUser.role || item.id === apiUser.role);
   if (!role) return section === '工作台';
-  const permission = sectionPermissions[section];
-  return role.permissions.includes(permission) || role.permissions.includes('全部') || role.permissions.includes(`${section}管理`);
+  return moduleSections[section].some((item) => {
+    const permission = sectionPermissions[item];
+    return role.permissions.includes(permission) || role.permissions.includes('全部') || role.permissions.includes(`${item}管理`);
+  });
 }
 
 export function App() {
   const [section, setSection] = useState<Section>('工作台');
-  const [navMode, setNavMode] = useState<'我的工作' | '全部模块'>('我的工作');
   const { data, update, audit, resetData, storageMode, apiUser, apiToken, authRequired, authError, login, logout } = useAppData();
   const permittedNavItems = navItems.filter(({ key }) => canAccessSection(key, data, apiUser));
-  const focusedNavItems = navMode === '我的工作' ? permittedNavItems.filter(({ key }) => operatorSections.has(key)) : permittedNavItems;
-  const visibleNavItems = focusedNavItems.length > 0 ? focusedNavItems : permittedNavItems;
-  const activeSection = visibleNavItems.some(({ key }) => key === section) && canAccessSection(section, data, apiUser) ? section : visibleNavItems[0]?.key ?? '工作台';
+  const visibleNavItems = permittedNavItems.length > 0 ? permittedNavItems : navItems.slice(0, 1);
+  const requestedParent = sectionParent[section] ?? '工作台';
+  const activeNavSection = visibleNavItems.some(({ key }) => key === requestedParent) && canAccessSection(requestedParent, data, apiUser) ? requestedParent : visibleNavItems[0]?.key ?? '工作台';
+  const activeSection = canAccessSection(section, data, apiUser) && sectionParent[section] === activeNavSection ? section : activeNavSection;
   const myTasks = deriveTasks(data).filter((task) => !apiUser || task.owner === apiUser.name || task.owner === apiUser.username || task.owner === '未分配' || task.owner === '招聘专员' || apiUser.role === '系统管理员');
 
   if (authRequired) {
@@ -4835,16 +4973,11 @@ export function App() {
           <strong>{apiUser?.name ?? '当前用户'}</strong>
           <span>{apiUser?.role ?? '本地视图'} · {myTasks.length} 项待办</span>
         </div>
-        <div className="sidebar-segment">
-          {(['我的工作', '全部模块'] as const).map((mode) => (
-            <button key={mode} className={navMode === mode ? 'active' : ''} onClick={() => setNavMode(mode)}>{mode}</button>
-          ))}
-        </div>
         <nav>
-          {visibleNavItems.map(({ key, icon: Icon }) => (
-            <button key={key} className={activeSection === key ? 'active' : ''} onClick={() => setSection(key)}>
+          {visibleNavItems.map(({ key, label, note, icon: Icon }) => (
+            <button key={key} className={activeNavSection === key ? 'active' : ''} onClick={() => setSection(key)}>
               <Icon size={18} />
-              {key}
+              <span>{label}<small>{note}</small></span>
             </button>
           ))}
         </nav>
@@ -4853,7 +4986,7 @@ export function App() {
           <Badge tone={storageMode === '本地API' ? 'good' : 'warn'}>{storageMode}</Badge>
           {apiUser && <small>{apiUser.name} · {apiUser.role}</small>}
           {apiUser && <button className="ghost" onClick={logout}>退出登录</button>}
-          <small>{navMode === '我的工作' ? '仅显示招聘运营日常模块' : '显示配置与管理模块'}</small>
+          <small>一级入口只保留运营首页、内容工厂、渠道数据、连接配置</small>
         </div>
       </aside>
       <main>
