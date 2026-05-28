@@ -341,6 +341,16 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
   const pendingReview = data.contents.filter((item) => item.status === '待专业审核' || item.status === '待品牌合规审核').length;
   const pendingMetrics = data.contents.filter((item) => (item.status === '已发布' || item.status === '数据回收中') && Object.values(item.metrics).every((value) => value === 0)).length;
   const accountWarnings = tasks.filter((task) => task.type === '账号停更').length;
+  const topTasks = visibleTasks.slice(0, 5);
+  const urgentTask = tasks.find((task) => task.priority === '高') ?? tasks[0];
+  const headline = urgentTask
+    ? `先处理：${urgentTask.title}`
+    : pendingPublish > 0
+      ? '先确认待发布内容'
+      : pendingMetrics > 0
+        ? '先补齐数据回收'
+        : '今日暂无阻塞事项';
+  const recommendation = urgentTask?.body || '当前没有高优先级待办，可以查看渠道数据或继续准备内容。';
   const totals = useMemo(() => {
     const published = data.contents.filter((item) => item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘').length;
     const views = data.contents.reduce((sum, item) => sum + item.metrics.views, 0);
@@ -390,17 +400,18 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
 
   return (
     <div className="page-grid">
-      <div className="hero-panel">
+      <div className="hero-panel command-summary">
         <div>
           <span className="eyebrow">工作台</span>
           <h1>今日招聘运营概览</h1>
-          <p>{tasks.length} 项运营待办 · {pendingPublish} 条待发布 · {pendingReview} 条待审核 · {pendingMetrics} 条数据待回收</p>
+          <strong>{headline}</strong>
+          <p>{recommendation}</p>
         </div>
         <div className="hero-actions">
-          <button onClick={() => openSection('内容运营')}><Sparkles size={16} />生成内容</button>
-          <button className="secondary" onClick={() => openSection('排期日历')}><Target size={16} />看排期</button>
-          <button className="secondary" onClick={() => openSection('账号与平台')}><Users size={16} />看平台</button>
-          <button className="ghost" onClick={() => openSection('数据分析')}><BarChart3 size={16} />看数据</button>
+          {urgentTask
+            ? <button onClick={() => openSection(urgentTask.targetSection)}><Target size={16} />处理当前事项</button>
+            : <button onClick={() => openSection('内容运营')}><Sparkles size={16} />准备内容</button>}
+          <button className="secondary" onClick={() => openSection('数据分析')}><BarChart3 size={16} />看数据</button>
         </div>
       </div>
 
@@ -433,13 +444,8 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
 
       <section className="panel wide">
         <div className="panel-title">
-          <h2>今日任务中心</h2>
+          <h2>下一步处理</h2>
           <ClipboardList size={18} />
-        </div>
-        <div className="module-tabs">
-          {(['全部', '待发布', '待审核', '数据待回收', '高风险待处理', '素材授权到期', '审核超时', '账号停更'] as const).map((item) => (
-            <button key={item} className={taskFilter === item ? 'active' : ''} onClick={() => setTaskFilter(item)}>{item}</button>
-          ))}
         </div>
         <div className="task-summary-grid">
           <div><span>待处理</span><b>{tasks.length}</b></div>
@@ -447,9 +453,17 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
           <div><span>数据待回收</span><b>{tasks.filter((task) => task.type === '数据待回收').length}</b></div>
           <div><span>账号/素材预警</span><b>{accountWarnings + tasks.filter((task) => task.type === '素材授权到期').length}</b></div>
         </div>
-        {visibleTasks.length === 0 && <EmptyState title="暂无待处理任务" body="当内容、素材、账号和数据回收出现待办时会自动进入这里。" />}
+        <details className="home-filter-drawer">
+          <summary>筛选任务</summary>
+          <div className="module-tabs">
+            {(['全部', '待发布', '待审核', '数据待回收', '高风险待处理', '素材授权到期', '审核超时', '账号停更'] as const).map((item) => (
+              <button key={item} className={taskFilter === item ? 'active' : ''} onClick={() => setTaskFilter(item)}>{item}</button>
+            ))}
+          </div>
+        </details>
+        {topTasks.length === 0 && <EmptyState title="暂无待处理任务" body="当内容、素材、账号和数据回收出现待办时会自动进入这里。" />}
         <div className="task-list">
-          {visibleTasks.map((task) => (
+          {topTasks.map((task) => (
             <div className="task-row" key={task.id}>
               <div>
                 <strong>{task.title}</strong>
@@ -465,6 +479,7 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
             </div>
           ))}
         </div>
+        {visibleTasks.length > topTasks.length && <p className="helper">已展示前 {topTasks.length} 条，展开筛选后可按类型定位更多任务。</p>}
         {selectedTask && (
           <div className="detail-panel">
             <strong>{selectedTask.title}</strong>
@@ -483,11 +498,8 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
         )}
       </section>
 
-      <section className="panel wide">
-        <div className="panel-title">
-          <h2>通知中心</h2>
-          <Bell size={18} />
-        </div>
+      <details className="panel wide support-drawer">
+        <summary><span>通知中心</span><small>{pendingNotices.length} 条未读/预警</small></summary>
         <div className="toolbar-actions compact-actions">
           <button className="ghost" onClick={markAllNoticesRead}>全部已读</button>
         </div>
@@ -504,13 +516,10 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
             </div>
           ))}
         </div>
-      </section>
+      </details>
 
-      <section className="panel wide">
-        <div className="panel-title">
-          <h2>运营目标进度</h2>
-          <Target size={18} />
-        </div>
+      <details className="panel wide support-drawer">
+        <summary><span>运营目标进度</span><small>{data.goals.length} 个目标</small></summary>
         <div className="inline-form">
           <input value={goal.title} onChange={(event) => setGoal({ ...goal, title: event.target.value })} placeholder="目标名称" />
           <input value={goal.dimension} onChange={(event) => setGoal({ ...goal, dimension: event.target.value })} placeholder="目标维度" />
@@ -532,13 +541,10 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
             </article>
           ))}
         </div>
-      </section>
+      </details>
 
-      <section className="panel">
-        <div className="panel-title">
-          <h2>高风险待办</h2>
-          <AlertTriangle size={18} />
-        </div>
+      <details className="panel support-drawer">
+        <summary><span>高风险待办</span><small>{data.contents.filter((item) => item.riskLevel === '高').length} 条</small></summary>
         {data.contents.filter((item) => item.riskLevel === '高').length === 0 && <EmptyState title="暂无高风险待办" body="没有内容数据时高风险数量为 0；录入内容后系统会自动扫描。" />}
         {data.contents.filter((item) => item.riskLevel === '高').map((item) => (
           <div className="compact-row" key={item.id}>
@@ -549,13 +555,10 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
             <Badge tone="danger">高风险</Badge>
           </div>
         ))}
-      </section>
+      </details>
 
-      <section className="panel">
-        <div className="panel-title">
-          <h2>自动复盘建议</h2>
-          <Bot size={18} />
-        </div>
+      <details className="panel support-drawer">
+        <summary><span>自动复盘建议</span><small>{data.reports.length} 条</small></summary>
         {data.reports.length === 0 && <EmptyState title="暂无复盘建议" body="导入平台数据或录入内容指标后，可生成真实周报和运营建议。" />}
         {data.reports.map((report) => (
           <div className="insight" key={report.id}>
@@ -564,7 +567,7 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
             <p>{report.action}</p>
           </div>
         ))}
-      </section>
+      </details>
     </div>
   );
 }

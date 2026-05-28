@@ -376,6 +376,13 @@ main {
   line-height: 1.5;
 }
 
+.command-summary strong {
+  display: block;
+  margin: 4px 0;
+  color: #202426;
+  font-size: 18px;
+}
+
 .hero-actions {
   display: flex;
   gap: 8px;
@@ -488,6 +495,33 @@ td span,
 
 .panel-title svg {
   color: var(--blue);
+}
+
+.support-drawer summary,
+.home-filter-drawer summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #202426;
+  font-weight: 800;
+}
+
+.support-drawer summary small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.support-drawer[open],
+.home-filter-drawer[open] {
+  display: grid;
+  gap: 12px;
+}
+
+.home-filter-drawer {
+  padding: 8px 0;
 }
 
 .badge {
