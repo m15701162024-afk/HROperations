@@ -331,14 +331,12 @@ function LoginScreen({ onLogin, error }: { onLogin: (username: string, password:
 
 function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void; openSection: (section: Section) => void }) {
   const [goal, setGoal] = useState({ title: '', dimension: '平台', target: 0, current: 0, metric: '发布篇数' });
-  const [drilldown, setDrilldown] = useState<'内容' | '曝光' | '互动' | '点击' | ''>('');
   const [taskFilter, setTaskFilter] = useState<'全部' | Exclude<TaskItem['type'], '线索待跟进'>>('全部');
   const [selectedTaskId, setSelectedTaskId] = useState('');
   const tasks = useMemo(() => deriveTasks(data).filter((task) => task.type !== '线索待跟进'), [data]);
   const visibleTasks = tasks.filter((task) => taskFilter === '全部' || task.type === taskFilter);
   const selectedTask = tasks.find((task) => task.id === selectedTaskId);
   const pendingPublish = data.contents.filter((item) => item.status === '待发布').length;
-  const pendingReview = data.contents.filter((item) => item.status === '待专业审核' || item.status === '待品牌合规审核').length;
   const pendingMetrics = data.contents.filter((item) => (item.status === '已发布' || item.status === '数据回收中') && Object.values(item.metrics).every((value) => value === 0)).length;
   const accountWarnings = tasks.filter((task) => task.type === '账号停更').length;
   const topTasks = visibleTasks.slice(0, 5);
@@ -352,12 +350,10 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
         : '今日暂无阻塞事项';
   const recommendation = urgentTask?.body || '当前没有高优先级待办，可以查看渠道数据或继续准备内容。';
   const totals = useMemo(() => {
-    const published = data.contents.filter((item) => item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘').length;
-    const views = data.contents.reduce((sum, item) => sum + item.metrics.views, 0);
-    const interactions = data.contents.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
     const clicks = data.contents.reduce((sum, item) => sum + item.metrics.clicks, 0);
-    return { published, views, interactions, clicks };
-  }, [data.contents]);
+    const effectiveResumes = data.beisenResults.filter((item) => ['有效简历', '初筛通过', '已约面', '已面试', 'Offer', '已入职'].includes(item.stage)).length;
+    return { clicks, effectiveResumes };
+  }, [data.beisenResults, data.contents]);
 
   const createGoal = () => {
     if (!goal.title.trim()) return;
@@ -416,31 +412,11 @@ function Dashboard({ data, audit, openSection }: { data: AppData; audit: (action
       </div>
 
       <div className="stats-row">
-        <button className="stat-button" onClick={() => setDrilldown(drilldown === '内容' ? '' : '内容')}><StatCard label="内容发布数量" value={totals.published} note="已发布/回收/复盘" icon={FileText} /></button>
-        <button className="stat-button" onClick={() => setDrilldown(drilldown === '曝光' ? '' : '曝光')}><StatCard label="曝光/阅读/播放" value={totals.views.toLocaleString()} note="全平台合计" icon={Rocket} /></button>
-        <button className="stat-button" onClick={() => setDrilldown(drilldown === '互动' ? '' : '互动')}><StatCard label="互动量" value={totals.interactions.toLocaleString()} note="赞评藏转合计" icon={PieChart} /></button>
-        <button className="stat-button" onClick={() => setDrilldown(drilldown === '点击' ? '' : '点击')}><StatCard label="招聘入口点击" value={totals.clicks.toLocaleString()} note="北森/官网跳转前" icon={Link} /></button>
+        <button className="stat-button" onClick={() => urgentTask ? openSection(urgentTask.targetSection) : openSection('内容运营')}><StatCard label="待处理事项" value={tasks.length} note="跳转到当前最紧急事项" icon={ClipboardList} /></button>
+        <button className="stat-button" onClick={() => openSection('排期日历')}><StatCard label="待发布内容" value={pendingPublish} note="进入发布排期处理" icon={FileText} /></button>
+        <button className="stat-button" onClick={() => openSection('数据分析')}><StatCard label="招聘入口点击" value={totals.clicks.toLocaleString()} note="查看点击来源" icon={Link} /></button>
+        <button className="stat-button" onClick={() => openSection('数据分析')}><StatCard label="有效简历" value={totals.effectiveResumes.toLocaleString()} note="进入转化归因查看" icon={Users} /></button>
       </div>
-      {drilldown && (
-        <section className="panel wide">
-          <div className="panel-title"><h2>{drilldown}数据下钻</h2><BarChart3 size={18} /></div>
-          <div className="entry-grid">
-            {platforms.map((platform) => {
-              const contents = data.contents.filter((item) => item.platform === platform);
-              const views = contents.reduce((sum, item) => sum + item.metrics.views, 0);
-              const clicks = contents.reduce((sum, item) => sum + item.metrics.clicks, 0);
-              const interactions = contents.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
-              return (
-                <article key={platform}>
-                  <strong>{platform}</strong>
-                  <span>{contents.length} 内容 · {views} 曝光 · {interactions} 互动 · {clicks} 点击</span>
-                  <button className="ghost" onClick={() => openSection('数据分析')}>进入平台分析</button>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      )}
 
       <section className="panel wide">
         <div className="panel-title">

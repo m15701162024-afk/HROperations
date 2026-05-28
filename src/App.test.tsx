@@ -14,8 +14,10 @@ describe('招聘运营助手', () => {
     render(<App />);
 
     expect(screen.getByText('今日招聘运营概览')).toBeInTheDocument();
-    expect(screen.getByText('内容发布数量')).toBeInTheDocument();
+    expect(screen.getByText('待处理事项')).toBeInTheDocument();
+    expect(screen.getByText('待发布内容')).toBeInTheDocument();
     expect(screen.getByText('招聘入口点击')).toBeInTheDocument();
+    expect(screen.getByText('有效简历')).toBeInTheDocument();
     expect(screen.getByText('运营首页')).toBeInTheDocument();
     expect(screen.getByText('内容工厂')).toBeInTheDocument();
     expect(screen.getByText('渠道数据')).toBeInTheDocument();
