@@ -184,7 +184,7 @@ describe('analytics drill service', () => {
 
     const job = buildAnalyticsDrill(baseData, { dimension: 'job', jobId: 'job-1' }).breakdowns[0];
     expect(job.meta?.contentCount).toBe(1);
-    expect(job.meta?.platformContributions).toBe('小红书:1000曝光/3投递');
+    expect(job.meta?.platformContributions).toBe('小红书:1000观看/3投递');
 
     const funnel = buildAnalyticsDrill({ ...baseData, contents: [{ ...baseData.contents[0], metrics: { ...baseData.contents[0].metrics, clicks: 0 } }], beisenResults: [] }, { dimension: 'funnel', platform: '小红书' });
     expect(funnel.breakdowns.find((item) => item.id === 'clicks')?.meta?.abnormal).toBe(true);

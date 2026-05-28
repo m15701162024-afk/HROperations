@@ -133,17 +133,35 @@ export function applyMetricsCsv(contents: ContentTask[], raw: string) {
     if (!row) return content;
     const numberOf = (...keys: string[]) => {
       const value = keys.map((key) => row[key]).find((item) => item !== undefined && item !== '');
-      return Number(value ?? 0);
+      return value === undefined ? undefined : Number(String(value).replace('%', '')) || 0;
     };
+    const metric = (current: number | undefined, ...keys: string[]) => numberOf(...keys) ?? Number(current ?? 0);
     return {
       ...content,
       metrics: {
-        views: numberOf('views', '曝光', '阅读', '播放', '曝光量'),
-        likes: numberOf('likes', '点赞', '点赞量'),
-        comments: numberOf('comments', '评论', '评论量'),
-        saves: numberOf('saves', '收藏', '收藏量'),
-        shares: numberOf('shares', '转发', '分享', '转发量'),
-        clicks: numberOf('clicks', '点击', '招聘入口点击', '点击量'),
+        ...content.metrics,
+        impressions: metric(content.metrics.impressions, 'impressions', '曝光', '曝光数', '曝光量'),
+        views: metric(content.metrics.views, 'views', '观看', '观看数', '阅读', '阅读数', '播放', '播放量'),
+        coverClickRate: metric(content.metrics.coverClickRate, 'coverClickRate', '封面点击率'),
+        avgWatchDuration: metric(content.metrics.avgWatchDuration, 'avgWatchDuration', '平均观看时长', '平均观看时长秒'),
+        totalWatchDuration: metric(content.metrics.totalWatchDuration, 'totalWatchDuration', '观看总时长', '观看总时长秒'),
+        completionRate: metric(content.metrics.completionRate, 'completionRate', '视频完播率', '完播率'),
+        likes: metric(content.metrics.likes, 'likes', '点赞', '点赞数', '点赞量'),
+        comments: metric(content.metrics.comments, 'comments', '评论', '评论数', '评论量'),
+        saves: metric(content.metrics.saves, 'saves', '收藏', '收藏数', '收藏量'),
+        shares: metric(content.metrics.shares, 'shares', '分享', '分享数', '转发', '转发量'),
+        followsGained: metric(content.metrics.followsGained, 'followsGained', '涨粉', '涨粉数'),
+        profileVisitors: metric(content.metrics.profileVisitors, 'profileVisitors', '主页访客', '主页访客数'),
+        newFollows: metric(content.metrics.newFollows, 'newFollows', '新增关注', '新增粉丝', '新增粉丝数'),
+        unfollows: metric(content.metrics.unfollows, 'unfollows', '取消关注', '流失粉丝', '流失粉丝数'),
+        netFollows: metric(content.metrics.netFollows, 'netFollows', '净涨粉'),
+        profileFollowRate: metric(content.metrics.profileFollowRate, 'profileFollowRate', '主页转粉率'),
+        publishCount: metric(content.metrics.publishCount, 'publishCount', '发布数', '总发布'),
+        videoPublishCount: metric(content.metrics.videoPublishCount, 'videoPublishCount', '发布视频'),
+        imageTextPublishCount: metric(content.metrics.imageTextPublishCount, 'imageTextPublishCount', '发布图文'),
+        totalFollowers: metric(content.metrics.totalFollowers, 'totalFollowers', '总粉丝数'),
+        activeFollowers: metric(content.metrics.activeFollowers, 'activeFollowers', '活跃粉丝数'),
+        clicks: metric(content.metrics.clicks, 'clicks', '招聘入口点击', '入口点击', '链接点击', '落地页点击', '投递入口点击'),
       },
     };
   });
@@ -326,7 +344,7 @@ export function calculateAccountHealth(accountId: string, data: AppData): Accoun
     inactiveDays >= 14 ? `账号已 ${inactiveDays} 天未发布，建议补充排期。` : '',
     highRiskRatio > 0.25 ? '高风险内容占比偏高，建议加强审核规则。' : '',
     positioningMatchScore < 40 ? '内容与账号定位匹配度偏低，建议收敛选题。' : '',
-    clicks === 0 && views > 0 ? '有曝光但无点击，建议强化 CTA 和招聘入口。' : '',
+    clicks === 0 && views > 0 ? '有观看但无招聘入口点击，建议强化 CTA 和招聘入口。' : '',
   ].filter(Boolean);
   return {
     id: `health-${accountId}-${Date.now()}`,
@@ -401,10 +419,10 @@ export function buildDataExplanations(data: AppData): DataExplanation[] {
     const applications = data.beisenResults.filter((item) => item.sourcePlatform === platform && item.stage === '已投递').length;
     const list = [];
     if (views > 1000 && clicks / views < 0.005) {
-      list.push({ scope: '平台' as const, targetId: platform, title: `${platform} 曝光高但点击低`, body: '可能是 CTA 不清晰、招聘入口不明显，或内容偏品牌曝光而非岗位转化。', severity: '风险' as const, evidence: [`曝光 ${views}`, `点击 ${clicks}`, `点击率 ${((clicks / views) * 100).toFixed(2)}%`] });
+      list.push({ scope: '平台' as const, targetId: platform, title: `${platform} 观看高但招聘入口点击低`, body: '可能是 CTA 不清晰、招聘入口不明显，或内容偏品牌曝光而非岗位转化。', severity: '风险' as const, evidence: [`观看 ${views}`, `招聘入口点击 ${clicks}`, `观看到点击 ${((clicks / views) * 100).toFixed(2)}%`] });
     }
     if (clicks > 20 && applications / clicks < 0.05) {
-      list.push({ scope: '平台' as const, targetId: platform, title: `${platform} 点击后投递转化偏低`, body: '建议检查岗位落地页、薪酬口径、JD 清晰度和北森投递路径。', severity: '建议' as const, evidence: [`点击 ${clicks}`, `投递 ${applications}`] });
+      list.push({ scope: '平台' as const, targetId: platform, title: `${platform} 招聘入口点击后投递转化偏低`, body: '建议检查岗位落地页、薪酬口径、JD 清晰度和北森投递路径。', severity: '建议' as const, evidence: [`招聘入口点击 ${clicks}`, `投递 ${applications}`] });
     }
     return list;
   });
@@ -425,8 +443,8 @@ export function buildPlatformStrategy(job: JobNeed | undefined, data: AppData) {
   return [
     `首选平台：${preferred}，原因是${platformPositioning[preferred]}，且与该岗位候选人画像更接近。`,
     `内容形式：${job.family.includes('技术') || job.type === '社招' ? '技术观点/岗位挑战拆解' : '岗位种草/团队氛围内容'}。`,
-    `发布频次：建议每周至少 2 条图文或 1 条长内容，连续 2 周观察点击和投递。`,
-    `账号建议：优先使用定位与 ${job.family} 相关、历史点击率较高的账号。`,
+    `发布频次：建议每周至少 2 条图文或 1 条长内容，连续 2 周观察招聘入口点击和投递。`,
+    `账号建议：优先使用定位与 ${job.family} 相关、历史观看到点击率较高的账号。`,
   ];
 }
 
@@ -442,7 +460,7 @@ function normalizeStage(value: string | undefined): BeisenResult['stage'] {
 
 export function buildRecommendations(data: AppData) {
   if (data.contents.length === 0) {
-    return ['录入真实岗位和内容后，系统将基于曝光、互动、点击、北森回流结果生成策略建议。'];
+    return ['录入真实岗位和内容后，系统将基于曝光、观看、互动、招聘入口点击、北森回流结果生成策略建议。'];
   }
   const best = data.contents.slice().sort((a, b) => b.metrics.clicks - a.metrics.clicks)[0];
   const platformResults = data.beisenResults.reduce<Record<string, number>>((acc, result) => {
@@ -451,7 +469,7 @@ export function buildRecommendations(data: AppData) {
   }, {});
   const bestPlatform = Object.entries(platformResults).sort((a, b) => b[1] - a[1])[0]?.[0];
   return [
-    best.metrics.clicks > 0 ? `优先复用「${best.title}」的选题结构，目前点击最高，为 ${best.metrics.clicks}。` : '已有内容但缺少真实点击，请先导入平台指标。',
+    best.metrics.clicks > 0 ? `优先复用「${best.title}」的选题结构，目前招聘入口点击最高，为 ${best.metrics.clicks}。` : '已有内容但缺少真实招聘入口点击，请先导入平台指标。',
     bestPlatform ? `${bestPlatform} 已产生最多北森回流结果，可优先配置对应岗位族群内容。` : '尚未导入北森结果，暂不判断真实渠道质量。',
     data.accounts.length === 0 ? '请补充真实平台账号，用于数据归属、权限和复盘。' : '账号归属已具备基础数据，可继续完善发布权限和审核规则。',
   ];
@@ -499,5 +517,5 @@ export function buildReportMarkdown(data: AppData) {
   const views = data.contents.reduce((sum, item) => sum + item.metrics.views, 0);
   const clicks = data.contents.reduce((sum, item) => sum + item.metrics.clicks, 0);
   const recommendations = buildRecommendations(data);
-  return `# 招聘新媒体运营周报\n\n## 核心指标\n\n- 内容任务：${data.contents.length}\n- 曝光/阅读/播放：${views}\n- 招聘入口点击：${clicks}\n- 平台账号：${data.accounts.length}\n- 北森回流结果：${data.beisenResults.length}\n\n## 策略建议\n\n${recommendations.map((item) => `- ${item}`).join('\n')}\n\n## 重点洞察\n\n${data.reports.map((report) => `### ${report.title}\n\n${report.body}\n\n行动计划：${report.action}`).join('\n\n')}\n`;
+  return `# 招聘新媒体运营周报\n\n## 核心指标\n\n- 内容任务：${data.contents.length}\n- 小红书观看数：${views}\n- 招聘入口点击：${clicks}\n- 平台账号：${data.accounts.length}\n- 北森回流结果：${data.beisenResults.length}\n\n## 策略建议\n\n${recommendations.map((item) => `- ${item}`).join('\n')}\n\n## 重点洞察\n\n${data.reports.map((report) => `### ${report.title}\n\n${report.body}\n\n行动计划：${report.action}`).join('\n\n')}\n`;
 }

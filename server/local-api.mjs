@@ -678,11 +678,28 @@ const server = createServer(async (request, response) => {
         return {
           ...content,
           metrics: {
+            ...content.metrics,
+            impressions: Number(record.impressions ?? content.metrics.impressions ?? 0),
             views: Number(record.views ?? content.metrics.views ?? 0),
+            coverClickRate: Number(record.coverClickRate ?? content.metrics.coverClickRate ?? 0),
+            avgWatchDuration: Number(record.avgWatchDuration ?? content.metrics.avgWatchDuration ?? 0),
+            totalWatchDuration: Number(record.totalWatchDuration ?? content.metrics.totalWatchDuration ?? 0),
+            completionRate: Number(record.completionRate ?? content.metrics.completionRate ?? 0),
             likes: Number(record.likes ?? content.metrics.likes ?? 0),
             comments: Number(record.comments ?? content.metrics.comments ?? 0),
             saves: Number(record.saves ?? content.metrics.saves ?? 0),
             shares: Number(record.shares ?? content.metrics.shares ?? 0),
+            followsGained: Number(record.followsGained ?? content.metrics.followsGained ?? 0),
+            profileVisitors: Number(record.profileVisitors ?? content.metrics.profileVisitors ?? 0),
+            newFollows: Number(record.newFollows ?? content.metrics.newFollows ?? 0),
+            unfollows: Number(record.unfollows ?? content.metrics.unfollows ?? 0),
+            netFollows: Number(record.netFollows ?? content.metrics.netFollows ?? 0),
+            profileFollowRate: Number(record.profileFollowRate ?? content.metrics.profileFollowRate ?? 0),
+            publishCount: Number(record.publishCount ?? content.metrics.publishCount ?? 0),
+            videoPublishCount: Number(record.videoPublishCount ?? content.metrics.videoPublishCount ?? 0),
+            imageTextPublishCount: Number(record.imageTextPublishCount ?? content.metrics.imageTextPublishCount ?? 0),
+            totalFollowers: Number(record.totalFollowers ?? content.metrics.totalFollowers ?? 0),
+            activeFollowers: Number(record.activeFollowers ?? content.metrics.activeFollowers ?? 0),
             clicks: Number(record.clicks ?? content.metrics.clicks ?? 0),
           },
         };
@@ -770,16 +787,35 @@ const server = createServer(async (request, response) => {
 });
 
 function normalizeMetricRecord(record, mapping) {
-  const valueOf = (standard, fallback) => record[mapping[standard]] ?? record[standard] ?? record[fallback];
+  const valueOf = (standard, ...fallbacks) => {
+    const value = record[mapping[standard]] ?? record[standard] ?? fallbacks.map((key) => record[key]).find((item) => item !== undefined && item !== '');
+    return typeof value === 'string' ? value.replace('%', '') : value;
+  };
   return {
     contentId: valueOf('contentId', '内容ID'),
     title: valueOf('title', '标题'),
-    views: valueOf('views', '曝光'),
-    likes: valueOf('likes', '点赞'),
-    comments: valueOf('comments', '评论'),
-    saves: valueOf('saves', '收藏'),
-    shares: valueOf('shares', '分享'),
-    clicks: valueOf('clicks', '点击'),
+    impressions: valueOf('impressions', '曝光', '曝光数', '曝光量'),
+    views: valueOf('views', '观看', '观看数', '阅读', '阅读数', '播放', '播放量'),
+    coverClickRate: valueOf('coverClickRate', '封面点击率'),
+    avgWatchDuration: valueOf('avgWatchDuration', '平均观看时长', '平均观看时长秒'),
+    totalWatchDuration: valueOf('totalWatchDuration', '观看总时长', '观看总时长秒'),
+    completionRate: valueOf('completionRate', '视频完播率', '完播率'),
+    likes: valueOf('likes', '点赞', '点赞数', '点赞量'),
+    comments: valueOf('comments', '评论', '评论数', '评论量'),
+    saves: valueOf('saves', '收藏', '收藏数', '收藏量'),
+    shares: valueOf('shares', '分享', '分享数', '转发', '转发量'),
+    followsGained: valueOf('followsGained', '涨粉', '涨粉数'),
+    profileVisitors: valueOf('profileVisitors', '主页访客', '主页访客数'),
+    newFollows: valueOf('newFollows', '新增关注', '新增粉丝', '新增粉丝数'),
+    unfollows: valueOf('unfollows', '取消关注', '流失粉丝', '流失粉丝数'),
+    netFollows: valueOf('netFollows', '净涨粉'),
+    profileFollowRate: valueOf('profileFollowRate', '主页转粉率'),
+    publishCount: valueOf('publishCount', '发布数', '总发布'),
+    videoPublishCount: valueOf('videoPublishCount', '发布视频'),
+    imageTextPublishCount: valueOf('imageTextPublishCount', '发布图文'),
+    totalFollowers: valueOf('totalFollowers', '总粉丝数'),
+    activeFollowers: valueOf('activeFollowers', '活跃粉丝数'),
+    clicks: valueOf('clicks', '招聘入口点击', '入口点击', '链接点击', '落地页点击', '投递入口点击'),
   };
 }
 
@@ -1054,7 +1090,7 @@ function detectMetricQualityIssues(data, query) {
   (data.contents ?? []).filter((content) => analyticsContentMatches(content, query)).forEach((content) => {
     if (!content.jobId || !(data.jobs ?? []).some((job) => job.id === content.jobId)) push({ issueType: '缺少字段', severity: '高', targetType: 'content', targetId: content.id, message: `${content.title} 未关联有效岗位。` });
     if (!content.accountId || !(data.accounts ?? []).some((account) => account.id === content.accountId)) push({ issueType: '缺少字段', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 未绑定有效账号。` });
-    if (Number(content.metrics?.views || 0) === 0 && (Number(content.metrics?.clicks || 0) > 0 || Number(content.metrics?.likes || 0) > 0)) push({ issueType: '指标异常', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 曝光为 0 但存在点击或互动。` });
+    if (Number(content.metrics?.views || 0) === 0 && (Number(content.metrics?.clicks || 0) > 0 || Number(content.metrics?.likes || 0) > 0)) push({ issueType: '指标异常', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 观看为 0 但存在招聘入口点击或互动。` });
     if (content.publishedAt && content.dueDate && content.publishedAt < content.dueDate && content.status === '已发布') push({ issueType: '日期异常', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 发布时间早于排期日期，请确认。` });
   });
   (data.beisenResults ?? []).filter((result) => analyticsResultInQualityScope(result, data, query)).forEach((result) => {
@@ -1075,9 +1111,9 @@ function detectMetricQualityIssues(data, query) {
 }
 
 function buildAnalyticsInsights(summary) {
-  if (summary.views === 0) return [{ id: 'insight-1', title: '暂无真实平台指标', body: '请先导入平台指标或配置平台 API。', severity: '建议', evidence: ['曝光 0', '点击 0'] }];
-  if (summary.clicks === 0) return [{ id: 'insight-1', title: '有曝光但无点击', body: '优先检查 CTA、招聘入口、岗位链接和内容落点。', severity: '风险', evidence: [`曝光 ${summary.views}`, '点击 0'] }];
-  if (summary.applications === 0) return [{ id: 'insight-1', title: '有点击但无北森回流', body: '优先检查追踪码、北森导入、岗位入口和归因字段。', severity: '风险', evidence: [`点击 ${summary.clicks}`, '投递 0'] }];
+  if (summary.views === 0) return [{ id: 'insight-1', title: '暂无真实平台指标', body: '请先导入平台指标或配置平台 API。', severity: '建议', evidence: ['观看 0', '招聘入口点击 0'] }];
+  if (summary.clicks === 0) return [{ id: 'insight-1', title: '有观看但无招聘入口点击', body: '优先检查 CTA、招聘入口、岗位链接和内容落点。', severity: '风险', evidence: [`观看 ${summary.views}`, '招聘入口点击 0'] }];
+  if (summary.applications === 0) return [{ id: 'insight-1', title: '有招聘入口点击但无北森回流', body: '优先检查追踪码、北森导入、岗位入口和归因字段。', severity: '风险', evidence: [`招聘入口点击 ${summary.clicks}`, '投递 0'] }];
   return [{ id: 'insight-1', title: '链路已有有效回流', body: '建议继续放大高点击内容和高质量岗位方向。', severity: '机会', evidence: [`投递 ${summary.applications}`, `有效 ${summary.effectiveResumes}`] }];
 }
 
@@ -1086,9 +1122,9 @@ function buildAnalyticsDrill(data, query = {}) {
   const summary = summarizeAnalytics(data, normalizedQuery);
   const breakdowns = normalizedQuery.dimension === 'funnel'
     ? [
-      ['views', '曝光', summary.views],
+      ['views', '观看', summary.views],
       ['interactions', '互动', summary.interactions],
-      ['clicks', '点击', summary.clicks],
+      ['clicks', '招聘入口点击', summary.clicks],
       ['applications', '投递', summary.applications],
       ['effectiveResumes', '有效简历', summary.effectiveResumes],
       ['interviews', '面试', summary.interviews],
@@ -1113,7 +1149,7 @@ function buildAnalyticsDrill(data, query = {}) {
       : normalizedQuery.dimension === 'job'
         ? (data.jobs ?? []).map((job) => {
           const jobContents = (data.contents ?? []).filter((content) => content.jobId === job.id && analyticsContentMatches(content, { ...normalizedQuery, jobId: job.id }));
-          const platformContributions = analyticsPlatforms.map((platform) => ({ platform, snapshot: summarizeAnalytics(data, { ...normalizedQuery, jobId: job.id, platform }) })).filter((item) => item.snapshot.views > 0 || item.snapshot.applications > 0).map((item) => `${item.platform}:${item.snapshot.views}曝光/${item.snapshot.applications}投递`);
+          const platformContributions = analyticsPlatforms.map((platform) => ({ platform, snapshot: summarizeAnalytics(data, { ...normalizedQuery, jobId: job.id, platform }) })).filter((item) => item.snapshot.views > 0 || item.snapshot.applications > 0).map((item) => `${item.platform}:${item.snapshot.views}观看/${item.snapshot.applications}投递`);
           const stageDistribution = analyticsBestStageResults((data.beisenResults ?? []).filter((result) => result.jobId === job.id && analyticsResultMatches(result, data, normalizedQuery))).reduce((acc, result) => ({ ...acc, [result.stage]: (acc[result.stage] ?? 0) + 1 }), {});
           return { id: job.id, label: job.title, dimension: 'job', snapshot: summarizeAnalytics(data, { ...normalizedQuery, jobId: job.id }), meta: { family: job.family, city: job.city, level: job.level, status: job.status, platformCoverage: (job.targetPlatforms ?? []).join('、'), contentCount: jobContents.length, contentTypeCoverage: [...new Set(jobContents.map((content) => content.type))].join('、'), platformContributions: platformContributions.join('；'), stageDistribution } };
         })

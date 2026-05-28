@@ -414,7 +414,7 @@ export function buildMvpSeedData(data: AppData = emptyData): AppData {
     ],
     integrations: data.integrations.length ? data.integrations : [
       { id: 'mvp-integration-beisen', type: '北森', name: '北森候选人同步', endpoint: 'https://openapi.example-beisen.com', apiKey: '', authMode: 'Token', status: '待验证', extraConfig: '{"method":"POST","endpointPath":"/candidate/import"}' },
-      { id: 'mvp-integration-platform', type: '平台API', name: '小红书指标拉取', endpoint: 'https://api.example-platform.com', apiKey: '', authMode: 'Token', status: '待验证', extraConfig: '{"platform":"小红书","fields":["views","likes","comments","clicks"]}' },
+      { id: 'mvp-integration-platform', type: '平台API', name: '小红书指标拉取', endpoint: 'https://api.example-platform.com', apiKey: '', authMode: 'Token', status: '待验证', extraConfig: '{"platform":"小红书","fields":["impressions","views","coverClickRate","likes","comments","saves","shares","followsGained","profileVisitors","clicks"]}' },
     ],
     integrationSyncRuns: data.integrationSyncRuns.length ? data.integrationSyncRuns : [
       { id: 'mvp-sync-1', integrationId: 'mvp-integration-platform', syncType: '平台指标拉取', status: '成功', message: '样例指标已进入内容明细', recordCount: 3, retryCount: 0, dataQualityScore: 92, ranAt: now },
@@ -464,7 +464,7 @@ export function buildMvpSeedData(data: AppData = emptyData): AppData {
       { id: 'mvp-deploy-api', title: '配置北森 OpenAPI 字段', category: '平台接口', owner: '招聘运营', status: '进行中', dueDate: '2026-06-05', note: '拿到正式字段后在生产集成字段映射中维护。' },
     ],
     importRuns: data.importRuns.length ? data.importRuns : [
-      { id: 'mvp-import-1', source: '内容指标', fileName: '小红书-指标样例.csv', mapping: '{"views":"曝光","clicks":"点击"}', status: '成功', recordCount: 3, errorRows: [], createdAt: now },
+      { id: 'mvp-import-1', source: '内容指标', fileName: '小红书-指标样例.csv', mapping: '{"impressions":"曝光数","views":"观看数","clicks":"招聘入口点击"}', status: '成功', recordCount: 3, errorRows: [], createdAt: now },
     ],
     reportActions: data.reportActions.length ? data.reportActions : [
       { id: 'mvp-report-action-1', reportId: 'rp-1', title: '复用 VLA 实习内容结构', owner: '招聘专员A', dueDate: '2026-05-31', status: '进行中', createdAt: now },
@@ -476,7 +476,7 @@ export function buildMvpSeedData(data: AppData = emptyData): AppData {
       { id: 'mvp-model-log-1', modelApiId: 'mvp-model-deepseek', task: '内容生成', status: '失败', inputSummary: '资深后端岗位', outputPreview: '', message: '未配置 API Key，等待使用人配置', ranAt: now },
     ],
     pluginRules: data.pluginRules.length ? data.pluginRules : [
-      { id: 'mvp-plugin-xhs', platform: '小红书', name: '笔记指标采集', urlPattern: 'xiaohongshu.com/explore/*', selectors: '{"title":"h1","views":".view","likes":".like"}', enabled: true, updatedAt: now },
+      { id: 'mvp-plugin-xhs', platform: '小红书', name: '笔记指标采集', urlPattern: 'xiaohongshu.com/explore/*', selectors: '{"title":"h1","impressions":".impression","views":".view","likes":".like"}', enabled: true, updatedAt: now },
     ],
     candidateLeads: data.candidateLeads.length ? data.candidateLeads : [
       { id: 'mvp-lead-1', name: '李同学', contact: 'li@example.com', sourcePlatform: '小红书', sourceAccountId: 'acc-1', sourceContentId: 'ct-2', targetJobId: 'job-2', owner: '招聘专员A', stage: '已联系', beisenStatus: '待转入', note: '收藏 VLA 内容后私信咨询', createdAt: now, updatedAt: now },

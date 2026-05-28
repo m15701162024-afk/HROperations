@@ -181,11 +181,27 @@ export interface ContentTask {
   riskLevel: RiskLevel;
   risks: string[];
   metrics: {
+    impressions?: number;
     views: number;
+    coverClickRate?: number;
+    avgWatchDuration?: number;
+    totalWatchDuration?: number;
+    completionRate?: number;
     likes: number;
     comments: number;
     saves: number;
     shares: number;
+    followsGained?: number;
+    profileVisitors?: number;
+    newFollows?: number;
+    unfollows?: number;
+    netFollows?: number;
+    profileFollowRate?: number;
+    publishCount?: number;
+    videoPublishCount?: number;
+    imageTextPublishCount?: number;
+    totalFollowers?: number;
+    activeFollowers?: number;
     clicks: number;
   };
 }

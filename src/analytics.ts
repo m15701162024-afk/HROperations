@@ -185,7 +185,7 @@ export function buildJobBreakdowns(data: AppData, query: DrillQuery): DrillBreak
     const platformContributions = platforms
       .map((platform) => ({ platform, snapshot: summarizeMetrics(data, { ...query, jobId: job.id, platform }) }))
       .filter((item) => item.snapshot.views > 0 || item.snapshot.applications > 0)
-      .map((item) => `${item.platform}:${item.snapshot.views}曝光/${item.snapshot.applications}投递`);
+      .map((item) => `${item.platform}:${item.snapshot.views}观看/${item.snapshot.applications}投递`);
     const stageDistribution = bestStageResults(data.beisenResults.filter((result) => result.jobId === job.id && resultMatches(result, data, query)))
       .reduce<Record<string, number>>((acc, result) => ({ ...acc, [result.stage]: (acc[result.stage] ?? 0) + 1 }), {});
     return {
@@ -245,9 +245,9 @@ export function buildContentDetails(data: AppData, query: DrillQuery): DrillDeta
 
 export function buildFunnelBreakdowns(summary: MetricSnapshot): DrillBreakdown[] {
   const steps = [
-    ['views', '曝光', summary.views],
+    ['views', '观看', summary.views],
     ['interactions', '互动', summary.interactions],
-    ['clicks', '点击', summary.clicks],
+    ['clicks', '招聘入口点击', summary.clicks],
     ['applications', '投递', summary.applications],
     ['effectiveResumes', '有效简历', summary.effectiveResumes],
     ['interviews', '面试', summary.interviews],
@@ -289,7 +289,7 @@ export function detectMetricQualityIssues(data: AppData, query: DrillQuery): Met
       issue({ issueType: '缺少字段', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 未绑定有效账号，账号下钻会缺失。` });
     }
     if (content.metrics.views === 0 && (content.metrics.clicks > 0 || content.metrics.likes > 0 || content.metrics.comments > 0 || content.metrics.saves > 0 || content.metrics.shares > 0)) {
-      issue({ issueType: '指标异常', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 曝光为 0 但存在互动或点击。` });
+      issue({ issueType: '指标异常', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 观看为 0 但存在互动或招聘入口点击。` });
     }
     if (content.publishedAt && content.dueDate && content.publishedAt < content.dueDate && content.status === '已发布') {
       issue({ issueType: '日期异常', severity: '中', targetType: 'content', targetId: content.id, message: `${content.title} 发布时间早于排期日期，请确认。` });
@@ -328,11 +328,11 @@ export function buildMetricInsights(result: Pick<DrillResult, 'summary'>): Drill
     insights.push({ id: `insight-${insights.length + 1}`, title, body, severity, evidence });
   };
   if (summary.views === 0) {
-    push('暂无真实平台指标', '请先导入平台指标或配置平台 API，再进行效果判断。', '建议', ['曝光 0', '点击 0']);
+    push('暂无真实平台指标', '请先导入平台指标或配置平台 API，再进行效果判断。', '建议', ['观看 0', '招聘入口点击 0']);
   } else if (summary.clicks === 0) {
-    push('有曝光但无点击', '优先检查 CTA、招聘入口、岗位链接和内容落点。', '风险', [`曝光 ${summary.views}`, '点击 0']);
+    push('有观看但无招聘入口点击', '优先检查 CTA、招聘入口、岗位链接和内容落点。', '风险', [`观看 ${summary.views}`, '招聘入口点击 0']);
   } else if (summary.applications === 0) {
-    push('有点击但无北森回流', '优先检查追踪码、北森导入、岗位入口和归因字段。', '风险', [`点击 ${summary.clicks}`, '投递 0']);
+    push('有招聘入口点击但无北森回流', '优先检查追踪码、北森导入、岗位入口和归因字段。', '风险', [`招聘入口点击 ${summary.clicks}`, '投递 0']);
   } else if (summary.effectiveRate < 0.2) {
     push('有效简历率偏低', '候选人画像或平台人群可能不匹配，建议复盘岗位表达。', '建议', [`有效简历率 ${(summary.effectiveRate * 100).toFixed(1)}%`]);
   } else {

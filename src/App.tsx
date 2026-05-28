@@ -102,7 +102,7 @@ const sectionDataIndicators: Record<Section, string[]> = {
   素材资产: ['素材数量', '授权状态', '高风险素材', '素材使用次数', '到期素材', '文件上传记录'],
   账号与平台: ['平台账号数', '授权状态', '账号健康分', '同步成功率', '招聘入口点击', '落地页访问/点击/留资'],
   导入中心: ['导入批次数', '成功记录数', '失败记录数', '字段映射完整度', '重复数据', '未归因指标'],
-  数据分析: ['曝光', '互动', '点击', '投递', '有效简历', '面试', 'Offer', '入职', 'ROI', '数据质量问题'],
+  数据分析: ['曝光数', '观看数', '互动数', '招聘入口点击', '投递', '有效简历', '面试', 'Offer', '入职', 'ROI', '数据质量问题'],
   复盘报告: ['报告数量', '机会/风险/建议数', '行动项完成率', '高表现内容特征', '周报导出次数'],
   AI工作台: ['模型任务数', '提示词模板数', '成功运行数', '失败运行数', '平均耗时', '生成内容采纳数'],
   系统配置: ['角色数量', '用户数量', '流程规则数', '敏感词规则数', '上线任务进度', '系统备份数'],
@@ -110,6 +110,52 @@ const sectionDataIndicators: Record<Section, string[]> = {
 const mvpSeedKey = 'hr-assistant-mvp-seeded-v1';
 const dataModeKey = 'hr-assistant-data-mode';
 const currentDataMode = 'real-v2-empty-platform-data';
+const xhsMetricHeaders = [
+  'contentId',
+  'title',
+  'impressions',
+  'views',
+  'coverClickRate',
+  'avgWatchDuration',
+  'totalWatchDuration',
+  'completionRate',
+  'likes',
+  'comments',
+  'saves',
+  'shares',
+  'followsGained',
+  'profileVisitors',
+  'newFollows',
+  'unfollows',
+  'netFollows',
+  'profileFollowRate',
+  'clicks',
+];
+const xhsMetricTemplate = `${xhsMetricHeaders.join(',')}\n`;
+const emptyContentMetrics: ContentTask['metrics'] = {
+  impressions: 0,
+  views: 0,
+  coverClickRate: 0,
+  avgWatchDuration: 0,
+  totalWatchDuration: 0,
+  completionRate: 0,
+  likes: 0,
+  comments: 0,
+  saves: 0,
+  shares: 0,
+  followsGained: 0,
+  profileVisitors: 0,
+  newFollows: 0,
+  unfollows: 0,
+  netFollows: 0,
+  profileFollowRate: 0,
+  publishCount: 0,
+  videoPublishCount: 0,
+  imageTextPublishCount: 0,
+  totalFollowers: 0,
+  activeFollowers: 0,
+  clicks: 0,
+};
 
 function isLegacyDemoData(data: Partial<AppData>) {
   const demoJobIds = new Set(['job-1', 'job-2', 'job-3']);
@@ -966,7 +1012,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
       tags: [selectedJob.family, selectedJob.level, platform],
       riskLevel: scanned.level,
       risks: scanned.risks,
-      metrics: { views: 0, likes: 0, comments: 0, saves: 0, shares: 0, clicks: 0 },
+      metrics: { ...emptyContentMetrics },
     };
     const version: ContentVersion = {
       id: `ver-${Date.now()}`,
@@ -1129,7 +1175,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
       status: '草稿',
       dueDate: new Date().toISOString().slice(0, 10),
       publishedAt: undefined,
-      metrics: { views: 0, likes: 0, comments: 0, saves: 0, shares: 0, clicks: 0 },
+      metrics: { ...emptyContentMetrics },
     };
     audit('复制内容任务', copy.title, { ...data, contents: [copy, ...data.contents] });
   };
@@ -1149,7 +1195,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
           <p>AI 多平台生成、风险识别、审核状态流转、排期发布一体管理。</p>
         </div>
         <div className="toolbar-actions">
-          <button onClick={() => downloadText('内容指标导入模板.csv', 'contentId,title,views,likes,comments,saves,shares,clicks\\n', 'text/csv;charset=utf-8')}><FileText size={16} />下载指标模板</button>
+          <button onClick={() => downloadText('小红书内容指标导入模板.csv', xhsMetricTemplate, 'text/csv;charset=utf-8')}><FileText size={16} />下载指标模板</button>
           <div className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索内容、平台、类型" /></div>
         </div>
       </section>
@@ -1229,7 +1275,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
             <div className="template-grid">
               <div className="template-chip">内容状态<small>{scheduleDetail.status} · {scheduleDetail.riskLevel}风险</small></div>
               <div className="template-chip">协作信息<small>{scheduleDetail.owner} 负责 · {scheduleDetail.reviewer} 审核</small></div>
-              <div className="template-chip">效果数据<small>{scheduleDetail.metrics.views} 曝光 · {scheduleDetail.metrics.clicks} 点击</small></div>
+              <div className="template-chip">效果数据<small>{scheduleDetail.metrics.impressions ?? 0} 曝光 · {scheduleDetail.metrics.views} 观看 · {scheduleDetail.metrics.clicks} 招聘入口点击</small></div>
             </div>
             <p>{scheduleDetail.content}</p>
             <div className="checklist-row">
@@ -1509,7 +1555,7 @@ function Assets({ data, audit, apiToken }: { data: AppData; audit: (action: stri
                 <article key={content.id}>
                   <strong>{content.title}</strong>
                   <span>{content.platform} · {content.status} · {content.owner}</span>
-                  <span>{content.metrics.views} 曝光 · {content.metrics.clicks} 点击</span>
+                  <span>{content.metrics.impressions ?? 0} 曝光 · {content.metrics.views} 观看 · {content.metrics.clicks} 招聘入口点击</span>
                 </article>
               ))}
               {data.contents.filter((content) => content.content.includes(selectedAsset.name) || content.tags.includes(selectedAsset.category)).length === 0 && <EmptyState title="暂无关联内容" body="内容正文或标签命中素材名称/类型后，会自动进入素材详情下钻。" />}
@@ -1706,7 +1752,27 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
         platform: platformName,
         method: 'GET',
         endpointPath: '/metrics',
-        fields: { contentId: 'contentId', title: 'title', views: 'views', likes: 'likes', comments: 'comments', saves: 'saves', shares: 'shares', clicks: 'clicks' },
+        fields: {
+          contentId: 'contentId',
+          title: 'title',
+          impressions: 'impressions',
+          views: 'views',
+          coverClickRate: 'coverClickRate',
+          avgWatchDuration: 'avgWatchDuration',
+          totalWatchDuration: 'totalWatchDuration',
+          completionRate: 'completionRate',
+          likes: 'likes',
+          comments: 'comments',
+          saves: 'saves',
+          shares: 'shares',
+          followsGained: 'followsGained',
+          profileVisitors: 'profileVisitors',
+          newFollows: 'newFollows',
+          unfollows: 'unfollows',
+          netFollows: 'netFollows',
+          profileFollowRate: 'profileFollowRate',
+          clicks: 'clicks',
+        },
       }, null, 2),
     });
     setActivePanel('API集成');
@@ -1833,12 +1899,23 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
     const normalizedRows = rows.map((row) => ({
       contentId: mappedValue(row, fieldMapping, 'contentId', '内容ID'),
       title: mappedValue(row, fieldMapping, 'title', '标题'),
-      views: mappedValue(row, fieldMapping, 'views', '曝光'),
-      likes: mappedValue(row, fieldMapping, 'likes', '点赞'),
-      comments: mappedValue(row, fieldMapping, 'comments', '评论'),
-      saves: mappedValue(row, fieldMapping, 'saves', '收藏'),
-      shares: mappedValue(row, fieldMapping, 'shares', '分享'),
-      clicks: mappedValue(row, fieldMapping, 'clicks', '点击'),
+      impressions: mappedValue(row, fieldMapping, 'impressions', '曝光数'),
+      views: mappedValue(row, fieldMapping, 'views', '观看数'),
+      coverClickRate: mappedValue(row, fieldMapping, 'coverClickRate', '封面点击率'),
+      avgWatchDuration: mappedValue(row, fieldMapping, 'avgWatchDuration', '平均观看时长'),
+      totalWatchDuration: mappedValue(row, fieldMapping, 'totalWatchDuration', '观看总时长'),
+      completionRate: mappedValue(row, fieldMapping, 'completionRate', '视频完播率'),
+      likes: mappedValue(row, fieldMapping, 'likes', '点赞数'),
+      comments: mappedValue(row, fieldMapping, 'comments', '评论数'),
+      saves: mappedValue(row, fieldMapping, 'saves', '收藏数'),
+      shares: mappedValue(row, fieldMapping, 'shares', '分享数'),
+      followsGained: mappedValue(row, fieldMapping, 'followsGained', '涨粉'),
+      profileVisitors: mappedValue(row, fieldMapping, 'profileVisitors', '主页访客'),
+      newFollows: mappedValue(row, fieldMapping, 'newFollows', '新增关注'),
+      unfollows: mappedValue(row, fieldMapping, 'unfollows', '取消关注'),
+      netFollows: mappedValue(row, fieldMapping, 'netFollows', '净涨粉'),
+      profileFollowRate: mappedValue(row, fieldMapping, 'profileFollowRate', '主页转粉率'),
+      clicks: mappedValue(row, fieldMapping, 'clicks', '招聘入口点击'),
     }));
     const csv = normalizedRows.length > 0 ? toCsv(normalizedRows) : '';
     const nextContents = csv ? applyMetricsCsv(data.contents, csv) : data.contents;
@@ -2045,7 +2122,7 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
           <div className="template-grid">
             <div className="template-chip">账号<small>{platformDetail.accounts.map((item) => item.name).join('、') || '未配置'}</small></div>
             <div className="template-chip">入口<small>{platformDetail.entries.map((item) => item.headline).join('、') || '未配置'}</small></div>
-            <div className="template-chip">内容效果<small>{platformDetail.contents.reduce((sum, item) => sum + item.metrics.views, 0)} 曝光 · {platformDetail.contents.reduce((sum, item) => sum + item.metrics.clicks, 0)} 点击</small></div>
+            <div className="template-chip">内容效果<small>{platformDetail.contents.reduce((sum, item) => sum + (item.metrics.impressions ?? 0), 0)} 曝光 · {platformDetail.contents.reduce((sum, item) => sum + item.metrics.views, 0)} 观看 · {platformDetail.contents.reduce((sum, item) => sum + item.metrics.clicks, 0)} 招聘入口点击</small></div>
             <div className="template-chip">北森回流<small>{platformDetail.results.length} 条</small></div>
             <div className="template-chip">本周建议<small>{platformPublished}/{platformTarget} 条已发布</small></div>
             <div className="template-chip">接口状态<small>{platformIntegrations.map((item) => `${item.name} ${item.status}`).join('、') || '未配置'}</small></div>
@@ -2421,6 +2498,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
     if (detailPage > detailTotalPages) setDetailPage(detailTotalPages);
   }, [detailPage, detailTotalPages]);
   const selectedResults = selectedPlatform === '全部' ? data.beisenResults : data.beisenResults.filter((item) => item.sourcePlatform === selectedPlatform);
+  const selectedImpressions = selectedContents.reduce((sum, item) => sum + (item.metrics.impressions ?? 0), 0);
   const selectedViews = analyticsResult.summary.views;
   const selectedInteractions = analyticsResult.summary.interactions;
   const selectedClicks = analyticsResult.summary.clicks;
@@ -2477,7 +2555,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
     .slice(0, 5);
   const funnelDiagnostics = [
     {
-      id: '曝光到点击',
+      id: '观看到招聘入口点击',
       current: selectedClicks,
       base: selectedViews,
       rate: analyticsResult.summary.clickRate,
@@ -2567,7 +2645,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   };
   const analyticsViewDescriptions: Record<typeof analyticsView, string> = {
     总览: '先看核心指标、趋势结论和本周优先动作。',
-    漏斗归因: '定位曝光、点击、投递、有效、入职各环节断点。',
+    漏斗归因: '定位观看、招聘入口点击、投递、有效、入职各环节断点。',
     平台账号: '比较平台和账号贡献，判断资源应该投向哪里。',
     内容岗位: '查看高低表现内容、岗位族群和内容类型贡献。',
     质量解释: '处理数据质量、异常归因和系统解释。',
@@ -2579,7 +2657,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       <section className="toolbar">
         <div>
           <h1>数据分析</h1>
-          <p>按平台、账号、岗位族群、内容类型分析曝光、互动、点击和跳转漏斗。</p>
+          <p>按平台、账号、岗位族群、内容类型分析曝光、观看、互动、招聘入口点击和跳转漏斗。</p>
         </div>
         <div className="toolbar-actions">
           <button onClick={importMetrics}><RefreshCw size={16} />导入指标</button>
@@ -2604,7 +2682,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
         <div className="usage-steps">
           <div><b>1</b><span>先在“内容运营”发布内容，或在“导入中心”导入内容指标</span></div>
           <div><b>2</b><span>再导入北森回流结果，建立平台/内容/岗位归因</span></div>
-          <div><b>3</b><span>最后按平台下钻看曝光、点击、投递和入职效果</span></div>
+          <div><b>3</b><span>最后按平台下钻看曝光、观看、招聘入口点击、投递和入职效果</span></div>
         </div>
       </section>
       <section className="panel wide">
@@ -2620,13 +2698,13 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
         </div>
         <div className="stats-row compact-stats analytics-stats">
           <button className="stat-button" onClick={() => setDrill({ type: '平台', id: String(selectedPlatform) })}><StatCard label="内容数" value={selectedContents.length} note="当前筛选平台" icon={FileText} /></button>
-          <button className="stat-button" onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}><StatCard label="曝光" value={selectedViews.toLocaleString()} note={`互动率 ${formatMetricRate(analyticsResult.summary.interactionRate)}`} icon={Rocket} /></button>
-          <button className="stat-button" onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}><StatCard label="点击" value={selectedClicks.toLocaleString()} note={`点击率 ${formatMetricRate(analyticsResult.summary.clickRate)}`} icon={Link} /></button>
+          <button className="stat-button" onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}><StatCard label="观看数" value={selectedViews.toLocaleString()} note={`曝光 ${selectedImpressions.toLocaleString()}`} icon={Rocket} /></button>
+          <button className="stat-button" onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}><StatCard label="招聘入口点击" value={selectedClicks.toLocaleString()} note={`观看到点击 ${formatMetricRate(analyticsResult.summary.clickRate)}`} icon={Link} /></button>
           <button className="stat-button" onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}><StatCard label="北森回流" value={selectedResults.length} note="投递/面试/入职" icon={Users} /></button>
         </div>
         <div className="analytics-kpi-strip">
           <div><span>互动量</span><b>{selectedInteractions.toLocaleString()}</b><small>赞评藏转合计</small></div>
-          <div><span>投递转化</span><b>{formatMetricRate(analyticsResult.summary.applicationRate)}</b><small>{selectedApplications} 投递 / {selectedClicks} 点击</small></div>
+          <div><span>投递转化</span><b>{formatMetricRate(analyticsResult.summary.applicationRate)}</b><small>{selectedApplications} 投递 / {selectedClicks} 招聘入口点击</small></div>
           <div><span>有效简历率</span><b>{formatMetricRate(analyticsResult.summary.effectiveRate)}</b><small>{selectedEffective} 有效 / {selectedApplications} 投递</small></div>
           <div><span>入职转化</span><b>{formatMetricRate(analyticsResult.summary.hireRate)}</b><small>{selectedHires} 入职 / {selectedApplications} 投递</small></div>
         </div>
@@ -2664,22 +2742,22 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
         <div className="performance-compare-grid">
           <article>
             <strong>优先复用</strong>
-            {topContents.length === 0 && <EmptyState title="暂无高表现内容" body="导入真实曝光、互动、点击后会生成可复用内容样本。" />}
+            {topContents.length === 0 && <EmptyState title="暂无高表现内容" body="导入真实小红书观看、互动、招聘入口点击后会生成可复用内容样本。" />}
             {topContents.map((content) => (
               <button key={content.id} className="performance-row" onClick={() => setDrill({ type: '内容', id: content.id })}>
                 <span>{content.title}</span>
-                <small>{content.platform} · {content.type} · {content.metrics.views} 曝光 · {content.metrics.clicks} 点击</small>
+                <small>{content.platform} · {content.type} · {content.metrics.impressions ?? 0} 曝光 · {content.metrics.views} 观看 · {content.metrics.clicks} 招聘入口点击</small>
                 <Badge tone="good">复用</Badge>
               </button>
             ))}
           </article>
           <article>
             <strong>优先复盘</strong>
-            {bottomContents.length === 0 && <EmptyState title="暂无低表现内容" body="有曝光但点击偏低的内容会进入这里。" />}
+            {bottomContents.length === 0 && <EmptyState title="暂无低表现内容" body="有观看但招聘入口点击偏低的内容会进入这里。" />}
             {bottomContents.map((content) => (
               <button key={content.id} className="performance-row" onClick={() => setDrill({ type: '内容', id: content.id })}>
                 <span>{content.title}</span>
-                <small>{content.platform} · 点击率 {formatRate(content.metrics.clicks, content.metrics.views)} · 建议复盘标题/CTA/平台匹配</small>
+                <small>{content.platform} · 观看到点击 {formatRate(content.metrics.clicks, content.metrics.views)} · 建议复盘标题/CTA/平台匹配</small>
                 <Badge tone="warn">复盘</Badge>
               </button>
             ))}
@@ -2690,7 +2768,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       {analyticsView === '平台账号' && <>
       <section className="panel wide analytics-board">
         <div className="panel-title"><h2>平台效率矩阵</h2><PieChart size={18} /></div>
-        {visiblePlatforms.length === 0 && <EmptyState title="暂无真实平台指标" body="请先发布内容并导入平台后台数据；当前平台曝光、互动和点击均按 0 展示。" />}
+        {visiblePlatforms.length === 0 && <EmptyState title="暂无真实平台指标" body="请先发布内容并导入平台后台数据；当前平台观看、互动和招聘入口点击均按 0 展示。" />}
         <div className="platform-metric-grid">
           {visiblePlatforms.map((item) => (
             <button key={item.platform} className={`platform-metric-card ${selectedPlatform === item.platform ? 'active' : ''}`} onClick={() => setSelectedPlatform(item.platform)}>
@@ -2699,13 +2777,13 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
                 <Badge tone={item.hires > 0 ? 'good' : item.clicks > 0 ? 'info' : 'neutral'}>{item.count} 内容</Badge>
               </div>
               <div className="metric-mini-grid">
-                <span>曝光 <b>{item.views.toLocaleString()}</b></span>
+                <span>观看 <b>{item.views.toLocaleString()}</b></span>
                 <span>互动 <b>{item.interactions.toLocaleString()}</b></span>
-                <span>点击 <b>{item.clicks.toLocaleString()}</b></span>
+                <span>入口点击 <b>{item.clicks.toLocaleString()}</b></span>
                 <span>入职 <b>{item.hires}</b></span>
               </div>
               <Progress current={item.views} target={maxViews} />
-              <small>点击率 {formatRate(item.clicks, item.views)} · 有效率 {formatRate(item.effective, item.applications)} · Offer {item.offers}</small>
+              <small>观看到点击 {formatRate(item.clicks, item.views)} · 有效率 {formatRate(item.effective, item.applications)} · Offer {item.offers}</small>
               <span className="text-link" onClick={(event) => { event.stopPropagation(); setSelectedPlatform(item.platform); setDrill({ type: '平台', id: item.platform }); }}>查看平台明细</span>
             </button>
           ))}
@@ -2717,7 +2795,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
         <div className="panel-title"><h2>下钻维度</h2><Filter size={18} /></div>
         <div className="drill-grid">
           <button onClick={() => setDrill({ type: '平台', id: String(selectedPlatform) })}><strong>平台</strong><span>看该平台账号、内容、入口和北森回流</span></button>
-          <button onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}><strong>漏斗</strong><span>从曝光到点击、投递、有效、入职逐级定位问题</span></button>
+          <button onClick={() => setDrill({ type: '漏斗', id: String(selectedPlatform) })}><strong>漏斗</strong><span>从观看到招聘入口点击、投递、有效、入职逐级定位问题</span></button>
           <button onClick={() => setDrill({ type: '内容', id: selectedContents[0]?.id ?? '' })} disabled={selectedContents.length === 0}><strong>内容</strong><span>查看单条内容指标和归因结果</span></button>
           <button onClick={() => setDrill({ type: '岗位', id: familyStats[0]?.id ?? '' })} disabled={familyStats.length === 0}><strong>岗位</strong><span>查看岗位关联内容和候选人回流</span></button>
           <button onClick={() => setDrill({ type: '账号', id: selectedAccountStats[0]?.account.id ?? '' })} disabled={selectedAccountStats.length === 0}><strong>账号</strong><span>查看账号发布频次、健康度和效果</span></button>
@@ -2734,9 +2812,10 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           )}
           {drill.type === '漏斗' && (
             <div className="funnel drill-funnel">
-              <div>曝光 <b>{selectedViews.toLocaleString()}</b><small>全部平台内容阅读/播放</small></div>
+              <div>曝光 <b>{selectedImpressions.toLocaleString()}</b><small>小红书后台曝光数</small></div>
+              <div>观看 <b>{selectedViews.toLocaleString()}</b><small>小红书后台观看数</small></div>
               <div>互动 <b>{selectedInteractions.toLocaleString()}</b><small>{formatRate(selectedInteractions, selectedViews)}</small></div>
-              <div>点击 <b>{selectedClicks.toLocaleString()}</b><small>{formatRate(selectedClicks, selectedViews)}</small></div>
+              <div>入口点击 <b>{selectedClicks.toLocaleString()}</b><small>{formatRate(selectedClicks, selectedViews)}</small></div>
               <div>投递 <b>{selectedApplications}</b><small>{formatRate(selectedApplications, selectedClicks)}</small></div>
               <div>有效 <b>{selectedEffective}</b><small>{formatRate(selectedEffective, selectedApplications)}</small></div>
               <div>入职 <b>{selectedHires}</b><small>{formatRate(selectedHires, selectedApplications)}</small></div>
@@ -2745,7 +2824,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           {selectedDrillContent && (
             <div className="template-grid">
               <div className="template-chip">内容<small>{selectedDrillContent.title}</small></div>
-              <div className="template-chip">曝光/点击<small>{selectedDrillContent.metrics.views} / {selectedDrillContent.metrics.clicks}</small></div>
+              <div className="template-chip">曝光/观看/入口点击<small>{selectedDrillContent.metrics.impressions ?? 0} / {selectedDrillContent.metrics.views} / {selectedDrillContent.metrics.clicks}</small></div>
               <div className="template-chip">互动<small>{selectedDrillContent.metrics.likes + selectedDrillContent.metrics.comments + selectedDrillContent.metrics.saves + selectedDrillContent.metrics.shares}</small></div>
               <div className="template-chip">北森结果<small>{data.beisenResults.filter((item) => item.sourceContentId === selectedDrillContent.id).length} 条</small></div>
             </div>
@@ -2837,10 +2916,13 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
               <tr>
                 <th>内容</th>
                 <th>平台/账号</th>
-                <th>曝光</th>
+                <th>曝光数</th>
+                <th>观看数</th>
+                <th>封面点击率</th>
                 <th>互动</th>
-                <th>点击</th>
-                <th>点击率</th>
+                <th>涨粉</th>
+                <th>招聘入口点击</th>
+                <th>观看到点击</th>
                 <th>状态</th>
                 <th>下钻</th>
               </tr>
@@ -2856,8 +2938,11 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
                     <tr key={item.id}>
                       <td><strong>{item.title}</strong><span>{item.type} · {item.dueDate}</span></td>
                       <td>{item.platform}<span>{account?.name ?? '未绑定账号'}</span></td>
+                      <td>{(item.metrics.impressions ?? 0).toLocaleString()}</td>
                       <td>{item.metrics.views.toLocaleString()}<Progress current={item.metrics.views} target={maxSelectedViews} /></td>
+                      <td>{item.metrics.coverClickRate ?? 0}%</td>
                       <td>{interactions.toLocaleString()}</td>
+                      <td>{item.metrics.followsGained ?? item.metrics.netFollows ?? 0}</td>
                       <td>{item.metrics.clicks.toLocaleString()}</td>
                       <td>{formatRate(item.metrics.clicks, item.metrics.views)}</td>
                       <td><Badge tone={item.status === '已发布' || item.status === '数据回收中' || item.status === '已复盘' ? 'good' : 'warn'}>{item.status}</Badge></td>
@@ -2873,8 +2958,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       {analyticsView === '导入配置' && <>
       <section className="panel wide">
         <div className="panel-title"><h2>平台指标导入</h2><Database size={18} /></div>
-        <p className="helper">支持字段：contentId/title、views、likes、comments、saves、shares、clicks，也支持中文表头。未导入时看板指标为 0。</p>
-        <textarea className="small-textarea" value={metricsCsv} onChange={(event) => setMetricsCsv(event.target.value)} placeholder="contentId,views,likes,comments,saves,shares,clicks&#10;ct-xxx,1000,20,3,8,2,15" />
+        <p className="helper">支持小红书表头：曝光数、观看数、封面点击率、平均观看时长、观看总时长、视频完播率、点赞数、评论数、收藏数、分享数、涨粉、主页访客；招聘入口点击需来自落地页或短链数据。</p>
+        <textarea className="small-textarea" value={metricsCsv} onChange={(event) => setMetricsCsv(event.target.value)} placeholder="contentId,曝光数,观看数,封面点击率,点赞数,评论数,收藏数,分享数,涨粉,招聘入口点击&#10;ct-xxx,1000,800,12.5,20,3,8,2,5,15" />
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>北森结果回流</h2><RefreshCw size={18} /></div>
@@ -2918,12 +3003,12 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       <section className="panel wide">
         <div className="panel-title"><h2>平台效果对比</h2><BarChart3 size={18} /></div>
         <div className="bar-list">
-          {visiblePlatforms.length === 0 && <EmptyState title="暂无真实平台指标" body="请先发布内容并导入平台后台数据；当前平台曝光、互动和点击均按 0 展示。" />}
+          {visiblePlatforms.length === 0 && <EmptyState title="暂无真实平台指标" body="请先发布内容并导入平台后台数据；当前平台观看、互动和招聘入口点击均按 0 展示。" />}
           {visiblePlatforms.map((item) => (
             <div key={item.platform} className="bar-row">
               <strong>{item.platform}</strong>
               <Progress current={item.views} target={maxViews} />
-              <span>{item.views.toLocaleString()} 曝光 · {item.interactions} 互动 · {item.clicks} 点击</span>
+              <span>{item.views.toLocaleString()} 观看 · {item.interactions} 互动 · {item.clicks} 招聘入口点击</span>
             </div>
           ))}
         </div>
@@ -2932,8 +3017,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       {analyticsView === '内容岗位' && <>
       <section className="panel">
         <div className="panel-title"><h2>岗位族群效果</h2><GitBranch size={18} /></div>
-        {familyStats.length === 0 && <EmptyState title="暂无岗位族群数据" body="录入真实岗位并关联内容后，这里会按岗位族群汇总曝光和点击。" />}
-        {familyStats.map((job) => <div className="compact-row" key={job.id}><div><strong>{job.family}</strong><span>{job.title} · {job.count} 条内容 · {job.views.toLocaleString()} 曝光</span></div><div className="row-actions"><Badge tone="info">{job.clicks} 点击</Badge><button className="ghost" onClick={() => setDrill({ type: '岗位', id: job.id })}>下钻</button></div></div>)}
+        {familyStats.length === 0 && <EmptyState title="暂无岗位族群数据" body="录入真实岗位并关联内容后，这里会按岗位族群汇总观看和招聘入口点击。" />}
+        {familyStats.map((job) => <div className="compact-row" key={job.id}><div><strong>{job.family}</strong><span>{job.title} · {job.count} 条内容 · {job.views.toLocaleString()} 观看</span></div><div className="row-actions"><Badge tone="info">{job.clicks} 入口点击</Badge><button className="ghost" onClick={() => setDrill({ type: '岗位', id: job.id })}>下钻</button></div></div>)}
       </section>
       </>}
       {analyticsView === '漏斗归因' && <>
@@ -2957,8 +3042,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
         {typeStats.length === 0 && <EmptyState title="暂无内容类型数据" body="发布或导入真实内容后，可按内容类型查看贡献。" />}
         {typeStats.map((item) => (
           <div className="compact-row" key={item.type}>
-            <div><strong>{item.type}</strong><span>{item.count} 条内容 · {item.views.toLocaleString()} 曝光</span></div>
-            <Badge tone="info">{item.clicks} 点击</Badge>
+            <div><strong>{item.type}</strong><span>{item.count} 条内容 · {item.views.toLocaleString()} 观看</span></div>
+            <Badge tone="info">{item.clicks} 入口点击</Badge>
           </div>
         ))}
       </section>
@@ -2973,10 +3058,10 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
               <strong>{account.platform}｜{account.name}</strong>
               <span>{account.positioning || '未填写定位'} · {items.length} 条内容</span>
               <div className="metric-mini-grid">
-                <span>曝光 <b>{views}</b></span>
+                <span>观看 <b>{views}</b></span>
                 <span>互动 <b>{interactions}</b></span>
-                <span>点击 <b>{clicks}</b></span>
-                <span>点击率 <b>{formatRate(clicks, views)}</b></span>
+                <span>入口点击 <b>{clicks}</b></span>
+                <span>观看到点击 <b>{formatRate(clicks, views)}</b></span>
               </div>
               <button className="ghost" onClick={() => setDrill({ type: '账号', id: account.id })}>查看账号下钻</button>
             </article>
@@ -2989,9 +3074,9 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
         <div className="panel-title"><h2>漏斗代理指标</h2><Target size={18} /></div>
         <div className="funnel">
           <div>发布内容 <b>{data.contents.length}</b></div>
-          <div>曝光阅读 <b>{data.contents.reduce((sum, item) => sum + item.metrics.views, 0).toLocaleString()}</b></div>
+          <div>观看数 <b>{data.contents.reduce((sum, item) => sum + item.metrics.views, 0).toLocaleString()}</b></div>
           <div>互动行为 <b>{data.contents.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0).toLocaleString()}</b></div>
-          <div>入口点击 <b>{data.contents.reduce((sum, item) => sum + item.metrics.clicks, 0)}</b></div>
+          <div>招聘入口点击 <b>{data.contents.reduce((sum, item) => sum + item.metrics.clicks, 0)}</b></div>
         </div>
       </section>
       </>}
@@ -3050,7 +3135,7 @@ function TopicLibrary({ data, audit }: { data: AppData; audit: (action: string, 
       tags: item.tags,
       riskLevel: risk.level,
       risks: risk.risks,
-      metrics: { views: 0, likes: 0, comments: 0, saves: 0, shares: 0, clicks: 0 },
+      metrics: { ...emptyContentMetrics },
     };
     audit('选题转内容任务', item.title, {
       ...data,
@@ -3373,7 +3458,7 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
   const [csv, setCsv] = useState('');
   const [fileName, setFileName] = useState('手动粘贴.csv');
   const [lastImportMessage, setLastImportMessage] = useState('');
-  const [mappingText, setMappingText] = useState('{"岗位名称":"title","平台":"platform","账号名称":"name","曝光":"views","点击":"clicks","候选人编号":"candidateCode"}');
+  const [mappingText, setMappingText] = useState('{"岗位名称":"title","平台":"platform","账号名称":"name","曝光数":"impressions","观看数":"views","招聘入口点击":"clicks","候选人编号":"candidateCode"}');
   const [confirmImport, setConfirmImport] = useState(false);
   const mappedCsv = remapCsv(csv, mappingText);
   const preview = csvPreviewRows(mappedCsv);
@@ -3417,7 +3502,7 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
   const warningErrors = duplicateChecks;
   const templates: Record<ImportRun['source'], string> = {
     岗位: 'title,family,city,level,type,jd,persona,sellingPoints,targetPlatforms,beisenUrl,websiteUrl\n',
-    内容指标: 'contentId,title,views,likes,comments,saves,shares,clicks\n',
+    内容指标: xhsMetricTemplate,
     北森结果: 'jobId,sourcePlatform,sourceContentId,candidateCode,stage\n',
     账号: 'platform,name,type,owner,positioning\n',
     素材: 'name,category,owner,scope,authorization,expiresAt\n',
@@ -3534,7 +3619,7 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
         </div>
         <label className="checkbox-line"><input type="checkbox" checked={confirmImport} onChange={(event) => setConfirmImport(event.target.checked)} />确认写入业务数据</label>
         <textarea className="small-textarea" value={csv} onChange={(event) => setCsv(event.target.value)} placeholder={templates[source]} />
-        <textarea className="small-textarea" value={mappingText} onChange={(event) => setMappingText(event.target.value)} placeholder='字段映射 JSON，例如 {"岗位名称":"title","曝光":"views"}' />
+        <textarea className="small-textarea" value={mappingText} onChange={(event) => setMappingText(event.target.value)} placeholder='字段映射 JSON，例如 {"曝光数":"impressions","观看数":"views","招聘入口点击":"clicks"}' />
         <div className="platform-note"><Database size={16} />识别到 {allRows.rows.length} 行数据，预览显示前 {preview.rows.length} 行。必要字段：{requiredHeaders[source].join('、')}</div>
         <div className="stats-row compact-stats analytics-stats">
           <StatCard label="待导入行" value={allRows.rows.length} note="CSV 有效数据行" icon={Database} />
@@ -4087,7 +4172,7 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
   const [mapping, setMapping] = useState({ name: '', integrationType: '北森' as IntegrationMapping['integrationType'], scenario: '北森线索同步' as IntegrationMapping['scenario'], method: 'POST' as IntegrationMapping['method'], endpointPath: '', resultPath: '', fieldMapping: '{"candidateName":"name","mobile":"contact","jobCode":"jobId"}' });
   const [policy, setPolicy] = useState({ title: '', scope: '隐私授权' as CompliancePolicy['scope'], owner: '', content: '' });
   const [task, setTask] = useState({ title: '', category: '平台接口' as DeploymentTask['category'], owner: '', dueDate: '', note: '' });
-  const [pluginRule, setPluginRule] = useState({ platform: '小红书' as Platform, name: '', urlPattern: '', selectors: '{"title":"h1","views":".view","likes":".like"}' });
+  const [pluginRule, setPluginRule] = useState({ platform: '小红书' as Platform, name: '', urlPattern: '', selectors: '{"title":"h1","impressions":".impression","views":".view","likes":".like"}' });
   const [systemStatus, setSystemStatus] = useState('');
   const [authUsers, setAuthUsers] = useState<ApiUser[]>([]);
   const [authUser, setAuthUser] = useState({ username: '', name: '', role: '招聘专员', password: '' });
@@ -4273,7 +4358,7 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
       updatedAt: nowText(),
     };
     update({ ...data, pluginRules: [item, ...data.pluginRules] });
-    setPluginRule({ platform: '小红书', name: '', urlPattern: '', selectors: '{"title":"h1","views":".view","likes":".like"}' });
+    setPluginRule({ platform: '小红书', name: '', urlPattern: '', selectors: '{"title":"h1","impressions":".impression","views":".view","likes":".like"}' });
   };
   const togglePluginRule = (id: string) => {
     update({ ...data, pluginRules: data.pluginRules.map((item) => item.id === id ? { ...item, enabled: !item.enabled, updatedAt: nowText() } : item) });
@@ -4664,7 +4749,7 @@ function SettingsPage({ data, update, resetData, apiToken }: { data: AppData; up
           <input value={pluginRule.urlPattern} onChange={(event) => setPluginRule({ ...pluginRule, urlPattern: event.target.value })} placeholder="URL 匹配规则，如 xiaohongshu.com/explore/*" />
           <button onClick={addPluginRule}><Plus size={16} />保存规则</button>
         </div>
-        <textarea className="small-textarea" value={pluginRule.selectors} onChange={(event) => setPluginRule({ ...pluginRule, selectors: event.target.value })} placeholder='字段选择器 JSON，如 {"title":"h1","views":".view"}' />
+        <textarea className="small-textarea" value={pluginRule.selectors} onChange={(event) => setPluginRule({ ...pluginRule, selectors: event.target.value })} placeholder='字段选择器 JSON，如 {"title":"h1","impressions":".impression","views":".view"}' />
         <div className="entry-grid">
           {data.pluginRules.length === 0 && <EmptyState title="暂无插件采集规则" body="后续由使用人按各平台页面结构配置 URL、字段和选择器。" />}
           {data.pluginRules.map((item) => (
