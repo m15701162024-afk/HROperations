@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildAnalyticsDrill } from './analytics';
 import { emptyData, scanRisks } from './data';
 import type { AppData, ContentTask, JobNeed, PlatformAccount } from './types';
-import { applyMetricsCsv, buildReportMarkdown, calculateAccountHealth, deriveTasks, detectCalendarConflicts, evaluateContentReadiness, evaluateIntegrationReadiness, evaluateModelApiReadiness, findDuplicateLead, generateTopicsFromJob, getContentDataStatus, parseBeisenCsv, parseJobCsv, parseLeadCsv, scoreContentQuality } from './utils';
+import { applyMetricsCsv, buildAttributionRecords, buildReportMarkdown, buildReviewActions, calculateAccountHealth, deriveTasks, detectCalendarConflicts, evaluateContentReadiness, evaluateIntegrationReadiness, evaluateModelApiReadiness, findDuplicateLead, generateTopicsFromJob, getContentDataStatus, mergeBeisenResults, mergeMetricRecords, parseBeisenCsv, parseJobCsv, parseLeadCsv, parseMetricCsvRecords, scoreContentQuality } from './utils';
 
 const job: JobNeed = {
   id: 'job-mvp',
@@ -128,16 +128,34 @@ describe('模块主流程 MVP 自动化验收', () => {
 
   it('stores metric date and schema version on XHS metric import', () => {
     const updated = applyMetricsCsv([content], 'contentId,metricDate,曝光数,观看数,点赞数,评论数,收藏数,分享数,招聘入口点击\nct-mvp,2026-05-30,3000,2000,40,8,16,6,60')[0];
+    const records = parseMetricCsvRecords([content], 'contentId,metricDate,曝光数,观看数,点赞数,评论数,收藏数,分享数,招聘入口点击\nct-mvp,2026-05-30,3000,2000,40,8,16,6,60', 'batch-test');
     expect(updated.metrics.metricDate).toBe('2026-05-30');
     expect(updated.metrics.metricSchemaVersion).toBe('xhs-mvp-v1');
     expect(updated.metrics.impressions).toBe(3000);
     expect(updated.metrics.views).toBe(2000);
+    expect(records[0].metricDate).toBe('2026-05-30');
+    expect(mergeMetricRecords(records, records)).toHaveLength(1);
   });
 
   it('keeps Beisen stage time and derives content data status', () => {
     const [result] = parseBeisenCsv('jobId,sourcePlatform,sourceContentId,candidateCode,stage,stageChangedAt\njob-mvp,小红书,ct-mvp,C1,有效简历,2026-05-30');
     expect(result.stageChangedAt).toBe('2026-05-30');
+    expect(mergeBeisenResults([result], [result])).toHaveLength(1);
     expect(getContentDataStatus({ ...content, metrics: { ...content.metrics, clicks: 0 } }, { beisenResults: [] })).toBe('缺入口数据');
     expect(getContentDataStatus(content, { beisenResults: [] })).toBe('缺北森回流');
+  });
+
+  it('builds attribution evidence and review actions from MVP data', () => {
+    const fixture = {
+      ...dataFixture(),
+      entryClicks: [{ id: 'click-mvp', entryId: 'entry-mvp', contentId: content.id, jobId: job.id, platform: '小红书' as const, clickedAt: '2026-05-30 10:00:00', source: '手动导入' as const }],
+      metricRecords: parseMetricCsvRecords([content], 'contentId,metricDate,观看数,点赞数\nct-mvp,2026-05-30,1000,10', 'attr-test'),
+      attributionRecords: [],
+    };
+    const attribution = buildAttributionRecords(fixture);
+    const actions = buildReviewActions({ ...fixture, beisenResults: [] }, '2026-05-30', '2026-05-30');
+
+    expect(attribution.some((item) => item.sourceType === '入口点击' && item.basis === 'sourceContentId')).toBe(true);
+    expect(actions.some((item) => item.ruleId === 'click-no-application')).toBe(true);
   });
 });

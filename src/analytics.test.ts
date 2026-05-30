@@ -60,6 +60,9 @@ const baseData: AppData = {
     { id: 'b-2', jobId: 'job-1', sourcePlatform: '小红书', sourceContentId: 'ct-1', candidateCode: 'C002', stage: '有效简历', importedAt: '2026-05-21' },
     { id: 'b-3', jobId: 'job-1', sourcePlatform: '小红书', sourceContentId: 'ct-1', candidateCode: 'C003', stage: '已入职', importedAt: '2026-05-21' },
   ],
+  metricRecords: [],
+  entryClicks: [],
+  attributionRecords: [],
   integrations: [],
   integrationSyncRuns: [],
   modelApis: [],
@@ -113,6 +116,28 @@ describe('analytics drill service', () => {
     expect(summary.hires).toBe(1);
     expect(summary.clickRate).toBe(0.04);
     expect(summary.effectiveRate).toBeCloseTo(0.6667, 4);
+  });
+
+  it('uses dated metric records and entry click events for configurable periods', () => {
+    const data: AppData = {
+      ...baseData,
+      contents: [{ ...baseData.contents[0], metrics: { ...baseData.contents[0].metrics, views: 9999, clicks: 9999 } }],
+      metricRecords: [
+        { id: 'mr-1', contentId: 'ct-1', platform: '小红书', metricDate: '2026-05-22', sourceBatchId: 'batch-1', metricSchemaVersion: 'xhs-mvp-v1', impressions: 500, views: 300, coverClickRate: 10, avgWatchDuration: 0, totalWatchDuration: 0, completionRate: 0, likes: 10, comments: 2, saves: 3, shares: 1, followsGained: 0, profileVisitors: 0, clicks: 10, importedAt: '2026-05-22' },
+        { id: 'mr-2', contentId: 'ct-1', platform: '小红书', metricDate: '2026-05-10', sourceBatchId: 'batch-1', metricSchemaVersion: 'xhs-mvp-v1', impressions: 900, views: 700, coverClickRate: 10, avgWatchDuration: 0, totalWatchDuration: 0, completionRate: 0, likes: 1, comments: 1, saves: 1, shares: 1, followsGained: 0, profileVisitors: 0, clicks: 8, importedAt: '2026-05-10' },
+      ],
+      entryClicks: [
+        { id: 'click-1', contentId: 'ct-1', jobId: 'job-1', platform: '小红书', clickedAt: '2026-05-22 10:00:00', source: '手动导入' },
+        { id: 'click-2', contentId: 'ct-1', jobId: 'job-1', platform: '小红书', clickedAt: '2026-05-22 11:00:00', source: '手动导入' },
+      ],
+    };
+
+    const summary = summarizeMetrics(data, { dimension: 'platform', platform: '小红书', dateFrom: '2026-05-22', dateTo: '2026-05-22' });
+
+    expect(summary.views).toBe(300);
+    expect(summary.interactions).toBe(16);
+    expect(summary.clicks).toBe(2);
+    expect(summary.clickRate).toBeCloseTo(0.0067, 4);
   });
 
   it('returns zero metrics for empty real data', () => {

@@ -1,5 +1,5 @@
 import { platformPositioning, platforms } from './data';
-import type { AccountHealthSnapshot, AppData, BeisenResult, CandidateLead, ContentQualityScore, ContentTask, DataExplanation, IntegrationConfig, JobNeed, ModelApiConfig, Platform, TaskItem, TopicItem } from './types';
+import type { AccountHealthSnapshot, AppData, AttributionRecord, BeisenResult, CandidateLead, ContentQualityScore, ContentTask, DataExplanation, IntegrationConfig, JobNeed, MetricRecord, ModelApiConfig, Platform, ReportAction, TaskItem, TopicItem } from './types';
 
 export const metricSchemaVersion = 'xhs-mvp-v1';
 
@@ -162,7 +162,8 @@ export function getContentDataStatus(content: ContentTask, data: Pick<AppData, '
   if (!content.publishedAt) return '未发布';
   const hasPlatformMetrics = Number(content.metrics.views || 0) + Number(content.metrics.likes || 0) + Number(content.metrics.comments || 0) + Number(content.metrics.saves || 0) + Number(content.metrics.shares || 0) > 0;
   const hasEntryClicks = Number(content.metrics.clicks || 0) > 0;
-  const attributedApplications = data.beisenResults.filter((item) => item.sourceContentId === content.id && item.stage === '已投递').length;
+  const applicationStages: BeisenResult['stage'][] = ['已投递', '有效简历', '初筛通过', '已约面', '已面试', 'Offer', '已入职'];
+  const attributedApplications = data.beisenResults.filter((item) => item.sourceContentId === content.id && applicationStages.includes(item.stage)).length;
   if (!hasPlatformMetrics) return '缺平台数据';
   if (!hasEntryClicks) return '缺入口数据';
   if (hasEntryClicks && attributedApplications === 0) return '缺北森回流';
@@ -219,6 +220,157 @@ export function applyMetricsCsv(contents: ContentTask[], raw: string) {
       },
     };
   });
+}
+
+export function parseMetricCsvRecords(contents: ContentTask[], raw: string, sourceBatchId = `metric-${Date.now()}`): MetricRecord[] {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = splitCsvLine(lines[0]).map((header) => header.trim());
+  const rows = lines.slice(1).map((line) => {
+    const values = splitCsvLine(line);
+    return Object.fromEntries(headers.map((header, i) => [header, values[i] ?? '']));
+  });
+  const numberOf = (row: Record<string, string>, ...keys: string[]) => {
+    const value = keys.map((key) => row[key]).find((item) => item !== undefined && item !== '');
+    return value === undefined ? 0 : Number(String(value).replace('%', '')) || 0;
+  };
+  const textOf = (row: Record<string, string>, ...keys: string[]) => keys.map((key) => row[key]).find((item) => item !== undefined && item !== '');
+  const now = new Date().toLocaleString('zh-CN', { hour12: false });
+  return rows
+    .map((row, index) => {
+      const contentId = textOf(row, 'contentId', '内容ID');
+      const title = textOf(row, 'title', '标题');
+      const content = contents.find((item) => item.id === contentId || item.title === title);
+      if (!content) return undefined;
+      const metricDate = String(textOf(row, 'metricDate', '数据日期', '日期', 'date') ?? content.metrics.metricDate ?? now.slice(0, 10));
+      return {
+        id: `${content.id}-${metricDate}-${sourceBatchId}-${index}`,
+        contentId: content.id,
+        platform: content.platform,
+        metricDate,
+        sourceBatchId,
+        metricSchemaVersion,
+        impressions: numberOf(row, 'impressions', '曝光', '曝光数', '曝光量'),
+        views: numberOf(row, 'views', '观看', '观看数', '阅读', '阅读数', '播放', '播放量'),
+        coverClickRate: numberOf(row, 'coverClickRate', '封面点击率'),
+        avgWatchDuration: numberOf(row, 'avgWatchDuration', '平均观看时长', '平均观看时长秒'),
+        totalWatchDuration: numberOf(row, 'totalWatchDuration', '观看总时长', '观看总时长秒'),
+        completionRate: numberOf(row, 'completionRate', '视频完播率', '完播率'),
+        likes: numberOf(row, 'likes', '点赞', '点赞数', '点赞量'),
+        comments: numberOf(row, 'comments', '评论', '评论数', '评论量'),
+        saves: numberOf(row, 'saves', '收藏', '收藏数', '收藏量'),
+        shares: numberOf(row, 'shares', '分享', '分享数', '转发', '转发量'),
+        followsGained: numberOf(row, 'followsGained', '涨粉', '涨粉数'),
+        profileVisitors: numberOf(row, 'profileVisitors', '主页访客', '主页访客数'),
+        clicks: numberOf(row, 'clicks', '招聘入口点击', '入口点击', '链接点击', '落地页点击', '投递入口点击'),
+        importedAt: now,
+      } satisfies MetricRecord;
+    })
+    .filter((item): item is MetricRecord => Boolean(item));
+}
+
+export function mergeMetricRecords(existing: MetricRecord[], incoming: MetricRecord[]) {
+  return [...incoming, ...existing].filter((item, index, list) => (
+    list.findIndex((record) => record.contentId === item.contentId && record.metricDate === item.metricDate && record.platform === item.platform && record.sourceBatchId === item.sourceBatchId) === index
+  ));
+}
+
+export function mergeBeisenResults(existing: BeisenResult[], incoming: BeisenResult[]) {
+  return [...incoming, ...existing].filter((item, index, list) => (
+    list.findIndex((result) => result.candidateCode === item.candidateCode && result.jobId === item.jobId && result.stage === item.stage) === index
+  ));
+}
+
+export function buildAttributionRecords(data: Pick<AppData, 'contents' | 'jobs' | 'entries' | 'beisenResults' | 'entryClicks' | 'metricRecords'>): AttributionRecord[] {
+  const now = new Date().toLocaleString('zh-CN', { hour12: false });
+  const byTrackingCode = new Map(data.entries.filter((entry) => entry.trackingCode).map((entry) => [entry.trackingCode, entry]));
+  const records: AttributionRecord[] = [];
+  data.beisenResults.forEach((result) => {
+    const content = result.sourceContentId ? data.contents.find((item) => item.id === result.sourceContentId) : undefined;
+    const job = result.jobId ? data.jobs.find((item) => item.id === result.jobId) : undefined;
+    records.push({
+      id: `attr-beisen-${result.id}`,
+      sourceType: '北森回流',
+      sourceId: result.id,
+      targetType: content ? 'content' : job ? 'job' : result.sourcePlatform !== '未知' ? 'platform' : 'unknown',
+      contentId: content?.id,
+      jobId: job?.id ?? content?.jobId,
+      platform: content?.platform ?? result.sourcePlatform,
+      entryId: content?.entryId,
+      basis: content ? 'sourceContentId' : job && result.sourcePlatform !== '未知' ? 'jobId+platform' : result.sourcePlatform !== '未知' ? 'platform' : 'unmatched',
+      confidence: content ? '高' : job ? '中' : '低',
+      createdAt: now,
+    });
+  });
+  data.entryClicks.forEach((click) => {
+    const entry = click.entryId ? data.entries.find((item) => item.id === click.entryId) : click.trackingCode ? byTrackingCode.get(click.trackingCode) : undefined;
+    const content = click.contentId ? data.contents.find((item) => item.id === click.contentId) : undefined;
+    records.push({
+      id: `attr-click-${click.id}`,
+      sourceType: '入口点击',
+      sourceId: click.id,
+      targetType: content ? 'content' : entry ? 'entry' : click.jobId ? 'job' : click.platform !== '未知' ? 'platform' : 'unknown',
+      contentId: content?.id,
+      jobId: click.jobId ?? content?.jobId,
+      platform: content?.platform ?? entry?.platform ?? click.platform,
+      entryId: entry?.id ?? click.entryId,
+      basis: content ? 'sourceContentId' : entry ? 'trackingCode' : click.jobId ? 'jobId+platform' : click.platform !== '未知' ? 'platform' : 'unmatched',
+      confidence: content || entry ? '高' : click.jobId ? '中' : '低',
+      createdAt: now,
+    });
+  });
+  data.metricRecords.forEach((metric) => {
+    const content = data.contents.find((item) => item.id === metric.contentId);
+    records.push({
+      id: `attr-metric-${metric.id}`,
+      sourceType: '平台指标',
+      sourceId: metric.id,
+      targetType: content ? 'content' : 'unknown',
+      contentId: content?.id,
+      jobId: content?.jobId,
+      platform: content?.platform ?? metric.platform,
+      entryId: content?.entryId,
+      basis: content ? 'sourceContentId' : 'unmatched',
+      confidence: content ? '高' : '低',
+      createdAt: now,
+    });
+  });
+  return records;
+}
+
+export function buildReviewActions(data: AppData, periodStart = '', periodEnd = ''): ReportAction[] {
+  const now = new Date().toLocaleString('zh-CN', { hour12: false });
+  const due = new Date();
+  due.setDate(due.getDate() + 3);
+  const dueDate = due.toISOString().slice(0, 10);
+  const actions = data.contents.flatMap((content) => {
+    const interactions = Number(content.metrics.likes || 0) + Number(content.metrics.comments || 0) + Number(content.metrics.saves || 0) + Number(content.metrics.shares || 0);
+    const list: ReportAction[] = [];
+    const push = (ruleId: string, title: string, reason: string, action: string) => {
+      list.push({
+        id: `review-${content.id}-${ruleId}-${periodStart || 'all'}-${periodEnd || 'all'}`,
+        reportId: 'auto-review',
+        title,
+        targetType: '内容',
+        targetId: content.id,
+        reason,
+        action,
+        ruleId,
+        periodStart,
+        periodEnd,
+        owner: content.owner,
+        dueDate,
+        status: '未开始',
+        createdAt: now,
+      });
+    };
+    if ((content.metrics.impressions ?? 0) > 0 && content.metrics.views === 0) push('high-impression-low-view', `优化标题/封面：${content.title}`, `曝光 ${content.metrics.impressions}，观看 0`, '调整首图、标题和发布时间。');
+    if (content.metrics.views > 0 && interactions === 0) push('high-view-low-interaction', `强化内容共鸣：${content.title}`, `观看 ${content.metrics.views}，互动 0`, '补充候选人痛点、真实工作场景和岗位卖点。');
+    if (interactions > 0 && content.metrics.clicks === 0) push('interaction-no-click', `强化招聘入口：${content.title}`, `互动 ${interactions}，招聘入口点击 0`, '强化 CTA、入口位置和岗位动作。');
+    if (content.metrics.clicks > 0 && !data.beisenResults.some((item) => item.sourceContentId === content.id)) push('click-no-application', `检查投递路径：${content.title}`, `招聘入口点击 ${content.metrics.clicks}，无北森回流`, '检查北森链接、trackingCode、JD 和投递门槛。');
+    return list;
+  });
+  return actions.filter((item, index, list) => list.findIndex((action) => action.id === item.id) === index);
 }
 
 export function parseBeisenCsv(raw: string): BeisenResult[] {

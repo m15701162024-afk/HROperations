@@ -52,6 +52,17 @@ function contentMatches(content: ContentTask, query: DrillQuery) {
   );
 }
 
+function contentScopeMatches(content: ContentTask, query: DrillQuery) {
+  return (
+    (!query.platform || query.platform === '全部' || content.platform === query.platform)
+    && (!query.accountId || content.accountId === query.accountId)
+    && (!query.contentId || content.id === query.contentId)
+    && (!query.jobId || content.jobId === query.jobId)
+    && (!query.contentType || content.type === query.contentType)
+    && (!query.status || content.status === query.status)
+  );
+}
+
 function bestStageResults(results: BeisenResult[]) {
   const byCandidate = new Map<string, BeisenResult>();
   results.forEach((result) => {
@@ -90,13 +101,31 @@ function resultInQualityScope(result: BeisenResult, data: Pick<AppData, 'content
 }
 
 export function summarizeMetrics(data: AppData, query: DrillQuery): MetricSnapshot {
-  const contents = data.contents.filter((content) => contentMatches(content, query));
+  const scopedContents = data.contents.filter((content) => contentScopeMatches(content, query));
+  const scopedContentIds = new Set(scopedContents.map((content) => content.id));
+  const metricRecords = data.metricRecords.filter((record) => scopedContentIds.has(record.contentId) && dateInRange(record.metricDate, query));
+  const contents = metricRecords.length > 0 ? scopedContents : data.contents.filter((content) => contentMatches(content, query));
   const results = bestStageResults(data.beisenResults.filter((result) => resultMatches(result, data, query)));
-  const views = contents.reduce((sum, content) => sum + Number(content.metrics.views || 0), 0);
-  const interactions = contents.reduce((sum, content) => (
+  const views = metricRecords.length > 0
+    ? metricRecords.reduce((sum, record) => sum + Number(record.views || 0), 0)
+    : contents.reduce((sum, content) => sum + Number(content.metrics.views || 0), 0);
+  const interactions = metricRecords.length > 0 ? metricRecords.reduce((sum, record) => (
+    sum + Number(record.likes || 0) + Number(record.comments || 0) + Number(record.saves || 0) + Number(record.shares || 0)
+  ), 0) : contents.reduce((sum, content) => (
     sum + Number(content.metrics.likes || 0) + Number(content.metrics.comments || 0) + Number(content.metrics.saves || 0) + Number(content.metrics.shares || 0)
   ), 0);
-  const clicks = contents.reduce((sum, content) => sum + Number(content.metrics.clicks || 0), 0);
+  const scopedEntryClicks = data.entryClicks.filter((click) => (
+    (!query.platform || query.platform === '全部' || click.platform === query.platform)
+    && (!query.contentId || click.contentId === query.contentId)
+    && (!query.jobId || click.jobId === query.jobId || (click.contentId && scopedContentIds.has(click.contentId)))
+    && dateInRange(click.clickedAt.slice(0, 10), query)
+    && (!click.contentId || scopedContentIds.has(click.contentId))
+  ));
+  const clicks = scopedEntryClicks.length > 0
+    ? scopedEntryClicks.length
+    : metricRecords.some((record) => record.clicks > 0)
+      ? metricRecords.reduce((sum, record) => sum + Number(record.clicks || 0), 0)
+      : contents.reduce((sum, content) => sum + Number(content.metrics.clicks || 0), 0);
   const applications = results.filter((result) => stageRank[result.stage] >= stageRank.已投递).length;
   const effectiveResumes = results.filter((result) => stageRank[result.stage] >= stageRank.有效简历).length;
   const interviews = results.filter((result) => stageRank[result.stage] >= stageRank.已约面).length;

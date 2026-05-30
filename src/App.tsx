@@ -32,7 +32,7 @@ import { buildMvpSeedData, emptyData, generateContent, nextStatus, platformPosit
 import { evaluateMvpMatrix, mvpReportMarkdown, summarizeMvp } from './mvp';
 import type { AccountType, AppData, AppSection, AssetItem, BeisenResult, CalendarMilestone, CandidateLead, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, LeadFollowUp, ModelApiConfig, NotificationItem, OperationSettings, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, TaskItem, TopicItem, UserProfile, WorkflowRule } from './types';
 import type { ImportRun, ModelRunLog, PluginRule, PromptTemplate, ReportAction, ReviewMention } from './types';
-import { applyMetricsCsv, buildDataExplanations, buildPlatformStrategy, buildRecommendations, buildReportMarkdown, calculateAccountHealth, calculateRoi, deriveTasks, detectCalendarConflicts, downloadText, evaluateContentReadiness, evaluateIntegrationReadiness, evaluateModelApiReadiness, exportJson, findDuplicateLead, generateTopicsFromJob, getContentDataStatus, inferContentCta, metricSchemaVersion, parseBeisenCsv, parseJobCsv, parseLeadCsv, readJsonFile, scoreContentQuality, toCsv } from './utils';
+import { applyMetricsCsv, buildAttributionRecords, buildDataExplanations, buildPlatformStrategy, buildRecommendations, buildReportMarkdown, buildReviewActions, calculateAccountHealth, calculateRoi, deriveTasks, detectCalendarConflicts, downloadText, evaluateContentReadiness, evaluateIntegrationReadiness, evaluateModelApiReadiness, exportJson, findDuplicateLead, generateTopicsFromJob, getContentDataStatus, inferContentCta, mergeBeisenResults, mergeMetricRecords, metricSchemaVersion, parseBeisenCsv, parseJobCsv, parseLeadCsv, parseMetricCsvRecords, readJsonFile, scoreContentQuality, toCsv } from './utils';
 
 type Section = AppSection;
 
@@ -1980,15 +1980,21 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
       clicks: mappedValue(row, fieldMapping, 'clicks', '招聘入口点击'),
     }));
     const csv = normalizedRows.length > 0 ? toCsv(normalizedRows) : '';
+    const importedRecords = csv ? parseMetricCsvRecords(data.contents, csv, `sync-${target.id}-${Date.now()}`) : [];
     const nextContents = csv ? applyMetricsCsv(data.contents, csv) : data.contents;
-    const next = recordSyncRun(target, '平台指标拉取', result.ok, result.message, rows.length || result.recordCount, {
+    const syncedData = {
       ...data,
       contents: nextContents,
+      metricRecords: mergeMetricRecords(data.metricRecords, importedRecords),
       notifications: [
         makeNotification('平台指标拉取结果', `${target.name}：${result.message}，记录 ${rows.length || result.recordCount} 条`, '数据分析', result.ok ? '提醒' : '预警'),
         ...data.notifications,
       ],
-    }, result.retryCount ?? 0, fieldMapping ? `已应用字段映射：${Object.keys(fieldMapping).join('、')}` : '未配置字段映射');
+    };
+    const next = recordSyncRun(target, '平台指标拉取', result.ok, result.message, rows.length || result.recordCount, {
+      ...syncedData,
+      attributionRecords: buildAttributionRecords(syncedData),
+    }, result.retryCount ?? 0, fieldMapping ? `已应用字段映射：${Object.keys(fieldMapping).join('、')}；指标明细 ${importedRecords.length} 条` : `未配置字段映射；指标明细 ${importedRecords.length} 条`);
     audit('拉取平台指标', `${target.name}：${result.message}`, next);
   };
 
@@ -2009,9 +2015,22 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
   const updateLandingMetric = (id: string, metric: 'visits' | 'clicks') => {
     const target = data.landingPages.find((item) => item.id === id);
     if (!target) return;
+    const click = metric === 'clicks' ? {
+      id: `click-${Date.now()}`,
+      entryId: undefined,
+      contentId: undefined,
+      jobId: target.linkedJobIds[0],
+      platform: '未知' as const,
+      trackingCode: target.slug,
+      clickedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      source: '落地页埋点' as const,
+    } : undefined;
+    const clickedData = click ? { ...data, entryClicks: [click, ...data.entryClicks] } : data;
+    const nextLandingPages = clickedData.landingPages.map((item) => item.id === id ? { ...item, [metric]: item[metric] + 1 } : item);
     audit(metric === 'visits' ? '记录落地页访问' : '记录落地页点击', target.title, {
-      ...data,
-      landingPages: data.landingPages.map((item) => item.id === id ? { ...item, [metric]: item[metric] + 1 } : item),
+      ...clickedData,
+      landingPages: nextLandingPages,
+      attributionRecords: buildAttributionRecords(clickedData),
     });
   };
 
@@ -2665,17 +2684,28 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   const strategyJob = data.jobs[0];
   const strategy = buildPlatformStrategy(strategyJob, data);
   const importMetrics = () => {
+    const importedRecords = parseMetricCsvRecords(data.contents, metricsCsv);
     const nextContents = applyMetricsCsv(data.contents, metricsCsv);
-    audit('导入平台指标', '内容数据', { ...data, contents: nextContents });
+    const nextData = {
+      ...data,
+      contents: nextContents,
+      metricRecords: mergeMetricRecords(data.metricRecords, importedRecords),
+    };
+    audit('导入平台指标', `内容数据，明细 ${importedRecords.length} 条`, {
+      ...nextData,
+      attributionRecords: buildAttributionRecords(nextData),
+    });
     setMetricsCsv('');
   };
   const importBeisen = () => {
     const results = parseBeisenCsv(beisenCsv);
     if (results.length === 0) return;
-    const merged = [...results, ...data.beisenResults].filter((item, index, list) => (
-      list.findIndex((candidate) => candidate.candidateCode === item.candidateCode && candidate.jobId === item.jobId && candidate.stage === item.stage) === index
-    ));
-    audit('导入北森结果', `${results.length} 条，去重后 ${merged.length} 条`, { ...data, beisenResults: merged });
+    const merged = mergeBeisenResults(data.beisenResults, results);
+    const nextData = { ...data, beisenResults: merged };
+    audit('导入北森结果', `${results.length} 条，去重后 ${merged.length} 条`, {
+      ...nextData,
+      attributionRecords: buildAttributionRecords(nextData),
+    });
     setBeisenCsv('');
   };
   const createCost = () => {
@@ -3587,18 +3617,20 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
         next = { ...next, jobs: [...jobs, ...next.jobs] };
       }
       if (source === '内容指标') {
-        next = { ...next, contents: applyMetricsCsv(next.contents, mappedCsv) };
+        const importedRecords = parseMetricCsvRecords(next.contents, mappedCsv, `import-${Date.now()}`);
+        next = {
+          ...next,
+          contents: applyMetricsCsv(next.contents, mappedCsv),
+          metricRecords: mergeMetricRecords(next.metricRecords, importedRecords),
+        };
+        next = { ...next, attributionRecords: buildAttributionRecords(next) };
         recordCount = Math.max(0, mappedCsv.trim().split(/\r?\n/).length - 1);
       }
       if (source === '北森结果') {
         const results = parseBeisenCsv(mappedCsv);
         recordCount = results.length;
-        next = {
-          ...next,
-          beisenResults: [...results, ...next.beisenResults].filter((item, index, list) => (
-            list.findIndex((candidate) => candidate.candidateCode === item.candidateCode && candidate.jobId === item.jobId && candidate.stage === item.stage) === index
-          )),
-        };
+        next = { ...next, beisenResults: mergeBeisenResults(next.beisenResults, results) };
+        next = { ...next, attributionRecords: buildAttributionRecords(next) };
       }
       if (source === '账号') {
         const accounts = allRows.rows.map((row) => {
@@ -3787,18 +3819,19 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
     const interactions = scopedContents.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
     const platformLine = platforms.map((platform) => {
       const items = scopedContents.filter((content) => content.platform === platform);
-      return items.length ? `${platform} ${items.length} 条/${items.reduce((sum, item) => sum + item.metrics.clicks, 0)} 点击` : '';
+      return items.length ? `${platform} ${items.length} 条/${items.reduce((sum, item) => sum + item.metrics.clicks, 0)} 招聘入口点击` : '';
     }).filter(Boolean).join('；');
     const report = {
       id: `rp-${Date.now()}`,
-      title: `${reportParams.period}复盘：${contentCount} 条内容 / ${clickCount} 次点击`,
-      body: `范围：${reportParams.platform} · ${reportParams.family}。曝光 ${views}，互动 ${interactions}，点击 ${clickCount}。${platformLine ? `平台拆解：${platformLine}。` : ''}${reportRecommendations.join(' ')}`,
+      title: `${reportParams.period}复盘：${contentCount} 条内容 / ${clickCount} 次招聘入口点击`,
+      body: `范围：${reportParams.platform} · ${reportParams.family}。观看 ${views}，互动 ${interactions}，招聘入口点击 ${clickCount}。${platformLine ? `平台拆解：${platformLine}。` : ''}${reportRecommendations.join(' ')}`,
       action: '请将高表现内容转为模板，低表现内容进入标题/CTA/平台匹配复盘，并补齐缺失的北森结果。',
       severity: '建议' as const,
     };
-    const actions: ReportAction[] = [
-      { id: `report-action-${Date.now()}-1`, reportId: report.id, title: '沉淀高表现内容模板', owner: '新媒体运营', dueDate: reportParams.to || '', status: '未开始', createdAt: nowText() },
-      { id: `report-action-${Date.now()}-2`, reportId: report.id, title: '补齐低表现内容的点击和北森回流数据', owner: '招聘专员', dueDate: reportParams.to || '', status: '未开始', createdAt: nowText() },
+    const ruleActions = buildReviewActions({ ...data, contents: scopedContents }, reportParams.from, reportParams.to).map((item) => ({ ...item, reportId: report.id }));
+    const actions: ReportAction[] = ruleActions.length > 0 ? ruleActions : [
+      { id: `report-action-${Date.now()}-1`, reportId: report.id, title: '沉淀高表现内容模板', targetType: '内容', reason: '当前周期存在可复用内容样本', action: '提炼标题、平台表达和 CTA 模板', owner: '新媒体运营', dueDate: reportParams.to || '', status: '未开始', createdAt: nowText() },
+      { id: `report-action-${Date.now()}-2`, reportId: report.id, title: '补齐低表现内容的招聘入口点击和北森回流数据', targetType: '内容', reason: '缺少完整转化数据会影响复盘判断', action: '检查入口埋点、短链和北森导入', owner: '招聘专员', dueDate: reportParams.to || '', status: '未开始', createdAt: nowText() },
     ];
     audit('生成复盘报告', report.title, { ...data, reports: [report, ...data.reports], reportActions: [...actions, ...data.reportActions] });
   };
@@ -3922,11 +3955,11 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
           {data.contents.length === 0 && <EmptyState title="暂无高表现特征" body="导入真实内容效果后，系统会提炼标题、平台、账号和岗位族群特征。" />}
           {sortedContents.slice(0, 4)
             .map((content) => (
-              <div className="template-chip" key={content.id}>高表现｜{content.title}<small>{content.platform} · {content.metrics.clicks} 点击 · {content.metrics.likes + content.metrics.comments} 互动</small></div>
+              <div className="template-chip" key={content.id}>高表现｜{content.title}<small>{content.platform} · {content.metrics.clicks} 招聘入口点击 · {content.metrics.likes + content.metrics.comments} 互动</small></div>
             ))}
           {sortedContents.length > 1 && sortedContents.slice(-3).reverse()
             .map((content) => (
-              <div className="template-chip" key={`low-${content.id}`}>低表现｜{content.title}<small>{content.platform} · {content.metrics.clicks} 点击 · 建议复盘标题和渠道匹配</small></div>
+              <div className="template-chip" key={`low-${content.id}`}>低表现｜{content.title}<small>{content.platform} · {content.metrics.clicks} 招聘入口点击 · 建议复盘标题和渠道匹配</small></div>
             ))}
         </div>
       </section>
@@ -3948,6 +3981,7 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
             <article key={item.id}>
               <strong>{item.title}</strong>
               <span>{item.owner} · {item.dueDate || '未定日期'} · {item.createdAt}</span>
+              {(item.reason || item.action || item.targetType) && <span>{item.targetType ?? '对象'} {item.targetId ?? ''} · {item.reason ?? '规则触发'} · {item.action ?? '待补动作'}</span>}
               <select value={item.status} onChange={(event) => updateReportAction(item.id, event.target.value as ReportAction['status'])}>
                 <option>未开始</option>
                 <option>进行中</option>

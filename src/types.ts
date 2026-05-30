@@ -290,6 +290,56 @@ export interface BeisenResult {
   stageChangedAt?: string;
 }
 
+export interface MetricRecord {
+  id: string;
+  contentId: string;
+  platform: Platform;
+  metricDate: string;
+  sourceBatchId: string;
+  metricSchemaVersion: string;
+  impressions: number;
+  views: number;
+  coverClickRate: number;
+  avgWatchDuration: number;
+  totalWatchDuration: number;
+  completionRate: number;
+  likes: number;
+  comments: number;
+  saves: number;
+  shares: number;
+  followsGained: number;
+  profileVisitors: number;
+  clicks: number;
+  importedAt: string;
+}
+
+export interface EntryClick {
+  id: string;
+  entryId?: string;
+  contentId?: string;
+  jobId?: string;
+  platform: Platform | '未知';
+  trackingCode?: string;
+  eventId?: string;
+  visitorId?: string;
+  clickedAt: string;
+  source: '落地页埋点' | '短链' | '手动导入' | '平台API';
+}
+
+export interface AttributionRecord {
+  id: string;
+  sourceType: '北森回流' | '入口点击' | '平台指标';
+  sourceId: string;
+  targetType: 'content' | 'job' | 'platform' | 'entry' | 'unknown';
+  contentId?: string;
+  jobId?: string;
+  platform?: Platform | '未知';
+  entryId?: string;
+  basis: 'sourceContentId' | 'trackingCode' | 'jobId+platform' | 'platform' | 'unmatched';
+  confidence: '高' | '中' | '低';
+  createdAt: string;
+}
+
 export interface IntegrationConfig {
   id: string;
   type: '北森' | '平台API' | '企业微信' | '飞书' | 'BI';
@@ -465,6 +515,13 @@ export interface ReportAction {
   id: string;
   reportId: string;
   title: string;
+  targetType?: '内容' | '岗位' | '平台' | '账号' | '入口';
+  targetId?: string;
+  reason?: string;
+  action?: string;
+  ruleId?: string;
+  periodStart?: string;
+  periodEnd?: string;
   owner: string;
   dueDate: string;
   status: '未开始' | '进行中' | '已完成';
@@ -641,6 +698,9 @@ export interface AppData {
   reports: ReportInsight[];
   entries: RecruitmentEntry[];
   beisenResults: BeisenResult[];
+  metricRecords: MetricRecord[];
+  entryClicks: EntryClick[];
+  attributionRecords: AttributionRecord[];
   integrations: IntegrationConfig[];
   integrationSyncRuns: IntegrationSyncRun[];
   modelApis: ModelApiConfig[];

@@ -373,6 +373,18 @@ const server = createServer(async (request, response) => {
       const data = await repository.readData();
       const eventType = body.eventType === 'click' ? 'clicks' : 'visits';
       const landingPageId = String(body.landingPageId ?? '');
+      const landingPage = (data.landingPages ?? []).find((item) => item.id === landingPageId || item.slug === landingPageId);
+      const clickedAt = new Date().toLocaleString('zh-CN', { hour12: false });
+      const entryClick = body.eventType === 'click' ? {
+        id: `click-${Date.now()}`,
+        jobId: landingPage?.linkedJobIds?.[0] ?? String(body.targetJobId ?? ''),
+        platform: String(body.sourcePlatform ?? '未知'),
+        trackingCode: landingPage?.slug ?? landingPageId,
+        eventId: body.eventId ? String(body.eventId) : undefined,
+        visitorId: body.visitorId ? String(body.visitorId) : undefined,
+        clickedAt,
+        source: '落地页埋点',
+      } : undefined;
       const next = {
         ...data,
         landingPages: data.landingPages.map((item) => (
@@ -380,12 +392,15 @@ const server = createServer(async (request, response) => {
             ? { ...item, [eventType]: Number(item[eventType] ?? 0) + 1 }
             : item
         )),
+        entryClicks: entryClick ? [entryClick, ...(data.entryClicks ?? [])].filter((item, index, list) => (
+          !item.eventId || list.findIndex((click) => click.eventId === item.eventId) === index
+        )) : (data.entryClicks ?? []),
         auditLogs: [{
           id: `track-${Date.now()}`,
           actor: 'landing-sdk',
           action: body.eventType === 'click' ? '落地页点击埋点' : '落地页访问埋点',
           target: landingPageId,
-          createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+          createdAt: clickedAt,
         }, ...data.auditLogs],
       };
       await repository.writeData(next);
@@ -671,8 +686,10 @@ const server = createServer(async (request, response) => {
       const records = Array.isArray(body.records) ? body.records : [];
       const mapping = typeof body.fieldMapping === 'object' && body.fieldMapping ? body.fieldMapping : {};
       const data = await repository.readData();
+      const importedAt = new Date().toLocaleString('zh-CN', { hour12: false });
+      const sourceBatchId = body.sourceBatchId ? String(body.sourceBatchId) : `plugin-${Date.now()}`;
+      const normalizedRecords = records.map((item) => normalizeMetricRecord(item, mapping));
       const nextContents = data.contents.map((content) => {
-        const normalizedRecords = records.map((item) => normalizeMetricRecord(item, mapping));
         const record = normalizedRecords.find((item) => item.contentId === content.id || item.title === content.title || item.title === content.title.replace(/^.+?｜/, ''));
         if (!record) return content;
         return {
@@ -680,7 +697,7 @@ const server = createServer(async (request, response) => {
           metrics: {
             ...content.metrics,
             metricDate: record.metricDate ?? content.metrics.metricDate ?? new Date().toISOString().slice(0, 10),
-            metricImportedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+            metricImportedAt: importedAt,
             metricSchemaVersion: 'xhs-mvp-v1',
             impressions: Number(record.impressions ?? content.metrics.impressions ?? 0),
             views: Number(record.views ?? content.metrics.views ?? 0),
@@ -707,9 +724,41 @@ const server = createServer(async (request, response) => {
           },
         };
       });
+      const metricRecords = normalizedRecords
+        .map((record, index) => {
+          const content = data.contents.find((item) => record.contentId === item.id || record.title === item.title || record.title === item.title.replace(/^.+?｜/, ''));
+          if (!content) return undefined;
+          const metricDate = record.metricDate ?? new Date().toISOString().slice(0, 10);
+          return {
+            id: `${content.id}-${metricDate}-${sourceBatchId}-${index}`,
+            contentId: content.id,
+            platform: content.platform,
+            metricDate,
+            sourceBatchId,
+            metricSchemaVersion: 'xhs-mvp-v1',
+            impressions: Number(record.impressions ?? 0),
+            views: Number(record.views ?? 0),
+            coverClickRate: Number(record.coverClickRate ?? 0),
+            avgWatchDuration: Number(record.avgWatchDuration ?? 0),
+            totalWatchDuration: Number(record.totalWatchDuration ?? 0),
+            completionRate: Number(record.completionRate ?? 0),
+            likes: Number(record.likes ?? 0),
+            comments: Number(record.comments ?? 0),
+            saves: Number(record.saves ?? 0),
+            shares: Number(record.shares ?? 0),
+            followsGained: Number(record.followsGained ?? 0),
+            profileVisitors: Number(record.profileVisitors ?? 0),
+            clicks: Number(record.clicks ?? 0),
+            importedAt,
+          };
+        })
+        .filter(Boolean);
       await repository.writeData({
         ...data,
         contents: nextContents,
+        metricRecords: [...metricRecords, ...(data.metricRecords ?? [])].filter((item, index, list) => (
+          list.findIndex((record) => record.contentId === item.contentId && record.metricDate === item.metricDate && record.platform === item.platform && record.sourceBatchId === item.sourceBatchId) === index
+        )),
         auditLogs: [{
           id: `metrics-${Date.now()}`,
           actor: 'browser-extension',
@@ -1026,6 +1075,15 @@ function analyticsContentMatches(content, query) {
     && analyticsDateInRange(content.metrics?.metricDate ?? content.publishedAt ?? content.dueDate, query);
 }
 
+function analyticsContentScopeMatches(content, query) {
+  return (!query.platform || query.platform === '全部' || content.platform === query.platform)
+    && (!query.accountId || content.accountId === query.accountId)
+    && (!query.contentId || content.id === query.contentId)
+    && (!query.jobId || content.jobId === query.jobId)
+    && (!query.contentType || content.type === query.contentType)
+    && (!query.status || content.status === query.status);
+}
+
 function analyticsBestStageResults(results) {
   const byCandidate = new Map();
   results.forEach((result) => {
@@ -1057,11 +1115,27 @@ function analyticsResultInQualityScope(result, data, query) {
 }
 
 function summarizeAnalytics(data, query) {
-  const contents = (data.contents ?? []).filter((content) => analyticsContentMatches(content, query));
+  const scopedContents = (data.contents ?? []).filter((content) => analyticsContentScopeMatches(content, query));
+  const scopedContentIds = new Set(scopedContents.map((content) => content.id));
+  const metricRecords = (data.metricRecords ?? []).filter((record) => scopedContentIds.has(record.contentId) && analyticsDateInRange(record.metricDate, query));
+  const contents = metricRecords.length > 0 ? scopedContents : (data.contents ?? []).filter((content) => analyticsContentMatches(content, query));
   const results = analyticsBestStageResults((data.beisenResults ?? []).filter((result) => analyticsResultMatches(result, data, query)));
-  const views = contents.reduce((sum, content) => sum + Number(content.metrics?.views || 0), 0);
-  const interactions = contents.reduce((sum, content) => sum + Number(content.metrics?.likes || 0) + Number(content.metrics?.comments || 0) + Number(content.metrics?.saves || 0) + Number(content.metrics?.shares || 0), 0);
-  const clicks = contents.reduce((sum, content) => sum + Number(content.metrics?.clicks || 0), 0);
+  const views = metricRecords.length > 0 ? metricRecords.reduce((sum, record) => sum + Number(record.views || 0), 0) : contents.reduce((sum, content) => sum + Number(content.metrics?.views || 0), 0);
+  const interactions = metricRecords.length > 0
+    ? metricRecords.reduce((sum, record) => sum + Number(record.likes || 0) + Number(record.comments || 0) + Number(record.saves || 0) + Number(record.shares || 0), 0)
+    : contents.reduce((sum, content) => sum + Number(content.metrics?.likes || 0) + Number(content.metrics?.comments || 0) + Number(content.metrics?.saves || 0) + Number(content.metrics?.shares || 0), 0);
+  const scopedEntryClicks = (data.entryClicks ?? []).filter((click) => (
+    (!query.platform || query.platform === '全部' || click.platform === query.platform)
+    && (!query.contentId || click.contentId === query.contentId)
+    && (!query.jobId || click.jobId === query.jobId || (click.contentId && scopedContentIds.has(click.contentId)))
+    && (!click.contentId || scopedContentIds.has(click.contentId))
+    && analyticsDateInRange(String(click.clickedAt ?? '').slice(0, 10), query)
+  ));
+  const clicks = scopedEntryClicks.length > 0
+    ? scopedEntryClicks.length
+    : metricRecords.some((record) => Number(record.clicks || 0) > 0)
+      ? metricRecords.reduce((sum, record) => sum + Number(record.clicks || 0), 0)
+      : contents.reduce((sum, content) => sum + Number(content.metrics?.clicks || 0), 0);
   const applications = results.filter((result) => analyticsStageRank[result.stage] >= analyticsStageRank.已投递).length;
   const effectiveResumes = results.filter((result) => analyticsStageRank[result.stage] >= analyticsStageRank.有效简历).length;
   const interviews = results.filter((result) => analyticsStageRank[result.stage] >= analyticsStageRank.已约面).length;
