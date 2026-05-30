@@ -1,5 +1,5 @@
 import { platformPositioning, platforms } from './data';
-import type { AccountHealthSnapshot, AppData, AttributionRecord, BeisenResult, CandidateLead, ContentQualityScore, ContentTask, DataExplanation, IntegrationConfig, JobNeed, MetricRecord, ModelApiConfig, Platform, ReportAction, TaskItem, TopicItem } from './types';
+import type { AccountHealthSnapshot, AppData, AttributionRecord, BeisenResult, CandidateLead, ContentQualityScore, ContentTask, DataExplanation, EntryClick, IntegrationConfig, JobNeed, MetricRecord, ModelApiConfig, Platform, ReportAction, TaskItem, TopicItem } from './types';
 
 export const metricSchemaVersion = 'xhs-mvp-v1';
 
@@ -279,6 +279,104 @@ export function mergeBeisenResults(existing: BeisenResult[], incoming: BeisenRes
   return [...incoming, ...existing].filter((item, index, list) => (
     list.findIndex((result) => result.candidateCode === item.candidateCode && result.jobId === item.jobId && result.stage === item.stage) === index
   ));
+}
+
+export function parseEntryClickCsv(data: Pick<AppData, 'contents' | 'entries' | 'jobs'>, raw: string, source: EntryClick['source'] = '手动导入'): EntryClick[] {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = splitCsvLine(lines[0]).map((header) => header.trim());
+  const rows = lines.slice(1).map((line) => {
+    const values = splitCsvLine(line);
+    return Object.fromEntries(headers.map((header, i) => [header, values[i] ?? '']));
+  });
+  const now = new Date().toLocaleString('zh-CN', { hour12: false });
+  const textOf = (row: Record<string, string>, ...keys: string[]) => keys.map((key) => row[key]).find((item) => item !== undefined && item !== '');
+  const numberOf = (row: Record<string, string>, ...keys: string[]) => {
+    const value = textOf(row, ...keys);
+    return Math.max(1, Number(value) || 1);
+  };
+  return rows.flatMap((row, rowIndex) => {
+    const contentId = textOf(row, 'contentId', '内容ID');
+    const title = textOf(row, 'title', '标题');
+    const entryId = textOf(row, 'entryId', '入口ID');
+    const trackingCode = textOf(row, 'trackingCode', '追踪码', '短链码');
+    const content = data.contents.find((item) => item.id === contentId || item.title === title);
+    const entry = data.entries.find((item) => item.id === entryId || item.trackingCode === trackingCode || (content?.entryId && item.id === content.entryId));
+    const job = data.jobs.find((item) => item.id === textOf(row, 'jobId', '岗位ID')) ?? data.jobs.find((item) => item.id === content?.jobId);
+    const clickedAt = String(textOf(row, 'clickedAt', '点击时间', '时间', 'date', '日期') ?? now);
+    const count = Math.min(numberOf(row, 'clicks', '点击数', '招聘入口点击', '入口点击', 'count'), 10000);
+    const rawEventId = textOf(row, 'eventId', '事件ID');
+    const stableEventPrefix = rawEventId || `${entry?.id ?? entryId ?? content?.id ?? contentId ?? 'unknown'}-${clickedAt}-${textOf(row, 'visitorId', '访客ID') ?? 'anonymous'}-${rowIndex}`;
+    return Array.from({ length: count }, (_, index) => ({
+      id: `click-${Date.now()}-${rowIndex}-${index}`,
+      entryId: entry?.id ?? entryId,
+      contentId: content?.id ?? contentId,
+      jobId: job?.id,
+      platform: content?.platform ?? entry?.platform ?? normalizePlatform(textOf(row, 'platform', '平台')),
+      trackingCode: trackingCode ?? entry?.trackingCode,
+      eventId: `${stableEventPrefix}-${index}`,
+      visitorId: textOf(row, 'visitorId', '访客ID'),
+      clickedAt,
+      source,
+    }));
+  });
+}
+
+export function mergeEntryClicks(existing: EntryClick[], incoming: EntryClick[]) {
+  return [...incoming, ...existing].filter((item, index, list) => (
+    list.findIndex((click) => {
+      const sameEvent = item.eventId && click.eventId && item.eventId === click.eventId;
+      const sameVisitorTime = !item.eventId && !click.eventId
+        && (item.entryId || item.trackingCode || item.contentId) === (click.entryId || click.trackingCode || click.contentId)
+        && item.clickedAt === click.clickedAt
+        && (item.visitorId || '') === (click.visitorId || '')
+        && (item.contentId || '') === (click.contentId || '');
+      return sameEvent || sameVisitorTime;
+    }) === index
+  ));
+}
+
+export function applyEntryClicksToContents(contents: ContentTask[], entryClicks: EntryClick[]) {
+  return contents.map((content) => {
+    const clickCount = entryClicks.filter((click) => click.contentId === content.id).length;
+    if (clickCount === 0) return content;
+    return {
+      ...content,
+      metrics: {
+        ...content.metrics,
+        clicks: Math.max(Number(content.metrics.clicks || 0), clickCount),
+      },
+    };
+  });
+}
+
+export function resolveAttribution(data: AppData, sourceType: AttributionRecord['sourceType'], sourceId: string, patch: { contentId?: string; jobId?: string; entryId?: string; platform?: Platform | '未知' }) {
+  const content = patch.contentId ? data.contents.find((item) => item.id === patch.contentId) : undefined;
+  const entry = patch.entryId ? data.entries.find((item) => item.id === patch.entryId) : undefined;
+  const jobId = patch.jobId || content?.jobId;
+  const platform = patch.platform || content?.platform || entry?.platform;
+  const nextData: AppData = {
+    ...data,
+    beisenResults: data.beisenResults.map((result) => sourceType === '北森回流' && result.id === sourceId ? {
+      ...result,
+      sourceContentId: patch.contentId || result.sourceContentId,
+      jobId: jobId || result.jobId,
+      sourcePlatform: platform || result.sourcePlatform,
+    } : result),
+    entryClicks: data.entryClicks.map((click) => sourceType === '入口点击' && click.id === sourceId ? {
+      ...click,
+      contentId: patch.contentId || click.contentId,
+      jobId: jobId || click.jobId,
+      entryId: patch.entryId || click.entryId,
+      platform: platform || click.platform,
+    } : click),
+  };
+  const clickedContents = applyEntryClicksToContents(nextData.contents, nextData.entryClicks);
+  return {
+    ...nextData,
+    contents: clickedContents,
+    attributionRecords: buildAttributionRecords({ ...nextData, contents: clickedContents }),
+  };
 }
 
 export function buildAttributionRecords(data: Pick<AppData, 'contents' | 'jobs' | 'entries' | 'beisenResults' | 'entryClicks' | 'metricRecords'>): AttributionRecord[] {

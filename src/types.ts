@@ -526,6 +526,7 @@ export interface ReportAction {
   dueDate: string;
   status: '未开始' | '进行中' | '已完成';
   createdAt: string;
+  completedAt?: string;
 }
 
 export interface PromptTemplate {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildAnalyticsDrill } from './analytics';
 import { emptyData, scanRisks } from './data';
 import type { AppData, ContentTask, JobNeed, PlatformAccount } from './types';
-import { applyMetricsCsv, buildAttributionRecords, buildReportMarkdown, buildReviewActions, calculateAccountHealth, deriveTasks, detectCalendarConflicts, evaluateContentReadiness, evaluateIntegrationReadiness, evaluateModelApiReadiness, findDuplicateLead, generateTopicsFromJob, getContentDataStatus, mergeBeisenResults, mergeMetricRecords, parseBeisenCsv, parseJobCsv, parseLeadCsv, parseMetricCsvRecords, scoreContentQuality } from './utils';
+import { applyEntryClicksToContents, applyMetricsCsv, buildAttributionRecords, buildReportMarkdown, buildReviewActions, calculateAccountHealth, deriveTasks, detectCalendarConflicts, evaluateContentReadiness, evaluateIntegrationReadiness, evaluateModelApiReadiness, findDuplicateLead, generateTopicsFromJob, getContentDataStatus, mergeBeisenResults, mergeEntryClicks, mergeMetricRecords, parseBeisenCsv, parseEntryClickCsv, parseJobCsv, parseLeadCsv, parseMetricCsvRecords, resolveAttribution, scoreContentQuality } from './utils';
 
 const job: JobNeed = {
   id: 'job-mvp',
@@ -157,5 +157,32 @@ describe('模块主流程 MVP 自动化验收', () => {
 
     expect(attribution.some((item) => item.sourceType === '入口点击' && item.basis === 'sourceContentId')).toBe(true);
     expect(actions.some((item) => item.ruleId === 'click-no-application')).toBe(true);
+  });
+
+  it('imports entry clicks idempotently and backfills content click metrics', () => {
+    const fixture = dataFixture();
+    const imported = parseEntryClickCsv(fixture, 'contentId,entryId,clickedAt,visitorId,点击数\nct-mvp,entry-mvp,2026-05-30 10:00:00,u001,2');
+    const merged = mergeEntryClicks([], imported);
+    const deduped = mergeEntryClicks(merged, imported);
+    const [updatedContent] = applyEntryClicksToContents([{ ...content, metrics: { ...content.metrics, clicks: 0 } }], deduped);
+
+    expect(imported).toHaveLength(2);
+    expect(deduped).toHaveLength(2);
+    expect(updatedContent.metrics.clicks).toBe(2);
+  });
+
+  it('resolves unmatched attribution back to content, job and entry', () => {
+    const fixture: AppData = {
+      ...dataFixture(),
+      beisenResults: [{ id: 'beisen-unmatched', jobId: '', sourcePlatform: '未知', candidateCode: 'candidate-x', stage: '已投递', importedAt: '2026-05-30' }],
+      entryClicks: [{ id: 'click-unmatched', platform: '未知', clickedAt: '2026-05-30 10:00:00', source: '手动导入' }],
+      attributionRecords: [],
+    };
+    const before = buildAttributionRecords(fixture);
+    const next = resolveAttribution(fixture, '入口点击', 'click-unmatched', { contentId: content.id, entryId: 'entry-mvp' });
+
+    expect(before.some((item) => item.sourceId === 'click-unmatched' && item.basis === 'unmatched')).toBe(true);
+    expect(next.entryClicks.find((item) => item.id === 'click-unmatched')?.contentId).toBe(content.id);
+    expect(next.attributionRecords.some((item) => item.sourceId === 'click-unmatched' && item.basis === 'sourceContentId')).toBe(true);
   });
 });

@@ -32,7 +32,7 @@ import { buildMvpSeedData, emptyData, generateContent, nextStatus, platformPosit
 import { evaluateMvpMatrix, mvpReportMarkdown, summarizeMvp } from './mvp';
 import type { AccountType, AppData, AppSection, AssetItem, BeisenResult, CalendarMilestone, CandidateLead, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, LeadFollowUp, ModelApiConfig, NotificationItem, OperationSettings, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, TaskItem, TopicItem, UserProfile, WorkflowRule } from './types';
 import type { ImportRun, ModelRunLog, PluginRule, PromptTemplate, ReportAction, ReviewMention } from './types';
-import { applyMetricsCsv, buildAttributionRecords, buildDataExplanations, buildPlatformStrategy, buildRecommendations, buildReportMarkdown, buildReviewActions, calculateAccountHealth, calculateRoi, deriveTasks, detectCalendarConflicts, downloadText, evaluateContentReadiness, evaluateIntegrationReadiness, evaluateModelApiReadiness, exportJson, findDuplicateLead, generateTopicsFromJob, getContentDataStatus, inferContentCta, mergeBeisenResults, mergeMetricRecords, metricSchemaVersion, parseBeisenCsv, parseJobCsv, parseLeadCsv, parseMetricCsvRecords, readJsonFile, scoreContentQuality, toCsv } from './utils';
+import { applyEntryClicksToContents, applyMetricsCsv, buildAttributionRecords, buildDataExplanations, buildPlatformStrategy, buildRecommendations, buildReportMarkdown, buildReviewActions, calculateAccountHealth, calculateRoi, deriveTasks, detectCalendarConflicts, downloadText, evaluateContentReadiness, evaluateIntegrationReadiness, evaluateModelApiReadiness, exportJson, findDuplicateLead, generateTopicsFromJob, getContentDataStatus, inferContentCta, mergeBeisenResults, mergeEntryClicks, mergeMetricRecords, metricSchemaVersion, parseBeisenCsv, parseEntryClickCsv, parseJobCsv, parseLeadCsv, parseMetricCsvRecords, readJsonFile, resolveAttribution, scoreContentQuality, toCsv } from './utils';
 
 type Section = AppSection;
 
@@ -2525,11 +2525,13 @@ function Accounts({ data, audit, apiToken }: { data: AppData; audit: (action: st
 
 function Analytics({ data, audit }: { data: AppData; audit: (action: string, target: string, nextData?: AppData) => void }) {
   const [metricsCsv, setMetricsCsv] = useState('');
+  const [entryClickCsv, setEntryClickCsv] = useState('');
   const [beisenCsv, setBeisenCsv] = useState('');
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | '全部'>('全部');
   const [drill, setDrill] = useState<{ type: '平台' | '内容' | '岗位' | '账号' | '漏斗'; id: string } | null>(null);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [cost, setCost] = useState({ targetType: '内容' as CostRecord['targetType'], targetId: '', laborCost: 0, mediaCost: 0, productionCost: 0 });
+  const [attributionFix, setAttributionFix] = useState({ sourceKey: '', contentId: '', jobId: '', entryId: '' });
   const [resolvedQualityIds, setResolvedQualityIds] = useState<string[]>([]);
   const [detailPage, setDetailPage] = useState(1);
   const [detailPageSize, setDetailPageSize] = useState(20);
@@ -2547,6 +2549,8 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   }), [dateRange.from, dateRange.to, detailPage, detailPageSize, drill, selectedPlatform]);
   const analyticsResult = useMemo(() => buildAnalyticsDrill(data, analyticsQuery), [data, analyticsQuery]);
   const platformDrillResult = useMemo(() => buildAnalyticsDrill(data, { ...analyticsQuery, dimension: 'platform', accountId: undefined, contentId: undefined, jobId: undefined }), [data, analyticsQuery]);
+  const currentAttributionRecords = data.attributionRecords.length > 0 ? data.attributionRecords : buildAttributionRecords(data);
+  const unresolvedAttributions = currentAttributionRecords.filter((item) => item.targetType === 'unknown' || item.basis === 'unmatched');
   const visibleQualityIssues = analyticsResult.qualityIssues.filter((issue) => !resolvedQualityIds.includes(issue.id));
   const inDateRange = (date?: string) => {
     if (!date) return true;
@@ -2707,6 +2711,29 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       attributionRecords: buildAttributionRecords(nextData),
     });
     setBeisenCsv('');
+  };
+  const importEntryClicks = () => {
+    const imported = parseEntryClickCsv(data, entryClickCsv);
+    if (imported.length === 0) return;
+    const merged = mergeEntryClicks(data.entryClicks, imported);
+    const nextContents = applyEntryClicksToContents(data.contents, merged);
+    const nextData = { ...data, contents: nextContents, entryClicks: merged };
+    audit('导入招聘入口点击', `${imported.length} 条，去重后 ${merged.length} 条`, {
+      ...nextData,
+      attributionRecords: buildAttributionRecords(nextData),
+    });
+    setEntryClickCsv('');
+  };
+  const fixAttribution = () => {
+    if (!attributionFix.sourceKey) return;
+    const [sourceType, sourceId] = attributionFix.sourceKey.split('|') as [AppData['attributionRecords'][number]['sourceType'], string];
+    const nextData = resolveAttribution(data, sourceType, sourceId, {
+      contentId: attributionFix.contentId || undefined,
+      jobId: attributionFix.jobId || undefined,
+      entryId: attributionFix.entryId || undefined,
+    });
+    audit('修正归因', `${sourceType}:${sourceId}`, nextData);
+    setAttributionFix({ sourceKey: '', contentId: '', jobId: '', entryId: '' });
   };
   const createCost = () => {
     const item: CostRecord = {
@@ -2951,7 +2978,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
           <div className="template-chip">当前查询<small>{analyticsResult.query.dimension} · {analyticsResult.query.platform || '全部平台'} · {analyticsResult.generatedAt}</small></div>
           <div className="template-chip">分页明细<small>{analyticsResult.pagination?.total ?? 0} 条 · 每页 {analyticsResult.pagination?.pageSize ?? 20}</small></div>
           <div className="template-chip">质量问题<small>{visibleQualityIssues.length} 条待处理 · 已处理 {resolvedQualityIds.length} 条</small></div>
-          <div className="template-chip">数据来源<small>平台指标 / 北森回流 / 成本录入 / 账号配置</small></div>
+          <div className="template-chip">归因修正<small>{unresolvedAttributions.length} 条待匹配 · 已归因 {currentAttributionRecords.length - unresolvedAttributions.length} 条</small></div>
         </div>
         {visibleQualityIssues.length === 0 && <EmptyState title="暂无数据质量问题" body="当前筛选范围内未发现缺字段、无法归因、指标异常或同步失败。" />}
         <div className="entry-grid">
@@ -2965,6 +2992,34 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
               </div>
             </article>
           ))}
+        </div>
+        <div className="detail-panel">
+          <strong>无法归因修正</strong>
+          <div className="inline-form">
+            <select value={attributionFix.sourceKey} onChange={(event) => setAttributionFix({ ...attributionFix, sourceKey: event.target.value })}>
+              <option value="">选择待修正来源</option>
+              {unresolvedAttributions.map((item) => (
+                <option key={item.id} value={`${item.sourceType}|${item.sourceId}`}>{item.sourceType}｜{item.sourceId}</option>
+              ))}
+            </select>
+            <select value={attributionFix.contentId} onChange={(event) => {
+              const content = data.contents.find((item) => item.id === event.target.value);
+              setAttributionFix({ ...attributionFix, contentId: event.target.value, jobId: content?.jobId ?? attributionFix.jobId, entryId: content?.entryId ?? attributionFix.entryId });
+            }}>
+              <option value="">匹配内容</option>
+              {data.contents.map((content) => <option key={content.id} value={content.id}>{content.title}</option>)}
+            </select>
+            <select value={attributionFix.jobId} onChange={(event) => setAttributionFix({ ...attributionFix, jobId: event.target.value })}>
+              <option value="">匹配岗位</option>
+              {data.jobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
+            </select>
+            <select value={attributionFix.entryId} onChange={(event) => setAttributionFix({ ...attributionFix, entryId: event.target.value })}>
+              <option value="">匹配入口</option>
+              {data.entries.map((entry) => <option key={entry.id} value={entry.id}>{entry.headline}</option>)}
+            </select>
+            <button onClick={fixAttribution}><CheckCircle2 size={16} />保存修正</button>
+          </div>
+          {unresolvedAttributions.length === 0 && <span className="helper">当前没有待人工修正的归因来源。</span>}
         </div>
       </section>
       <section className="panel wide">
@@ -3061,6 +3116,12 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
         <p className="helper">支持字段：jobId、sourcePlatform、sourceContentId、candidateCode、stage。stage 可为：已投递、有效简历、初筛通过、已约面、已面试、Offer、已入职。</p>
         <textarea className="small-textarea" value={beisenCsv} onChange={(event) => setBeisenCsv(event.target.value)} placeholder="jobId,sourcePlatform,sourceContentId,candidateCode,stage&#10;job-xxx,小红书,ct-xxx,C001,已投递" />
         <button className="full" onClick={importBeisen}><Database size={16} />导入北森结果</button>
+      </section>
+      <section className="panel wide">
+        <div className="panel-title"><h2>招聘入口点击导入</h2><Link size={18} /></div>
+        <p className="helper">支持字段：contentId、entryId、trackingCode、clickedAt、visitorId、eventId、点击数。导入后会写入入口点击事件，并按内容回填招聘入口点击。</p>
+        <textarea className="small-textarea" value={entryClickCsv} onChange={(event) => setEntryClickCsv(event.target.value)} placeholder="contentId,entryId,clickedAt,visitorId,点击数&#10;ct-xxx,entry-xxx,2026-05-30 10:00:00,u001,3" />
+        <button className="full" onClick={importEntryClicks}><Database size={16} />导入入口点击</button>
       </section>
       <section className="panel">
         <div className="panel-title"><h2>成本录入</h2><Target size={18} /></div>
@@ -3785,6 +3846,10 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
     && (reportParams.platform === '全部' || item.platform === reportParams.platform)
     && (reportParams.family === '全部' || data.jobs.find((job) => job.id === item.jobId)?.family === reportParams.family)
   ));
+  const reportAnalytics = useMemo(() => buildAnalyticsDrill(
+    { ...data, contents: scopedContents },
+    { dimension: 'platform', platform: reportParams.platform, dateFrom: reportParams.from, dateTo: reportParams.to, page: 1, pageSize: Math.max(scopedContents.length, 1) },
+  ), [data, reportParams.from, reportParams.platform, reportParams.to, scopedContents]);
   const sortedContents = scopedContents.slice().sort((a, b) => (b.metrics.clicks + b.metrics.likes + b.metrics.comments) - (a.metrics.clicks + a.metrics.likes + a.metrics.comments));
   const generatedReports = data.reports.length > 0
     ? data.reports
@@ -3814,9 +3879,9 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
       setAiStatus('未配置复盘建议模型，使用本地规则');
     }
     const contentCount = scopedContents.length;
-    const clickCount = scopedContents.reduce((sum, item) => sum + item.metrics.clicks, 0);
-    const views = scopedContents.reduce((sum, item) => sum + item.metrics.views, 0);
-    const interactions = scopedContents.reduce((sum, item) => sum + item.metrics.likes + item.metrics.comments + item.metrics.saves + item.metrics.shares, 0);
+    const clickCount = reportAnalytics.summary.clicks;
+    const views = reportAnalytics.summary.views;
+    const interactions = reportAnalytics.summary.interactions;
     const platformLine = platforms.map((platform) => {
       const items = scopedContents.filter((content) => content.platform === platform);
       return items.length ? `${platform} ${items.length} 条/${items.reduce((sum, item) => sum + item.metrics.clicks, 0)} 招聘入口点击` : '';
@@ -3851,7 +3916,14 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
   };
   const updateReportAction = (id: string, status: ReportAction['status']) => {
     const target = data.reportActions.find((item) => item.id === id);
-    audit('更新复盘行动项', `${target?.title ?? id}：${status}`, { ...data, reportActions: data.reportActions.map((item) => item.id === id ? { ...item, status } : item) });
+    const completedAt = status === '已完成' ? nowText() : undefined;
+    const nextActions = data.reportActions.map((item) => item.id === id ? { ...item, status, completedAt } : item);
+    const nextContents = status === '已完成' && target?.targetType === '内容' && target.targetId
+      ? data.contents.map((content) => content.id === target.targetId && ['已发布', '数据回收中'].includes(content.status)
+        ? { ...content, status: '已复盘' as ContentStatus }
+        : content)
+      : data.contents;
+    audit('更新复盘行动项', `${target?.title ?? id}：${status}`, { ...data, contents: nextContents, reportActions: nextActions });
   };
   const openReport = (report: ReportInsight) => {
     setSelectedReportId(report.id);
@@ -3875,11 +3947,12 @@ function Reports({ data, audit, apiToken }: { data: AppData; audit: (action: str
       dueDate: item.dueDate,
       status: item.status,
       createdAt: item.createdAt,
+      completedAt: item.completedAt,
     }))), 'text/csv;charset=utf-8');
   };
   const exportReportHtml = () => {
-    const views = scopedContents.reduce((sum, item) => sum + item.metrics.views, 0);
-    const clicks = scopedContents.reduce((sum, item) => sum + item.metrics.clicks, 0);
+    const views = reportAnalytics.summary.views;
+    const clicks = reportAnalytics.summary.clicks;
     const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" /><title>招聘运营复盘报告</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;margin:32px;color:#172033}h1{font-size:28px}section{margin:24px 0}.card{border:1px solid #dce3eb;border-radius:8px;padding:16px;margin:12px 0}table{border-collapse:collapse;width:100%}th,td{border:1px solid #dce3eb;padding:8px;text-align:left}th{background:#f5f7fa}</style></head><body><h1>${escapeHtmlText(reportParams.period)}招聘新媒体运营复盘</h1><p>范围：${escapeHtmlText(reportParams.platform)} · ${escapeHtmlText(reportParams.family)} · ${escapeHtmlText(reportParams.from || '不限')} 至 ${escapeHtmlText(reportParams.to || '不限')}</p><section><h2>核心指标</h2><table><tbody><tr><th>内容数</th><td>${scopedContents.length}</td></tr><tr><th>曝光</th><td>${views}</td></tr><tr><th>点击</th><td>${clicks}</td></tr><tr><th>点击率</th><td>${views > 0 ? ((clicks / views) * 100).toFixed(1) : '0.0'}%</td></tr></tbody></table></section><section><h2>复盘结论</h2>${generatedReports.map((report) => `<article class="card"><strong>${escapeHtmlText(report.severity)}｜${escapeHtmlText(report.title)}</strong><p>${escapeHtmlText(report.body)}</p><p>行动计划：${escapeHtmlText(report.action)}</p></article>`).join('') || '<p>暂无复盘报告。</p>'}</section><section><h2>高表现内容</h2>${sortedContents.slice(0, 5).map((content) => `<article class="card"><strong>${escapeHtmlText(content.title)}</strong><p>${escapeHtmlText(content.platform)} · ${content.metrics.views} 曝光 · ${content.metrics.clicks} 点击</p></article>`).join('') || '<p>暂无内容。</p>'}</section></body></html>`;
     downloadText('招聘运营复盘报告.html', html, 'text/html;charset=utf-8');
   };
