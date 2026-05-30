@@ -48,7 +48,7 @@ function contentMatches(content: ContentTask, query: DrillQuery) {
     && (!query.jobId || content.jobId === query.jobId)
     && (!query.contentType || content.type === query.contentType)
     && (!query.status || content.status === query.status)
-    && dateInRange(content.publishedAt ?? content.dueDate, query)
+    && dateInRange(content.metrics.metricDate ?? content.publishedAt ?? content.dueDate, query)
   );
 }
 
@@ -74,7 +74,7 @@ function resultMatches(result: BeisenResult, data: Pick<AppData, 'contents' | 'j
     && (!query.contentId || result.sourceContentId === query.contentId)
     && (!query.jobId || result.jobId === query.jobId)
     && (!query.accountId || relatedContent?.accountId === query.accountId)
-    && dateInRange(result.importedAt?.slice(0, 10), query)
+    && dateInRange((result.stageChangedAt ?? result.importedAt)?.slice(0, 10), query)
   );
 }
 
@@ -85,7 +85,7 @@ function resultInQualityScope(result: BeisenResult, data: Pick<AppData, 'content
     && (!query.contentId || result.sourceContentId === query.contentId)
     && (!query.jobId || result.jobId === query.jobId)
     && (!query.accountId || relatedContent?.accountId === query.accountId)
-    && dateInRange(result.importedAt?.slice(0, 10), query)
+    && dateInRange((result.stageChangedAt ?? result.importedAt)?.slice(0, 10), query)
   );
 }
 

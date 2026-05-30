@@ -176,11 +176,17 @@ export interface ContentTask {
   reviewer: string;
   dueDate: string;
   publishedAt?: string;
+  platformUrl?: string;
+  cta?: string;
+  entryId?: string;
   content: string;
   tags: string[];
   riskLevel: RiskLevel;
   risks: string[];
   metrics: {
+    metricDate?: string;
+    metricImportedAt?: string;
+    metricSchemaVersion?: string;
     impressions?: number;
     views: number;
     coverClickRate?: number;
@@ -281,6 +287,7 @@ export interface BeisenResult {
   candidateCode: string;
   stage: '已投递' | '有效简历' | '初筛通过' | '已约面' | '已面试' | 'Offer' | '已入职';
   importedAt: string;
+  stageChangedAt?: string;
 }
 
 export interface IntegrationConfig {

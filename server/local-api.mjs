@@ -679,6 +679,9 @@ const server = createServer(async (request, response) => {
           ...content,
           metrics: {
             ...content.metrics,
+            metricDate: record.metricDate ?? content.metrics.metricDate ?? new Date().toISOString().slice(0, 10),
+            metricImportedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+            metricSchemaVersion: 'xhs-mvp-v1',
             impressions: Number(record.impressions ?? content.metrics.impressions ?? 0),
             views: Number(record.views ?? content.metrics.views ?? 0),
             coverClickRate: Number(record.coverClickRate ?? content.metrics.coverClickRate ?? 0),
@@ -794,6 +797,7 @@ function normalizeMetricRecord(record, mapping) {
   return {
     contentId: valueOf('contentId', '内容ID'),
     title: valueOf('title', '标题'),
+    metricDate: valueOf('metricDate', '数据日期', '日期', 'date'),
     impressions: valueOf('impressions', '曝光', '曝光数', '曝光量'),
     views: valueOf('views', '观看', '观看数', '阅读', '阅读数', '播放', '播放量'),
     coverClickRate: valueOf('coverClickRate', '封面点击率'),
@@ -1019,7 +1023,7 @@ function analyticsContentMatches(content, query) {
     && (!query.jobId || content.jobId === query.jobId)
     && (!query.contentType || content.type === query.contentType)
     && (!query.status || content.status === query.status)
-    && analyticsDateInRange(content.publishedAt ?? content.dueDate, query);
+    && analyticsDateInRange(content.metrics?.metricDate ?? content.publishedAt ?? content.dueDate, query);
 }
 
 function analyticsBestStageResults(results) {
@@ -1040,7 +1044,7 @@ function analyticsResultMatches(result, data, query) {
     && (!query.contentId || result.sourceContentId === query.contentId)
     && (!query.jobId || result.jobId === query.jobId)
     && (!query.accountId || relatedContent?.accountId === query.accountId)
-    && analyticsDateInRange(result.importedAt?.slice(0, 10), query);
+    && analyticsDateInRange((result.stageChangedAt ?? result.importedAt)?.slice(0, 10), query);
 }
 
 function analyticsResultInQualityScope(result, data, query) {
@@ -1049,7 +1053,7 @@ function analyticsResultInQualityScope(result, data, query) {
     && (!query.contentId || result.sourceContentId === query.contentId)
     && (!query.jobId || result.jobId === query.jobId)
     && (!query.accountId || relatedContent?.accountId === query.accountId)
-    && analyticsDateInRange(result.importedAt?.slice(0, 10), query);
+    && analyticsDateInRange((result.stageChangedAt ?? result.importedAt)?.slice(0, 10), query);
 }
 
 function summarizeAnalytics(data, query) {

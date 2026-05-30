@@ -1,6 +1,8 @@
 import { platformPositioning, platforms } from './data';
 import type { AccountHealthSnapshot, AppData, BeisenResult, CandidateLead, ContentQualityScore, ContentTask, DataExplanation, IntegrationConfig, JobNeed, ModelApiConfig, Platform, TaskItem, TopicItem } from './types';
 
+export const metricSchemaVersion = 'xhs-mvp-v1';
+
 export function downloadText(filename: string, text: string, type = 'text/plain;charset=utf-8') {
   const blob = new Blob([text], { type });
   const url = URL.createObjectURL(blob);
@@ -120,6 +122,53 @@ export function parseJobCsv(raw: string): JobNeed[] {
   });
 }
 
+export function inferContentCta(content: string, job?: JobNeed) {
+  const ctaLine = content
+    .split(/\r?\n|。|！|!/)
+    .map((line) => line.trim())
+    .find((line) => /投递|私信|链接|查看岗位|简历|沟通|申请/.test(line));
+  if (ctaLine) return ctaLine.slice(0, 80);
+  if (job?.beisenUrl || job?.websiteUrl) return '查看岗位并投递简历';
+  return '';
+}
+
+export function evaluateContentReadiness(content: ContentTask, data: Pick<AppData, 'jobs' | 'accounts' | 'entries'>) {
+  const job = data.jobs.find((item) => item.id === content.jobId);
+  const account = data.accounts.find((item) => item.id === content.accountId);
+  const entry = content.entryId ? data.entries.find((item) => item.id === content.entryId) : undefined;
+  const hasEntryUrl = Boolean(entry?.url || job?.beisenUrl || job?.websiteUrl);
+  const checks = [
+    { label: '绑定真实岗位', passed: Boolean(job), blocking: true },
+    { label: '岗位招聘入口', passed: hasEntryUrl, blocking: true },
+    { label: '绑定平台账号', passed: Boolean(account && account.status === '启用'), blocking: true },
+    { label: '结构化 CTA', passed: Boolean((content.cta || inferContentCta(content.content, job)).trim()), blocking: true },
+    { label: '招聘入口归因', passed: Boolean(content.entryId || hasEntryUrl), blocking: true },
+    { label: '已完成审核', passed: ['待发布', '已发布', '数据回收中', '已复盘'].includes(content.status), blocking: true },
+    { label: '平台链接', passed: Boolean(content.platformUrl), blocking: true },
+  ];
+  const missing = checks.filter((item) => item.blocking && !item.passed).map((item) => item.label);
+  return {
+    ready: missing.length === 0,
+    checks,
+    missing,
+    cta: content.cta || inferContentCta(content.content, job),
+    entry,
+    job,
+    account,
+  };
+}
+
+export function getContentDataStatus(content: ContentTask, data: Pick<AppData, 'beisenResults'>) {
+  if (!content.publishedAt) return '未发布';
+  const hasPlatformMetrics = Number(content.metrics.views || 0) + Number(content.metrics.likes || 0) + Number(content.metrics.comments || 0) + Number(content.metrics.saves || 0) + Number(content.metrics.shares || 0) > 0;
+  const hasEntryClicks = Number(content.metrics.clicks || 0) > 0;
+  const attributedApplications = data.beisenResults.filter((item) => item.sourceContentId === content.id && item.stage === '已投递').length;
+  if (!hasPlatformMetrics) return '缺平台数据';
+  if (!hasEntryClicks) return '缺入口数据';
+  if (hasEntryClicks && attributedApplications === 0) return '缺北森回流';
+  return '已完成回收';
+}
+
 export function applyMetricsCsv(contents: ContentTask[], raw: string) {
   const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (lines.length < 2) return contents;
@@ -136,10 +185,15 @@ export function applyMetricsCsv(contents: ContentTask[], raw: string) {
       return value === undefined ? undefined : Number(String(value).replace('%', '')) || 0;
     };
     const metric = (current: number | undefined, ...keys: string[]) => numberOf(...keys) ?? Number(current ?? 0);
+    const textOf = (...keys: string[]) => keys.map((key) => row[key]).find((item) => item !== undefined && item !== '');
+    const metricDate = String(textOf('metricDate', '数据日期', '日期', 'date') ?? content.metrics.metricDate ?? new Date().toISOString().slice(0, 10));
     return {
       ...content,
       metrics: {
         ...content.metrics,
+        metricDate,
+        metricImportedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+        metricSchemaVersion,
         impressions: metric(content.metrics.impressions, 'impressions', '曝光', '曝光数', '曝光量'),
         views: metric(content.metrics.views, 'views', '观看', '观看数', '阅读', '阅读数', '播放', '播放量'),
         coverClickRate: metric(content.metrics.coverClickRate, 'coverClickRate', '封面点击率'),
@@ -175,6 +229,7 @@ export function parseBeisenCsv(raw: string): BeisenResult[] {
     const values = splitCsvLine(line);
     const row = Object.fromEntries(headers.map((header, i) => [header, values[i] ?? '']));
     const stage = normalizeStage(row.stage || row.阶段 || row.status || row.状态);
+    const importedAt = row.importedAt || row.导入时间 || new Date().toLocaleString('zh-CN', { hour12: false });
     return {
       id: `beisen-${Date.now()}-${index}`,
       jobId: row.jobId || row.岗位ID || '',
@@ -182,7 +237,8 @@ export function parseBeisenCsv(raw: string): BeisenResult[] {
       sourceContentId: row.sourceContentId || row.内容ID || undefined,
       candidateCode: row.candidateCode || row.候选人编码 || `candidate-${Date.now()}-${index}`,
       stage,
-      importedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      importedAt,
+      stageChangedAt: row.stageChangedAt || row.阶段时间 || row.状态时间 || importedAt,
     };
   });
 }
@@ -250,9 +306,16 @@ export function deriveTasks(data: AppData): TaskItem[] {
       push({ id: `task-risk-${content.id}`, type: '高风险待处理', title: `高风险内容：${content.title}`, body: content.risks.join('、') || '需要合规复核', owner: content.reviewer || content.owner, priority: '高', targetSection: '内容运营', targetId: content.id, dueDate: content.dueDate });
     }
     const publishedDate = content.publishedAt ? new Date(content.publishedAt) : undefined;
-    const metricsEmpty = Object.values(content.metrics).every((value) => value === 0);
+    const metricsEmpty = ['views', 'likes', 'comments', 'saves', 'shares', 'clicks'].every((key) => Number(content.metrics[key as keyof ContentTask['metrics']] ?? 0) === 0);
     if (publishedDate && metricsEmpty && Date.now() - publishedDate.getTime() > settings.dataCollectionDelayDays * 86400000) {
       push({ id: `task-metrics-${content.id}`, type: '数据待回收', title: `数据待回收：${content.title}`, body: '内容已发布超过 2 天但暂无平台指标', owner: content.owner, priority: '中', targetSection: '数据分析', targetId: content.id, dueDate: today });
+    }
+    const dataStatus = getContentDataStatus(content, data);
+    if (dataStatus === '缺入口数据') {
+      push({ id: `task-entry-data-${content.id}`, type: '数据待回收', title: `缺入口点击：${content.title}`, body: '内容已发布但没有招聘入口点击，请检查入口、短链或埋点。', owner: content.owner, priority: '中', targetSection: '数据分析', targetId: content.id, dueDate: today });
+    }
+    if (dataStatus === '缺北森回流') {
+      push({ id: `task-beisen-data-${content.id}`, type: '数据待回收', title: `缺北森回流：${content.title}`, body: '内容已有入口点击但没有北森投递回流，请导入北森结果或检查 trackingCode。', owner: content.owner, priority: '中', targetSection: '数据分析', targetId: content.id, dueDate: today });
     }
     if ((content.status === '待专业审核' || content.status === '待品牌合规审核') && content.dueDate < today) {
       push({ id: `task-sla-${content.id}`, type: '审核超时', title: `审核超时：${content.title}`, body: `已超过审核 SLA ${settings.reviewSlaHours} 小时，请尽快闭环`, owner: content.reviewer || content.owner, priority: '高', targetSection: '内容运营', targetId: content.id, dueDate: content.dueDate });

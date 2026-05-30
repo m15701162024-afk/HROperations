@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildAnalyticsDrill } from './analytics';
 import { emptyData, scanRisks } from './data';
 import type { AppData, ContentTask, JobNeed, PlatformAccount } from './types';
-import { applyMetricsCsv, buildReportMarkdown, calculateAccountHealth, deriveTasks, detectCalendarConflicts, evaluateIntegrationReadiness, evaluateModelApiReadiness, findDuplicateLead, generateTopicsFromJob, parseJobCsv, parseLeadCsv, scoreContentQuality } from './utils';
+import { applyMetricsCsv, buildReportMarkdown, calculateAccountHealth, deriveTasks, detectCalendarConflicts, evaluateContentReadiness, evaluateIntegrationReadiness, evaluateModelApiReadiness, findDuplicateLead, generateTopicsFromJob, getContentDataStatus, parseBeisenCsv, parseJobCsv, parseLeadCsv, scoreContentQuality } from './utils';
 
 const job: JobNeed = {
   id: 'job-mvp',
@@ -46,6 +46,9 @@ const content: ContentTask = {
   reviewer: '招聘主管',
   dueDate: new Date().toISOString().slice(0, 10),
   publishedAt: new Date().toISOString().slice(0, 10),
+  platformUrl: 'https://www.xiaohongshu.com/explore/ct-mvp',
+  cta: '点击投递高级后端工程师',
+  entryId: 'entry-mvp',
   content: '技术挑战、成长空间，点击投递高级后端工程师。',
   tags: ['后端', '高级'],
   riskLevel: '中',
@@ -114,5 +117,27 @@ describe('模块主流程 MVP 自动化验收', () => {
     expect(integrationReadiness.score).toBe(100);
     expect(modelReadiness.status).toBe('已闭环');
     expect(modelReadiness.score).toBe(100);
+  });
+
+  it('enforces MVP business readiness before publish', () => {
+    const fixture = dataFixture();
+    expect(evaluateContentReadiness({ ...content, status: '待发布' }, fixture).ready).toBe(true);
+    expect(evaluateContentReadiness({ ...content, cta: '', content: '只有岗位介绍，没有动作入口。' }, fixture).missing).toContain('结构化 CTA');
+    expect(evaluateContentReadiness({ ...content, platformUrl: '' }, fixture).missing).toContain('平台链接');
+  });
+
+  it('stores metric date and schema version on XHS metric import', () => {
+    const updated = applyMetricsCsv([content], 'contentId,metricDate,曝光数,观看数,点赞数,评论数,收藏数,分享数,招聘入口点击\nct-mvp,2026-05-30,3000,2000,40,8,16,6,60')[0];
+    expect(updated.metrics.metricDate).toBe('2026-05-30');
+    expect(updated.metrics.metricSchemaVersion).toBe('xhs-mvp-v1');
+    expect(updated.metrics.impressions).toBe(3000);
+    expect(updated.metrics.views).toBe(2000);
+  });
+
+  it('keeps Beisen stage time and derives content data status', () => {
+    const [result] = parseBeisenCsv('jobId,sourcePlatform,sourceContentId,candidateCode,stage,stageChangedAt\njob-mvp,小红书,ct-mvp,C1,有效简历,2026-05-30');
+    expect(result.stageChangedAt).toBe('2026-05-30');
+    expect(getContentDataStatus({ ...content, metrics: { ...content.metrics, clicks: 0 } }, { beisenResults: [] })).toBe('缺入口数据');
+    expect(getContentDataStatus(content, { beisenResults: [] })).toBe('缺北森回流');
   });
 });

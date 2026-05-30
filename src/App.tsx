@@ -32,7 +32,7 @@ import { buildMvpSeedData, emptyData, generateContent, nextStatus, platformPosit
 import { evaluateMvpMatrix, mvpReportMarkdown, summarizeMvp } from './mvp';
 import type { AccountType, AppData, AppSection, AssetItem, BeisenResult, CalendarMilestone, CandidateLead, CompliancePolicy, ContentReviewComment, ContentStatus, ContentTask, ContentVersion, CostRecord, DeploymentTask, IntegrationConfig, IntegrationMapping, IntegrationSyncRun, JobNeed, LandingPage, LandingPageLead, LeadFollowUp, ModelApiConfig, NotificationItem, OperationSettings, PermissionRole, Platform, PlatformAccount, RecruitmentEntry, ReportInsight, SensitiveRule, TaskItem, TopicItem, UserProfile, WorkflowRule } from './types';
 import type { ImportRun, ModelRunLog, PluginRule, PromptTemplate, ReportAction, ReviewMention } from './types';
-import { applyMetricsCsv, buildDataExplanations, buildPlatformStrategy, buildRecommendations, buildReportMarkdown, calculateAccountHealth, calculateRoi, deriveTasks, detectCalendarConflicts, downloadText, evaluateIntegrationReadiness, evaluateModelApiReadiness, exportJson, findDuplicateLead, generateTopicsFromJob, parseBeisenCsv, parseJobCsv, parseLeadCsv, readJsonFile, scoreContentQuality, toCsv } from './utils';
+import { applyMetricsCsv, buildDataExplanations, buildPlatformStrategy, buildRecommendations, buildReportMarkdown, calculateAccountHealth, calculateRoi, deriveTasks, detectCalendarConflicts, downloadText, evaluateContentReadiness, evaluateIntegrationReadiness, evaluateModelApiReadiness, exportJson, findDuplicateLead, generateTopicsFromJob, getContentDataStatus, inferContentCta, metricSchemaVersion, parseBeisenCsv, parseJobCsv, parseLeadCsv, readJsonFile, scoreContentQuality, toCsv } from './utils';
 
 type Section = AppSection;
 
@@ -113,6 +113,7 @@ const currentDataMode = 'real-v2-empty-platform-data';
 const xhsMetricHeaders = [
   'contentId',
   'title',
+  'metricDate',
   'impressions',
   'views',
   'coverClickRate',
@@ -133,6 +134,7 @@ const xhsMetricHeaders = [
 ];
 const xhsMetricTemplate = `${xhsMetricHeaders.join(',')}\n`;
 const emptyContentMetrics: ContentTask['metrics'] = {
+  metricSchemaVersion,
   impressions: 0,
   views: 0,
   coverClickRate: 0,
@@ -997,12 +999,17 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
         setAiStatus('模型风险识别失败，已回退本地规则：API 无法连接或未配置');
       }
     }
+    const defaultEntry = data.entries.find((entry) => entry.platform === platform && entry.status === '启用') ?? data.entries.find((entry) => entry.status === '启用');
+    const cta = inferContentCta(draft, selectedJob);
     const newTask: ContentTask = {
       id: `ct-${Date.now()}`,
       title: `${platform}｜${selectedJob.title}内容初稿`,
       jobId: selectedJob.id,
       platform,
       accountId,
+      entryId: defaultEntry?.id ?? '',
+      cta,
+      platformUrl: '',
       type: platform === 'B站' || platform === '抖音' ? '短视频脚本' : platform === '小红书' ? '岗位种草' : '技术/行业观点',
       status: 'AI已生成',
       owner: '招聘专员',
@@ -1030,6 +1037,26 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
     const target = data.contents.find((item) => item.id === id);
     if (!target) return;
     const status = getConfiguredNextStatus(target, data.workflowRules);
+    if (['待专业审核', '待品牌合规审核', '待平台适配', '待发布'].includes(status)) {
+      const job = data.jobs.find((item) => item.id === target.jobId);
+      const account = data.accounts.find((item) => item.id === target.accountId);
+      const missing = [
+        !job ? '绑定真实岗位' : '',
+        !(target.cta || inferContentCta(target.content, job)) ? '结构化 CTA' : '',
+        !(target.entryId || job?.beisenUrl || job?.websiteUrl) ? '招聘入口' : '',
+        !account ? '绑定平台账号' : '',
+      ].filter(Boolean);
+      if (missing.length > 0) {
+        audit('状态推进阻断', `${target.title}：${missing.join('、')}`, {
+          ...data,
+          notifications: [
+            makeNotification('内容字段未补齐', `${target.title} 缺少：${missing.join('、')}`, '内容运营', '预警'),
+            ...data.notifications,
+          ],
+        });
+        return;
+      }
+    }
     audit('推进审核状态', target?.title ?? id, {
       ...data,
       contents: data.contents.map((item) => (item.id === id ? { ...item, status } : item)),
@@ -1107,6 +1134,18 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
 
   const publishContent = (id: string) => {
     const target = data.contents.find((item) => item.id === id);
+    if (!target) return;
+    const readiness = evaluateContentReadiness(target, data);
+    if (!readiness.ready) {
+      audit('发布条件阻断', `${target.title}：${readiness.missing.join('、')}`, {
+        ...data,
+        notifications: [
+          makeNotification('发布条件未满足', `${target.title} 缺少：${readiness.missing.join('、')}`, '内容运营', '预警'),
+          ...data.notifications,
+        ],
+      });
+      return;
+    }
     const latestScore = data.contentQualityScores.find((score) => score.contentId === id);
     if (latestScore && latestScore.total < data.operationSettings.contentQualityBlockScore) {
       audit('内容质量分阻断发布', `${target?.title ?? id}：${latestScore.total}分`, {
@@ -1129,9 +1168,9 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
       });
       return;
     }
-    audit('标记内容已发布', target?.title ?? id, {
+    audit('标记内容已发布', target.title, {
       ...data,
-      contents: data.contents.map((item) => item.id === id ? { ...item, status: '已发布', publishedAt: new Date().toISOString().slice(0, 10) } : item),
+      contents: data.contents.map((item) => item.id === id ? { ...item, status: '数据回收中', publishedAt: new Date().toISOString().slice(0, 10) } : item),
     });
   };
   const togglePublishCheck = (id: string, check: string) => {
@@ -1175,6 +1214,7 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
       status: '草稿',
       dueDate: new Date().toISOString().slice(0, 10),
       publishedAt: undefined,
+      platformUrl: '',
       metrics: { ...emptyContentMetrics },
     };
     audit('复制内容任务', copy.title, { ...data, contents: [copy, ...data.contents] });
@@ -1278,6 +1318,14 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
               <div className="template-chip">效果数据<small>{scheduleDetail.metrics.impressions ?? 0} 曝光 · {scheduleDetail.metrics.views} 观看 · {scheduleDetail.metrics.clicks} 招聘入口点击</small></div>
             </div>
             <p>{scheduleDetail.content}</p>
+            <div className="inline-form compact-edit">
+              <input value={scheduleDetail.cta ?? ''} onChange={(event) => updateContentField(scheduleDetail.id, { cta: event.target.value })} placeholder="结构化 CTA" />
+              <select value={scheduleDetail.entryId ?? ''} onChange={(event) => updateContentField(scheduleDetail.id, { entryId: event.target.value })}>
+                <option value="">选择招聘入口</option>
+                {data.entries.filter((entry) => entry.status === '启用').map((entry) => <option key={entry.id} value={entry.id}>{entry.platform}｜{entry.headline}</option>)}
+              </select>
+              <input value={scheduleDetail.platformUrl ?? ''} onChange={(event) => updateContentField(scheduleDetail.id, { platformUrl: event.target.value })} placeholder="发布后的平台链接" />
+            </div>
             <div className="checklist-row">
               {['合规已审', '素材已授权', '入口已配置'].map((check) => (
                 <label key={check}><input type="checkbox" checked={(publishChecks[scheduleDetail.id] ?? []).includes(check)} onChange={() => togglePublishCheck(scheduleDetail.id, check)} />{check}</label>
@@ -1333,6 +1381,20 @@ function ContentOps({ data, audit, apiToken }: { data: AppData; audit: (action: 
                   <input value={item.owner} onChange={(event) => updateContentField(item.id, { owner: event.target.value })} placeholder="负责人" />
                   <input value={item.reviewer} onChange={(event) => updateContentField(item.id, { reviewer: event.target.value })} placeholder="审核人" />
                   <input type="date" value={item.dueDate} onChange={(event) => updateContentField(item.id, { dueDate: event.target.value })} />
+                </div>
+                <div className="inline-form compact-edit">
+                  <input value={item.cta ?? ''} onChange={(event) => updateContentField(item.id, { cta: event.target.value })} placeholder="结构化 CTA，如：查看岗位并投递简历" />
+                  <select value={item.entryId ?? ''} onChange={(event) => updateContentField(item.id, { entryId: event.target.value })}>
+                    <option value="">选择招聘入口</option>
+                    {data.entries.filter((entry) => entry.status === '启用').map((entry) => <option key={entry.id} value={entry.id}>{entry.platform}｜{entry.headline}</option>)}
+                  </select>
+                  <input value={item.platformUrl ?? ''} onChange={(event) => updateContentField(item.id, { platformUrl: event.target.value })} placeholder="发布后的平台链接" />
+                </div>
+                <div className="template-grid">
+                  {evaluateContentReadiness(item, data).checks.map((check) => (
+                    <div className="template-chip" key={check.label}>{check.label}<small>{check.passed ? '已满足' : '待补齐'}</small></div>
+                  ))}
+                  <div className="template-chip">数据状态<small>{getContentDataStatus(item, data)}</small></div>
                 </div>
                 <details className="version-box">
                   <summary>版本历史与对比（{versions.length}）</summary>
@@ -2610,7 +2672,10 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
   const importBeisen = () => {
     const results = parseBeisenCsv(beisenCsv);
     if (results.length === 0) return;
-    audit('导入北森结果', `${results.length} 条`, { ...data, beisenResults: [...results, ...data.beisenResults] });
+    const merged = [...results, ...data.beisenResults].filter((item, index, list) => (
+      list.findIndex((candidate) => candidate.candidateCode === item.candidateCode && candidate.jobId === item.jobId && candidate.stage === item.stage) === index
+    ));
+    audit('导入北森结果', `${results.length} 条，去重后 ${merged.length} 条`, { ...data, beisenResults: merged });
     setBeisenCsv('');
   };
   const createCost = () => {
@@ -2959,7 +3024,7 @@ function Analytics({ data, audit }: { data: AppData; audit: (action: string, tar
       <section className="panel wide">
         <div className="panel-title"><h2>平台指标导入</h2><Database size={18} /></div>
         <p className="helper">支持小红书表头：曝光数、观看数、封面点击率、平均观看时长、观看总时长、视频完播率、点赞数、评论数、收藏数、分享数、涨粉、主页访客；招聘入口点击需来自落地页或短链数据。</p>
-        <textarea className="small-textarea" value={metricsCsv} onChange={(event) => setMetricsCsv(event.target.value)} placeholder="contentId,曝光数,观看数,封面点击率,点赞数,评论数,收藏数,分享数,涨粉,招聘入口点击&#10;ct-xxx,1000,800,12.5,20,3,8,2,5,15" />
+        <textarea className="small-textarea" value={metricsCsv} onChange={(event) => setMetricsCsv(event.target.value)} placeholder="contentId,metricDate,曝光数,观看数,封面点击率,点赞数,评论数,收藏数,分享数,涨粉,招聘入口点击&#10;ct-xxx,2026-05-30,1000,800,12.5,20,3,8,2,5,15" />
       </section>
       <section className="panel wide">
         <div className="panel-title"><h2>北森结果回流</h2><RefreshCw size={18} /></div>
@@ -3299,7 +3364,7 @@ function LeadPool({ data, audit }: { data: AppData; audit: (action: string, targ
   const transferToBeisen = (id: string) => {
     const item = data.candidateLeads.find((leadItem) => leadItem.id === id);
     if (!item) return;
-    const result: BeisenResult = { id: `beisen-lead-${Date.now()}`, jobId: item.targetJobId ?? '', sourcePlatform: item.sourcePlatform, sourceContentId: item.sourceContentId, candidateCode: `lead-${item.id}`, stage: '已投递', importedAt: nowText() };
+    const result: BeisenResult = { id: `beisen-lead-${Date.now()}`, jobId: item.targetJobId ?? '', sourcePlatform: item.sourcePlatform, sourceContentId: item.sourceContentId, candidateCode: `lead-${item.id}`, stage: '已投递', importedAt: nowText(), stageChangedAt: nowText() };
     audit('线索转入北森', item.name || item.contact, { ...data, candidateLeads: data.candidateLeads.map((leadItem) => leadItem.id === id ? { ...leadItem, stage: '已转北森', beisenStatus: '已转入', updatedAt: nowText() } : leadItem), beisenResults: [result, ...data.beisenResults] });
   };
   const filteredLeads = data.candidateLeads.filter((item) => (
@@ -3322,7 +3387,7 @@ function LeadPool({ data, audit }: { data: AppData; audit: (action: string, targ
   };
   const batchTransferToBeisen = () => {
     const selected = data.candidateLeads.filter((item) => selectedLeadIds.includes(item.id) && item.beisenStatus !== '已转入');
-    const results: BeisenResult[] = selected.map((item) => ({ id: `beisen-lead-${item.id}-${Date.now()}`, jobId: item.targetJobId ?? '', sourcePlatform: item.sourcePlatform, sourceContentId: item.sourceContentId, candidateCode: `lead-${item.id}`, stage: '已投递', importedAt: nowText() }));
+    const results: BeisenResult[] = selected.map((item) => ({ id: `beisen-lead-${item.id}-${Date.now()}`, jobId: item.targetJobId ?? '', sourcePlatform: item.sourcePlatform, sourceContentId: item.sourceContentId, candidateCode: `lead-${item.id}`, stage: '已投递', importedAt: nowText(), stageChangedAt: nowText() }));
     audit('批量线索转北森', `${selected.length} 条`, {
       ...data,
       candidateLeads: data.candidateLeads.map((item) => selectedLeadIds.includes(item.id) ? { ...item, stage: '已转北森', beisenStatus: '已转入', updatedAt: nowText() } : item),
@@ -3528,7 +3593,12 @@ function ImportCenter({ data, audit }: { data: AppData; audit: (action: string, 
       if (source === '北森结果') {
         const results = parseBeisenCsv(mappedCsv);
         recordCount = results.length;
-        next = { ...next, beisenResults: [...results, ...next.beisenResults] };
+        next = {
+          ...next,
+          beisenResults: [...results, ...next.beisenResults].filter((item, index, list) => (
+            list.findIndex((candidate) => candidate.candidateCode === item.candidateCode && candidate.jobId === item.jobId && candidate.stage === item.stage) === index
+          )),
+        };
       }
       if (source === '账号') {
         const accounts = allRows.rows.map((row) => {

@@ -232,12 +232,49 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 export function normalizeAppData(data: Partial<AppData>): AppData {
+  const jobs = data.jobs ?? [];
   return {
     ...emptyData,
     ...data,
-    jobs: data.jobs ?? [],
+    jobs,
     accounts: data.accounts ?? [],
-    contents: data.contents ?? [],
+    contents: (data.contents ?? []).map((content) => {
+      const job = jobs.find((item) => item.id === content.jobId);
+      const metrics = content.metrics ?? {};
+      return {
+        ...content,
+        cta: content.cta ?? inferCta(content.content, job?.beisenUrl || job?.websiteUrl),
+        entryId: content.entryId ?? '',
+        platformUrl: content.platformUrl ?? '',
+        metrics: {
+          metricSchemaVersion: metrics.metricSchemaVersion ?? 'xhs-mvp-v1',
+          metricDate: metrics.metricDate,
+          metricImportedAt: metrics.metricImportedAt,
+          views: Number(metrics.views ?? 0),
+          likes: Number(metrics.likes ?? 0),
+          comments: Number(metrics.comments ?? 0),
+          saves: Number(metrics.saves ?? 0),
+          shares: Number(metrics.shares ?? 0),
+          clicks: Number(metrics.clicks ?? 0),
+          impressions: metrics.impressions ?? 0,
+          coverClickRate: metrics.coverClickRate ?? 0,
+          avgWatchDuration: metrics.avgWatchDuration ?? 0,
+          totalWatchDuration: metrics.totalWatchDuration ?? 0,
+          completionRate: metrics.completionRate ?? 0,
+          followsGained: metrics.followsGained ?? 0,
+          profileVisitors: metrics.profileVisitors ?? 0,
+          newFollows: metrics.newFollows ?? 0,
+          unfollows: metrics.unfollows ?? 0,
+          netFollows: metrics.netFollows ?? 0,
+          profileFollowRate: metrics.profileFollowRate ?? 0,
+          publishCount: metrics.publishCount ?? 0,
+          videoPublishCount: metrics.videoPublishCount ?? 0,
+          imageTextPublishCount: metrics.imageTextPublishCount ?? 0,
+          totalFollowers: metrics.totalFollowers ?? 0,
+          activeFollowers: metrics.activeFollowers ?? 0,
+        },
+      };
+    }),
     contentVersions: data.contentVersions ?? [],
     reviewComments: data.reviewComments ?? [],
     assets: data.assets ?? [],
@@ -277,4 +314,13 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     reviewMentions: data.reviewMentions ?? [],
     operationSettings: data.operationSettings ?? emptyData.operationSettings,
   };
+}
+
+function inferCta(content: string, fallbackUrl?: string) {
+  const ctaLine = content
+    .split(/\r?\n|。|！|!/)
+    .map((line) => line.trim())
+    .find((line) => /投递|私信|链接|查看岗位|简历|沟通|申请/.test(line));
+  if (ctaLine) return ctaLine.slice(0, 80);
+  return fallbackUrl ? '查看岗位并投递简历' : '';
 }
